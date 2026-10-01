@@ -1,66 +1,112 @@
-# Local credentials and machine-specific configuration
-api_key.txt
-auth.txt
-*.pem
-*.key
-*.secret
-.env
-.env.*
+# Default-deny policy: only reusable tools, source, and documentation are allowlisted below.
+/*
 
-# Concrete task packages, submissions, research runs, and private evidence
-/7686036052687064883/
-/7686036056655892251/
-/7686036061013954313/
-/autoresearch_三期/
-/example/
-/autoresearch_三期-formal-v2-status-*.json
+# Root-level reusable documentation
+!/.gitignore
+!/README.md
+!/AGENTS.md
+!/AutoResearch出题全流程指引.md
+!/部署与长程接管.md
 
-# Bundled example/task content and binary teaching attachments
-/materials/example/
-/materials/规范格式/图片和附件/
-/materials/AutoResearch 专家线下标注教程/图片和附件/
-/materials/AutoResearch 项目培训/图片和附件/
+# Allowed top-level collections; their contents remain deny-by-default.
+!/materials/
+!/notes/
+!/ops/
+!/tools/
 
-# Generated state, caches, archives, evidence, and runtime output
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
-*.log
-*.jsonl
-*.lock
-*.pid
-*.out
-*.tgz
-*.tar
-*.zip
-*.pt
-*.pth
-*.safetensors
-*.npz
-*.npy
-*.vcf
-*.pdf
-/tools/gpu_monitor/.state/
-/tools/gpu_monitor/archive/
-/tools/gpu_monitor/verification/
-/tools/gpu_monitor/tasks.json
-/tools/gpu_monitor/verification.json
-/tools/research_handoff/incidents/
-/notes/maintenance/
-/notes/*/evidence/
-/notes/*/scratch/
-/notes/*/releases/
-/ops/__pycache__/
+# Reusable materials and QA skill documentation/scripts
+/materials/*
+!/materials/README.md
+!/materials/AutoResearch 专家线下标注教程/
+/materials/AutoResearch 专家线下标注教程/*
+!/materials/AutoResearch 专家线下标注教程/*.md
+!/materials/AutoResearch 项目培训/
+/materials/AutoResearch 项目培训/*
+!/materials/AutoResearch 项目培训/*.md
+!/materials/规范格式/
+/materials/规范格式/*
+!/materials/规范格式/*.md
+!/materials/autoresearch-qa-skills/
+!/materials/autoresearch-qa-skills/autoresearch-baseline-quality/
+/materials/autoresearch-qa-skills/autoresearch-baseline-quality/*
+!/materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md
+!/materials/autoresearch-qa-skills/autoresearch-baseline-quality/agents/
+/materials/autoresearch-qa-skills/autoresearch-baseline-quality/agents/*
+!/materials/autoresearch-qa-skills/autoresearch-baseline-quality/agents/*.yaml
+!/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/
+/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/*
+!/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/*.md
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/
+/materials/autoresearch-qa-skills/autoresearch-task-qa/*
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/agents/
+/materials/autoresearch-qa-skills/autoresearch-task-qa/agents/*
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/agents/*.yaml
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/references/
+/materials/autoresearch-qa-skills/autoresearch-task-qa/references/*
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/references/*.md
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/
+/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/*
+!/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/*.py
 
-# Test projects and generated test artifacts
+# Reusable operational notes only; future task/evidence directories stay ignored.
+/notes/*
+!/notes/*.md
+!/notes/gpu-scheduler-v1/
+/notes/gpu-scheduler-v1/*
+!/notes/gpu-scheduler-v1/*.md
+!/notes/gpu-scheduler-v2-blocking/
+/notes/gpu-scheduler-v2-blocking/*
+!/notes/gpu-scheduler-v2-blocking/*.md
+
+# Explicitly allow the generic operations helper only.
+/ops/*
+!/ops/transfer_remote.py
+
+# Generic GPU monitor source, README, and example configuration.
+/tools/*
+!/tools/README.md
+!/tools/gpu_monitor/
+/tools/gpu_monitor/*
+!/tools/gpu_monitor/.gitignore
+!/tools/gpu_monitor/README.md
+!/tools/gpu_monitor/*.py
+!/tools/gpu_monitor/examples/
+/tools/gpu_monitor/examples/*
+!/tools/gpu_monitor/examples/*.json
+
+# Generic GPU scheduler source, README, and example configuration.
+!/tools/gpu_scheduler/
+/tools/gpu_scheduler/*
+!/tools/gpu_scheduler/*.py
+!/tools/gpu_scheduler/*.md
+!/tools/gpu_scheduler/*.json
+
+# Generic long-run handoff source, templates, README, and provenance.
+!/tools/research_handoff/
+/tools/research_handoff/*
+!/tools/research_handoff/*.py
+!/tools/research_handoff/*.md
+!/tools/research_handoff/*.json
+!/tools/research_handoff/core/
+/tools/research_handoff/core/*
+!/tools/research_handoff/core/*.py
+!/tools/research_handoff/templates/
+/tools/research_handoff/templates/*
+!/tools/research_handoff/templates/*.py
+!/tools/research_handoff/templates/*.json
+!/tools/research_handoff/templates/*.sh
+
+# Never allow generated files, tests, or credentials through the allowlist.
+**/__pycache__/
+**/*.py[cod]
 **/tests/
 **/test_*.py
 **/*_test.py
-
-# Keep only source/docs/config examples in the general QA skill tree.
-/materials/autoresearch-qa-skills/**/scripts/test_*.py
+**/.env
+**/.env.*
+**/api_key.txt
+**/auth.txt
+**/*.pem
+**/*.key
+**/*.secret
