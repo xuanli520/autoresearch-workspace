@@ -114,15 +114,27 @@ def validate_report(report: dict) -> list[str]:
                     by_id = {row["id"]: row for row in harbor_checks}
                     if any(by_id[key].get("status") != "pass" for key in ("H01", "H02", "H03", "H04")):
                         issues.append("PASS requires H01–H04 pass; QA17 cannot override Harbor")
-                    if any(by_id[key].get("status") not in ("pass", "not_applicable") for key in ("H05", "H06")):
-                        issues.append("PASS contains unpassed optional Harbor checks")
+                    if by_id["H05"].get("status") not in ("pass", "not_applicable"):
+                        issues.append("PASS contains unpassed H05 Harbor check")
+                    if by_id["H06"].get("status") not in ("pass", "not_applicable"):
+                        issues.append("PASS contains unresolved supplied Trial evidence in H06")
                     expected_runtime = {"pass": "evidence_consistent", "not_applicable": "not_run"}.get(by_id["H06"].get("status"))
                     if harbor.get("runtime_status") != expected_runtime:
                         issues.append("Harbor runtime_status disagrees with H06")
                 if harbor.get("static_status") != "pass" or harbor.get("qa17_status") != "pass":
                     issues.append("PASS requires passing Harbor static/QA17 statuses")
-                if harbor.get("runtime_status") not in ("not_run", "evidence_consistent"):
-                    issues.append("PASS contains unverified/failed Harbor runtime")
+                if harbor.get("runtime_status") not in ("evidence_consistent", "not_run"):
+                    issues.append("PASS cannot hide failed or unresolved submitted Trial evidence")
+                if harbor.get("runtime_status") == "not_run":
+                    h06 = by_id.get("H06", {})
+                    if h06.get("evidence"):
+                        issues.append("H06 cannot skip supplied runtime evidence")
+                artifacts = harbor.get("artifact_contract")
+                if not isinstance(artifacts, dict) or artifacts.get("status") != "pass":
+                    issues.append("PASS requires consistent submission artifact paths")
+                hidden = harbor.get("hidden_review")
+                if not isinstance(hidden, dict) or hidden.get("status") != "pass":
+                    issues.append("PASS requires reviewed Hidden supply and grading-use evidence")
                 contract = harbor.get("path_contract")
                 if not isinstance(contract, dict):
                     issues.append("PASS requires Docker path_contract")

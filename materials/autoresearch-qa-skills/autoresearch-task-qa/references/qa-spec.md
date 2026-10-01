@@ -87,13 +87,9 @@ observation, remaining proof needed, and remediation. Missing evidence is
 15. **QA15 — Iteration resources.** One score takes at most two hours; one job
     uses no more than 8 GPUs of the allowed H20/L20 class and no more than 64 CPU
     cores. Enforce limits in the scheduler/cgroup, not only `task.toml`.
-16. **QA16 — Long-run stability (platform dynamic gate).** The platform may use a
-    measured long-run soak, including a 12-hour window under benign Agent activity,
-    to check for OOM, FD/process leaks, disk/log growth to exhaustion, stuck jobs,
-    or premature shutdown. This is a platform quality/acceptance check, not an
-    expert pre-submission gate; the expert package does not need to contain a
-    continuous 12-hour soak. Expert-side evidence only needs to record health and
-    any observed anomalies during the actual runs.
+16. **QA16 — Long-run stability.** A measured 12-hour soak under benign Agent
+    activity shows no OOM, FD/process leak, disk/log growth to exhaustion, stuck
+    jobs, or premature shutdown. Include start/end resource snapshots and logs.
 17. **QA17 — Self-contained image.** Core dependencies and required public data
     are built into a pinned image. No runtime host Volume Mount supplies required
     code/data. Deleting a secret in a later Docker layer does not erase it.
@@ -180,10 +176,9 @@ observation, remaining proof needed, and remediation. Missing evidence is
 
 ## Dynamic gates before GO
 
-Static review cannot close these platform gates: final-image layer scan; runtime mount and
+Static review cannot close these gates: final-image layer scan; runtime mount and
 permission probe as the real Agent UID; hidden/ref absence across `/proc`, env,
 argv, IPC and logs; clean-checkout baseline/reference reruns; adversarial
 submission corpus; repeated statistical run; scheduler/cgroup enforcement;
-public/hidden dedup; and, where required by the platform contract, a long-run soak.
-The platform decides final GO after these dynamic checks. Lack of a continuous
-12-hour expert-side soak alone does not block local submission or static QA.
+public/hidden dedup; and a 12-hour soak. A delivery is not GO until every required
+dynamic gate has a trusted artifact or an explicitly approved exception.

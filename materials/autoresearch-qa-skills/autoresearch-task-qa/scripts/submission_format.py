@@ -9,6 +9,7 @@ and suggested for cleanup, but never changes the alignment status by itself.
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime
 import json
 import math
 from pathlib import Path
@@ -23,12 +24,26 @@ MAX_DISCOVERY_DEPTH = 5
 MAX_DISCOVERY_DIRS = 2_000
 
 REQUIRED_TOP_LEVEL = ("workspace", "expert_evidence", "optimization_evidence")
-REQUIRED_HARBOR_DIRS = ("environment", "solution", "tests")
+REQUIRED_HARBOR_DIRS = ("environment", "tests")
+OPTIONAL_HARBOR_DIRS = ("solution",)
 REQUIRED_HARBOR_FILES = ("instruction.md", "task.toml")
 REQUIRED_RESULT_FIELDS = (
     "schema_version", "status", "role", "seed", "task_type", "method",
     "protocol", "training", "execution", "metrics", "quality_gate", "artifacts",
 )
+REQUIRED_TRAJECTORY_FIELDS = (
+    "round", "policy_name", "method_summary", "status", "score",
+    "failure_reason", "retained_best", "time",
+)
+SUCCESS_STATUSES = {"ok", "success", "succeeded", "pass", "passed", "complete", "completed"}
+FAILURE_STATUSES = {
+    "fail", "failed", "failure", "error", "invalid", "timeout", "timed_out",
+    "crash", "crashed", "oom", "out_of_memory", "cancelled", "canceled",
+    "exception", "nonzero_exit", "runtime_error", "compile_error", "build_error",
+    "validation_error", "quality_gate_failed", "quality_gate_failure", "gate_failed",
+    "gate_fail", "quality_failed", "invalid_output", "incorrect", "wrong_answer",
+    "not_run", "skipped", "incomplete", "interrupted",
+}
 
 IGNORED_NAMES = {".DS_Store", "__MACOSX"}
 DISCOVERY_PRUNE = {
@@ -90,7 +105,10 @@ def _rel(path: Path, submission_root: Path) -> str:
 
 
 def _issue(items: list[dict[str, str]], code: str, path: str, message: str) -> None:
-    items.append({"code": code, "path": path, "message": message})
+    issue = {"code": code, "path": path, "message": message}
+    if "TRAJECTORY" in code:
+        issue["status"] = "manual" if code in {"TRAJECTORY_STATUS_REVIEW", "TRAJECTORY_UNREADABLE"} else "fail"
+    items.append(issue)
 
 
 def _suggest(
@@ -158,15 +176,20 @@ def _locate_submission_root(root: Path) -> tuple[Path, list[str]]:
     return best[0], [path.as_posix() for path in best[1:]]
 
 
-def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+def _read_json(path: Path, *, strict: bool = False) -> tuple[dict[str, Any] | None, str | None]:
     if not _regular_file(path):
         return None, "not a regular file"
     try:
         size = path.stat().st_size
         if size > MAX_JSON_BYTES:
             return None, f"JSON exceeds {MAX_JSON_BYTES} byte inspection limit"
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        def reject_constant(value: str) -> None:
+            raise ValueError(f"{value} is not a valid JSON number")
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            **({"parse_constant": reject_constant} if strict else {}),
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
     if not isinstance(value, dict):
         return None, "top-level JSON value is not an object"
@@ -612,6 +635,119 @@ def _comparison_summary(
     return output
 
 
+def _collect_trajectory(
+    path: Path, submission_root: Path, issues: list[dict[str, str]]
+) -> dict[str, Any]:
+    """Validate the documented eight-field rounds without inventing runtime evidence."""
+    rel = _rel(path, submission_root)
+    output: dict[str, Any] = {
+        "path": rel, "present": False, "valid_json": False,
+        "round_count": 0, "format_valid": False, "status": "missing",
+    }
+    if not _require_file(
+        path, submission_root, issues, "MISSING_TRAJECTORY",
+        "三期需提交 trajectory_codex.json 与 trajectory_seed.json 两份真实轨迹。",
+    ):
+        return output
+    output["present"] = True
+    data, error = _read_json(path, strict=True)
+    if error:
+        unreadable = "inspection limit" in error or error.startswith((
+            "OSError:", "PermissionError:", "FileNotFoundError:", "UnicodeDecodeError:",
+        ))
+        _issue(issues, "TRAJECTORY_UNREADABLE" if unreadable else "INVALID_TRAJECTORY_JSON", rel, error)
+        output["status"] = "unreadable" if unreadable else "invalid"
+        return output
+    assert data is not None
+    output["valid_json"] = True
+    rounds = data.get("rounds")
+    if not isinstance(rounds, list):
+        _issue(issues, "INVALID_TRAJECTORY_ROUNDS", rel, "最终轨迹 JSON 必须包含 rounds 数组。")
+        output["status"] = "invalid"
+        return output
+    output["round_count"] = len(rounds)
+    if not rounds:
+        _issue(issues, "EMPTY_TRAJECTORY_ROUNDS", rel, "rounds 为空，长程轨迹尚未完成或缺少证据；不能用虚构轮次补齐。")
+        output["status"] = "incomplete"
+        return output
+    initial_issue_count = len(issues)
+    previous_round: int | None = None
+    for index, row in enumerate(rounds):
+        label = f"rounds[{index}]"
+        if not isinstance(row, dict):
+            _issue(issues, "INVALID_TRAJECTORY_ROUND", rel, f"{label} 必须为 JSON 对象。")
+            continue
+        missing = [field for field in REQUIRED_TRAJECTORY_FIELDS if field not in row]
+        if missing:
+            _issue(issues, "MISSING_TRAJECTORY_FIELDS", rel, f"{label} 缺少字段：{', '.join(missing)}。")
+
+        def invalid(field: str, message: str) -> None:
+            _issue(issues, "INVALID_TRAJECTORY_FIELD", rel, f"{label}.{field} {message}")
+
+        number = row.get("round")
+        if "round" in row:
+            if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+                invalid("round", "必须为正整数。")
+            else:
+                if previous_round is not None and number <= previous_round:
+                    _issue(issues, "TRAJECTORY_ROUND_ORDER", rel, f"{label}.round 必须按轮次递增，不得重复或倒序。")
+                previous_round = number
+        for field in ("policy_name", "method_summary", "status"):
+            if field in row and (not isinstance(row[field], str) or not row[field].strip()):
+                invalid(field, "必须为非空字符串。")
+        status = row.get("status")
+        valid_status = isinstance(status, str) and bool(status.strip())
+        normalized_status = status.strip().casefold() if valid_status else None
+        successful = normalized_status in SUCCESS_STATUSES
+        failed = normalized_status in FAILURE_STATUSES
+        if valid_status and not successful and not failed:
+            _issue(issues, "TRAJECTORY_STATUS_REVIEW", rel, f"{label}.status={status!r} 为自定义状态；需人工确认成功/失败含义及对应分数、失败原因和最佳标记。")
+        if "score" in row:
+            score = row["score"]
+            finite_score = (
+                isinstance(score, (int, float)) and not isinstance(score, bool)
+                and (isinstance(score, int) or math.isfinite(score))
+            )
+            if not finite_score and not (score is None and valid_status and not successful):
+                invalid("score", "成功时必须为有限数值；失败时可为 null 或实际有限指标。")
+        if "failure_reason" in row and valid_status:
+            reason = row["failure_reason"]
+            if successful and reason is not None:
+                invalid("failure_reason", "成功（status=ok）时应为 null。")
+            elif failed and (not isinstance(reason, str) or not reason.strip()):
+                invalid("failure_reason", "失败时必须说明真实失败原因。")
+            elif not successful and not failed and reason is not None and not isinstance(reason, str):
+                invalid("failure_reason", "必须为字符串或 null。")
+        if "retained_best" in row:
+            if not isinstance(row["retained_best"], bool):
+                invalid("retained_best", "必须为布尔值。")
+            elif failed and row["retained_best"]:
+                invalid("retained_best", "失败轮次不能被标记为最佳有效方法。")
+        if "time" in row:
+            value = row["time"]
+            try:
+                if not isinstance(value, str) or not re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", value):
+                    raise ValueError("expected timestamp")
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                invalid("time", "必须为可解析的完成时间，例如 YYYY-MM-DD HH:mm:ss 或 ISO 8601 时间。")
+    own_issues = issues[initial_issue_count:]
+    hard_issues = [item for item in own_issues if item["code"] != "TRAJECTORY_STATUS_REVIEW"]
+    output["format_valid"] = not own_issues
+    output["status"] = "invalid" if hard_issues else "manual" if own_issues else "valid"
+    return output
+
+
+def validate_trajectory(path: str | Path, submission_root: str | Path | None = None) -> dict[str, Any]:
+    """Validate one evidence path selected by the review, including equivalent names."""
+    selected = Path(path).expanduser()
+    root = Path(submission_root) if submission_root is not None else selected.parent
+    issues: list[dict[str, str]] = []
+    output = _collect_trajectory(selected, root, issues)
+    output["alignment_issues"] = issues
+    return output
+
+
 def collect(root: str | Path) -> dict[str, Any]:
     """Collect simplified-format observations without mutating or executing the package."""
     inspected_root = Path(root).expanduser().resolve()
@@ -682,9 +818,14 @@ def collect(root: str | Path) -> dict[str, Any]:
             _require_file(harbor / name, submission_root, issues, "MISSING_HARBOR_FILE", f"harbor_task 缺少 {name}。")
         for name in REQUIRED_HARBOR_DIRS:
             _require_dir(harbor / name, submission_root, issues, "MISSING_HARBOR_DIR", f"harbor_task 缺少 {name}/。")
+        for path in (harbor / "environment" / "Dockerfile", harbor / "tests" / "Dockerfile"):
+            _require_file(path, submission_root, issues, "MISSING_HARBOR_DOCKERFILE", f"harbor_task 缺少 {path.parent.name}/Dockerfile。")
+        # Hidden evaluation material is mandatory, but its directory name and
+        # delivery method are task-specific. harbor_review validates the material,
+        # generation/injection evidence and isolation; format alone cannot do so.
         _expected_children(
             harbor,
-            set(REQUIRED_HARBOR_FILES) | set(REQUIRED_HARBOR_DIRS),
+            set(REQUIRED_HARBOR_FILES) | set(REQUIRED_HARBOR_DIRS) | set(OPTIONAL_HARBOR_DIRS),
             submission_root,
             extras,
             suggestions,
@@ -710,6 +851,16 @@ def collect(root: str | Path) -> dict[str, Any]:
                 "新版格式不再设置 tests/runtime/；建议将必要评分文件平铺进 tests/。",
             )
 
+    expert = submission_root / "expert_evidence"
+    trajectory_paths = sorted(expert.glob("trajectory*.json")) if _regular_dir(expert) else []
+    expert_evidence = {
+        "present": _regular_dir(expert),
+        "trajectories": {
+            path.name: _collect_trajectory(path, submission_root, issues)
+            for path in trajectory_paths
+        },
+        "completeness_note": "两条模型轨迹是否齐全按 overview 中的 source_path 核验；允许等价文件名，不以目录扫描代替完整性审查。",
+    }
     opt = submission_root / "optimization_evidence"
     optimization: dict[str, Any] = {
         "present": _regular_dir(opt),
@@ -844,8 +995,9 @@ def collect(root: str | Path) -> dict[str, Any]:
             "legacy_tests_runtime_present": _regular_dir(harbor / "tests" / "runtime"),
         },
         "extras": extras,
+        "expert_evidence": expert_evidence,
         "optimization_evidence": optimization,
     }
 
 
-__all__ = ["collect"]
+__all__ = ["collect", "validate_trajectory"]

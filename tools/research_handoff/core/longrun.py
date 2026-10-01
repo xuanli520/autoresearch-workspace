@@ -151,12 +151,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         heartbeat[name] = positive_number(heartbeat[name], "heartbeat." + name)
     if heartbeat["interval_seconds"] > 5 or heartbeat["stale_after_seconds"] < heartbeat["interval_seconds"] or heartbeat["controller_stale_seconds"] < heartbeat["interval_seconds"] * 3:
         raise ControllerError("poll interval <= 5; heartbeat stale >= interval; controller stale >= 3 * interval")
-    policy = section("policy", {"max_turns": 10000, "max_turn_retries": 1,
-                                 "retry_backoff_seconds": 5})
-    integer(policy["max_turns"], "policy.max_turns", 1)
-    integer(policy["max_turn_retries"], "policy.max_turn_retries", 0)
-    if policy["max_turn_retries"] > 5:
-        raise ControllerError("policy.max_turn_retries must be <= 5")
+    policy = section("policy", {"retry_backoff_seconds": 5})
     policy["retry_backoff_seconds"] = finite_number(policy["retry_backoff_seconds"],
                                                      "policy.retry_backoff_seconds")
     if not 0 <= policy["retry_backoff_seconds"] <= 300:

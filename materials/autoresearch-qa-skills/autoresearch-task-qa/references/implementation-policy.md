@@ -19,12 +19,12 @@
 | QA13 | `optimization_evidence/` 有 Baseline 与 Reference 全部正式 seed 的实际运行/原始指标记录，两者 seed 集一致并逐 seed 同向比较；Reference 汇总有提升且质量门通过。不要求本次复跑。归一化 baseline=0 是正常锚点，不是平凡分数；不得只凭随机输出、单独写 passed 或重复同一 checkpoint 冒充独立运行而通过。 |
 | QA14 | 有可修改空间，并能从实现/分析中找到至少一种题面未直接提示的合法方法方向；参考分数未饱和。无需替专家研究或实证新解。面向用户/专家的私有报告可以介绍已交付Reference的方法；不得把这些报告或方法答案写回Agent题面。 |
 | QA15 | **跳过，不检查。** |
-| QA16 | **两条模型轨迹各自有效执行≥10h**；仅不涉及训练且单轮迭代很短的任务，两条各≥7h且具备例外资格证据、每条≥3有效方法闭环、后续方向、best_method干净重跑及真实有效时长证据时可接受。runtime_review由脚本核验，排队/安装/故障/阻塞不计，不相加；未知有效时长或例外资格记未完成；涉及训练/微调、迭代不短却不足10h，或任何轨迹不足7h，明确不通过。容器 12h 稳定性属于平台动态质检，不属于 QA16；专家提交前不要求容器连续运行满 12 小时，也不要求提交 12h soak。 |
-| QA17 | **Harbor Harness 兼容性**：按 harbor-harness.md 完成 H01–H06，检查原生接口或有证据的适配实现，不能只看目录齐全。无已有 Harness 运行证据不强制新增执行，但必须标注未验证运行；有材料须检查一致性。仍不强制依赖预构建、数据预置或禁止 Volume Mount，不恢复 QA15 的资源门槛。 |
-| QA18 | 两条与当前任务一致的独立 Agent 轨迹及方法演进分析，结果和时长可从run_summary/专家说明/实际记录交叉引用，不要求简化轨迹逐轮带结构化分数。缺一条须退回补齐；Reference执行记录不能代替Agent迭代轨迹。轨迹写了另一题的方法、轮次与 run_summary 明显矛盾，或普通实验日志冒充 Harness 证据，均不能通过；若声称是 Harness 运行，交叉引用 H06。 |
+| QA16 | **两条模型轨迹各自有效执行≥10h**；仅不涉及训练且单轮迭代很短的任务，两条各≥7h且具备例外资格证据、每条≥3有效方法闭环、后续方向、best_method干净重跑及真实有效时长证据时可接受。runtime_review由脚本核验，排队/安装/故障/阻塞不计，不相加；未知有效时长或例外资格记未完成；涉及训练/微调、迭代不短却不足10h，或任何轨迹不足7h，明确不通过。容器12h稳定性不等于此项。 |
+| QA17 | **Harbor Harness 兼容性**：按 harbor-harness.md 完成 H01–H06，检查显式 separate、双 Dockerfile 的实际构建路径、公开 Dev 可用、私有 Hidden 材料及调用关系、独立依赖与 artifacts 移交。Hidden 目录名可灵活。NOP 是推荐自检，不因未交 NOP 单独判失败；报告分开写静态接口结论与运行状态。已有 NOP 或其他 Trial 则核对本题版本、separate、reward 和日志；0 分不能单独判接入失败。Oracle 不必交，不恢复 QA15 的资源门槛。 |
+| QA18 | 两条与当前任务一致的独立 Agent 轨迹及方法演进分析，每轮八字段齐全，分数、失败原因和最佳标记可追溯；结果和有效时长与 run_summary/专家说明/实际记录交叉核对。缺一条须补齐，Reference 执行记录不能替代 Agent 迭代轨迹。轨迹属于另一题、与摘要矛盾或普通日志冒充 Harness 证据不能通过；声称 Harness 运行则交叉引用 H06。 |
 | QA19 | 确定性 verifier 不适用；随机性评估在题面中只检查 seed 与有效提升阈值说明。**本 QA 项本身不要求题面额外说明重复评估规则、replicate 数或重复次数**，缺少这些文字不能判失败；但一旦正式协议已经声明多个 seed，`optimization_evidence/` 的提交完整性仍须按 QA03/04/13 与格式层核对全部已声明 seed，二者不要混淆。 |
 | QA20 | 题面包含可改范围、网络规则和工具策略即可，允许“按平台默认工具策略”等有明确对象的引用，不要求固定 webSearch 大小写。 |
-| QA21 | trajectory、expert_annotation、run_summary 可解析为 JSON/JSONL，包含当前任务的真实尝试/结果、专家分析、baseline/reference 和运行摘要等核心内容；内容须与 instruction、best method 和互相之间一致。两条轨迹都必须在报告前置概览中出现，缺少时明确写“缺失”；当前教程要求两条，确实缺少时不通过，文件不可访问则未完成。每轮只需round和method_summary，不强加run_id/命令/时间戳/资源等已简化字段；核心总览从expert_annotation/run_summary及其他证据核对。优先看教程 highlight 项；不因非核心版本字段或同义字段名失败。AutoResearch 交付记录与 Harbor agent/trajectory.json（ATIF）分开识别，不能互套 schema；若提交声称为 ATIF，则按其声明版本检查。教程未提供的 highlight 字段不能凭空增加。“Seed 2.1 Turbo High”中的 Seed 是 Agent 模型名，不得误作训练随机 seed。 |
+| QA21 | trajectory、expert_annotation、run_summary 可解析，核心内容与当前任务及 best method 相符。每轮八字段：round、policy_name、method_summary、status、score、failure_reason、retained_best、time；失败分数可 null，失败原因须真实。两条轨迹均在总览呈现；确实缺失不通过，无法访问则未完成。接受明确映射的等价文件名，不要求旧版额外 run_id、命令或资源字段。AutoResearch 轨迹与 Harbor ATIF 分开识别；声称 ATIF 才按对应版本检查。“Seed 2.1 Turbo High”是 Agent 模型名，不是训练随机种子。 |
 
 ## 证据复核
 

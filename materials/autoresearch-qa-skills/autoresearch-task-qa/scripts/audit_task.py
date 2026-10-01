@@ -64,7 +64,7 @@ CHECK_TITLES = {
     "QA13": "Baseline 非平凡且参考解可提升",
     "QA14": "保留未提示改进方向且参考方法未饱和",
     "QA15": "单次评分、GPU 与 CPU 资源上限",
-    "QA16": "运行中的容器健康观察（非 12h 提交闸门）",
+    "QA16": "容器 12 小时稳定性",
     "QA17": "依赖和数据预构建、无 Volume Mount",
     "QA18": "Agent 轨迹、执行日志与 trajectory analysis",
     "QA19": "随机性、seed、replicate 与有效提升阈值",
@@ -351,7 +351,7 @@ class Auditor:
             "静态包不能证明最终镜像历史层中无泄露。",
             "静态包不能证明实际挂载、UID 权限、环境变量、/proc、IPC 与日志隔离。",
             "静态包不能证明 GPU 时序正确、调度器/cgroup 资源限制或 hidden/public 数据去重。",
-            "静态包不能代替 baseline/reference 的干净环境复跑或平台动态稳定性验证；专家提交前不要求 12 小时 soak。",
+            "静态包不能代替 baseline/reference 的干净环境复跑和 12 小时稳定性测试。",
         ]
 
     def apply_policy(self) -> None:
@@ -1052,6 +1052,9 @@ class Auditor:
                 if isinstance(prefix, str) and (rel == prefix or rel.startswith(prefix.rstrip("/") + "/")):
                     return True
             return False
+        verifier = self.task_config.get("verifier") if isinstance(self.task_config, dict) else None
+        if isinstance(verifier, dict) and verifier.get("environment_mode") == "separate" and rel.startswith("harbor_task/tests/"):
+            return False
         return rel == "INIT_PROMPT.md" or rel.startswith("harbor_task/")
 
     def audit_isolation(self, instruction: str) -> None:
@@ -1075,7 +1078,7 @@ class Auditor:
         docker = self.text("harbor_task/environment/Dockerfile")
         docker_hidden = self.line_refs(
             "harbor_task/environment/Dockerfile",
-            r"^\s*(?:COPY|ADD)\s+.*(?:hidden|expert_evidence|reference|solution)",
+            r"^\s*(?:COPY|ADD)\s+.*(?:tests|hidden|expert_evidence|reference|solution)",
         )
         if hidden_files or docker_hidden:
             self.add(
@@ -1084,7 +1087,7 @@ class Auditor:
                 "blocker",
                 f"Agent 可见面中发现 {len(hidden_files)} 个 hidden 命名文件/资产，或 Docker COPY/ADD 泄露。",
                 hidden_files[:20] + docker_hidden,
-                "交付给 Agent 的树中保持 hidden_assets 为空；仅在 Agent 退出后的可信命名空间注入。",
+                "将非空 hidden_assets 仅构建进独立 Verifier 镜像；移除 Agent 镜像和可见面中的 tests/、隐藏集及评分实现。",
             )
         else:
             self.add(
@@ -1285,13 +1288,20 @@ class Auditor:
             "同步修正 task.toml、题面与调度器/cgroup 硬限制。",
         )
 
+        serialized = json.dumps(docs, ensure_ascii=False).lower()
+        stability_positive = bool(
+            re.search(r"twelve_hour_stability[^}]{0,120}(?:passed|measured|ok)", serialized)
+            or re.search(r"12[-_ ]?hour[^}]{0,120}(?:passed|measured|ok)", serialized)
+        ) and not bool(re.search(r"twelve_hour_stability[^}]{0,80}not_measured", serialized))
         self.add(
             "QA16",
-            "not_applicable",
-            "info",
-            "容器长时稳定性由平台动态质检/最终验收按平台合同验证；静态 strict 入口不把专家缺少连续 12h soak 判为失败。若包内提供运行健康观察，可作为附加证据读取。",
+            "pass" if stability_positive else "fail",
+            "high",
+            "存在 12 小时稳定性通过声明；仍需核对原始资源快照。"
+            if stability_positive
+            else "没有 12 小时稳定性通过证据，或明确标为 not_measured。",
             list(docs),
-            "专家侧记录实际运行中的存活、资源、错误、重启及 OOM/泄漏/卡死等异常；平台按合同执行必要的长时验证。",
+            "完成 12h soak，记录内存/FD/PID/磁盘/GPU/日志增长和退出状态。",
         )
 
         docker = self.text("harbor_task/environment/Dockerfile")

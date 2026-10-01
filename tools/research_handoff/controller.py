@@ -36,7 +36,8 @@ MAX_LINE = 131072
 EXIT_CODES = {'FAILED': 1, 'EXPIRED': 3}
 RETRYABLE_TURN_REASONS = frozenset({
     'agent_exit_nonzero', 'completion_missing', 'context_usage_missing', 'invalid_agent_event',
-    'heartbeat_stale', 'controller_lost', 'worker_error', 'worker_exit_missing', 'turn_timeout',
+    'agent_reported_failure', 'heartbeat_stale', 'controller_lost', 'worker_error',
+    'worker_exit_missing', 'turn_timeout',
 })
 
 
@@ -338,10 +339,13 @@ class LongRunController:
                 turn.update(runtime_synced=True, deadline_monotonic=started['monotonic']+turn['execution_seconds'])
             self.ingest_output()
             now = time.monotonic()
-            reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None) or self.pending_reason
+            reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None)
             view = budget_view(self.state)
-            if reason is None and view['hard_reached']:
-                reason = 'hard_limit'
+            if reason is None:
+                if view['hard_reached']:
+                    reason = 'hard_limit'
+                else:
+                    reason = self.pending_reason
             ctx = self.state['context']
             if ctx['state'] == 'COMPACTION_REQUIRED':
                 if summary_deadline is None:
@@ -407,7 +411,6 @@ class LongRunController:
         if self.config['budget']['mode'] == 'active' and self.config['budget']['credit_policy'] == 'successful_turn':
             target_reached = self.state['budget']['active_seconds'] >= self.state['budget']['window_seconds']
         retry_pending = (reason in RETRYABLE_TURN_REASONS and
-                         retry_state.get('used', 0) < self.config['policy']['max_turn_retries'] and
                          stop_reason(self.run_dir) is None and not self.signalled and
                          not view['hard_reached'] and not target_reached and
                          self.state['context']['state'] != 'COMPACTION_REQUIRED')
@@ -436,8 +439,7 @@ class LongRunController:
             used = retry_state.get('used', 0) + 1
             self.state['retry'] = {'anchor_turn': anchor, 'used': used}
             self.event('turn.retry_scheduled', failed_turn=turn['number'], retry_of=anchor,
-                       retry_index=used, max_retries=self.config['policy']['max_turn_retries'],
-                       reason=reason, next_turn=turn['number'] + 1)
+                       retry_index=used, reason=reason, next_turn=turn['number'] + 1)
         else:
             self.state['retry'] = {'anchor_turn': None, 'used': 0}
         self.save()
@@ -468,9 +470,6 @@ class LongRunController:
                 return
             if view['target_reached']:
                 self.state.update(status='COMPLETED', stop_reason='target_reached')
-                return
-            if self.state['turn']['number'] >= self.config['policy']['max_turns']:
-                self.state.update(status='PAUSED', stop_reason='max_turns', resume_required=True)
                 return
             self.pending_reason, self.summary, self.result, self.context_reported = None, None, {}, False
             self.retry_pending = False

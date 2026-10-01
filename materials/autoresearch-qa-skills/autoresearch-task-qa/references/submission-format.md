@@ -7,26 +7,36 @@
 ```text
 submission_root/
 ├── workspace/
-│   ├── harbor_task/                 # Agent 实际可见
+│   ├── harbor_task/                 # 完整平台任务包，不是全部交给 Agent
 │   │   ├── instruction.md
 │   │   ├── task.toml
 │   │   ├── environment/
-│   │   │   ├── Dockerfile
+│   │   │   ├── Dockerfile            # Agent 镜像
 │   │   │   ├── requirements.txt
 │   │   │   ├── public_assets/
+│   │   │   ├── public_eval/          # 公开 Dev 入口，目录名可等价
 │   │   │   └── starter/
-│   │   ├── solution/                # 题面声明的唯一提交面
-│   │   └── tests/                   # 评分文件直接平铺
+│   │   ├── solution/                # 可选 Oracle；不是 Agent 运行时提交目录
+│   │   └── tests/                   # 仅进入独立 Verifier 镜像
+│   │       ├── Dockerfile            # Verifier 镜像
 │   │       ├── grader.py / test.sh
-│   │       └── hidden_assets/       # 交付时为空，评分时外部注入
+│   │       └── hidden_assets/       # 私有材料示例；也可其他目录/有依据的生成或注入
 │   └── reference/                   # 出题方参考实现，Agent 不可见
 ├── expert_evidence/                 # 专家轨迹、最终方法与过程说明
 └── optimization_evidence/           # Baseline/Reference 优化面证据
 ```
 
-Dockerfile物理位置、构建上下文和容器入口另按 docker-path-contract.md 严格核对，不能归为普通额外文件建议。目录职责和可见边界固定；`starter/`、`tests/`、`reference/`、`public_assets/` 的内部文件可按具体优化面扩展。不要仅因额外辅助脚本或不同等价布局判失败。
+Dockerfile 位置、构建上下文和入口按 docker-path-contract.md 核对。`task.toml` 须显式设置 `[verifier] environment_mode = "separate"`。公开 Dev 入口及其数据必须进入 Agent；若原来与私有评分混在 tests/，先拆分公开部分，再由 Agent 构建或平台交付。上图 tests/ 指拆分后的私有 Verifier 内容。Hidden 材料必需，但不以目录名、是否训练或固定文件数量判断；预置、生成、安全注入的实际来源与调用关系在 hidden_review 中复核。Verifier 依赖须在自身镜像准备，不能依赖 Agent 临时安装包、缓存或未移交文件。
 
-当前推荐结构不设置 `environment/trusted/` 或 `tests/runtime/` 中间层。发现这些旧目录时列为格式对齐建议，说明可将评分实现归入并平铺到 `tests/`；只有调用链确实失效或暴露内容时，才映射到 QA 失败。
+当前推荐结构不设置 `environment/trusted/` 或 `tests/runtime/` 中间层。发现这些旧目录时列为格式对齐建议，说明可将最终私有评分实现归入 `tests/`，公开 Dev 仍留在 Agent 可见部分；只有调用链确实失效或暴露内容时，才映射到 QA 失败。
+
+Agent 运行时提交目录以题面为准，本教程采用 `/workspace/solution`，由 Starter 初始化。结束前恢复 Dev 最佳候选及必要模型/配置；平台按 artifacts 声明移交，在 Verifier 中保持原绝对路径。源码 `harbor_task/solution/solve.sh` 是可选 Oracle，缺少它不等于缺少运行时提交物。
+
+### 两条专家轨迹
+
+推荐放在 `expert_evidence/trajectory_codex.json`、`trajectory_seed.json`，等价命名应在 overview.source_path 中明确映射。每轮必含 `round`、`policy_name`、`method_summary`、`status`、`score`、`failure_reason`、`retained_best`、`time`。成功须记录有限数值分数；失败保留真实状态与失败原因，分数未知用 null；最佳标记为布尔值，时间须可解析。轮次与顺序、分数方向、最佳候选和 run_summary 相互一致，不补造记录。自动解析不能代替任务身份、实际有效时长或探索质量复核。
+
+NOP 为推荐自检，可复用平台已有运行记录；如提交，保留同一次 Trial 的配置、结果、reward、日志及任务版本对应依据。无需新增一条长时 Agent 轨迹，详见 harbor-harness.md。
 
 ## 2. optimization_evidence 最小结构
 

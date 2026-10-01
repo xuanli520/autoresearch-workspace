@@ -4,7 +4,7 @@ review.json 由质检代理逐项读证据后在报告目录创建，不信任�
 
 ## 共用条目
 
-QA01–QA21 恰好各一次，status 为 pass/fail/manual/not_applicable；仅 QA04/QA15/QA19 可不适用，QA15固定跳过。G01–G03 恰好各一次，不能不适用。H01–H06 恰好各一次，只有H05/H06可不适用。
+QA01–QA21 恰好各一次，status 为 pass/fail/manual/not_applicable；仅 QA04/QA15/QA19 可不适用，QA15固定跳过。G01–G03 恰好各一次，不能不适用。H01–H06 恰好各一次；H06 无已有运行证据可 not_applicable，并明确 runtime_status=not_run；推荐 NOP 的缺失不单独阻断静态 QA17。H05 无可审调用配置时可 not_applicable。已有配置或 Trial 则必须核查，不能选择不适用绕过反证。
 
 每条至少 id/status/summary/evidence。summary具体简短（QA/H≤220字）；evidence为包根相对的真实文件，可带行号或JSON字段。pass必须有证据；确定缺文件可无证据，但要写缺失路径。QA07/08引用只许instruction.md；QA12“清点无.git”允许特殊 @inventory。
 
@@ -81,17 +81,37 @@ G03另填assessment：
 harbor 必填 task_root（相对包根）、target_version、provider、version_basis、checks:[H01..H06]，另必填path_contract：
 
     {
-      "profile": "teaching-task-root-v1",
-      "profile_basis": "2026-09-18核对教学example.zip及本题构建入口"
+      "profile": "harbor-environment-v1",
+      "profile_basis": "目标 Harbor 版本独立 Verifier 规范及本题双 Dockerfile 构建入口"
     }
 
-teaching-task-root-v1与harbor-environment-v1的精确位置由程序计算，按docker-path-contract.md核对。custom另需dockerfile/build_context/runtime_task_root与adapter_evidence包内真实引用。未知动态语法可提交manual_resolution={summary,evidence}进行语义解释；确定源缺失、路径越界和错位不能用人工pass覆盖。合法预构建镜像按provider说明核对，不强求本地Dockerfile。
+teaching-task-root-v1与harbor-environment-v1的精确位置由程序计算，按docker-path-contract.md核对。custom另需dockerfile/build_context/runtime_task_root与adapter_evidence包内真实引用。未知动态语法可提交manual_resolution={summary,evidence}进行语义解释；确定源缺失、路径越界、Agent 复制最终私有评测材料或缺任一 Dockerfile，不能用人工pass覆盖。当前交付要求 Agent 与 Verifier 双 Dockerfile 独立构建，不能用预构建镜像替代。
 
-H01/H02通过需引用选中task.toml；H03不能用未知provider通过。H06通过需同一Trial config.json/result.json/reward和非空日志，程序核对奖励/异常/结束状态；未提交运行材料则not_applicable并标未验证运行。只能声称已有材料一致，不能冒充本次独立复跑。
+H01/H02 通过需引用选中 task.toml；H03 不能用未知 provider 通过。H06 有证据时核对同一 Trial 的 config.json、result.json、reward 与非空日志、任务及版本对应关系、separate 模式、异常/结束状态。支持 NOP 或其他有效 Trial；无证据明确 not_run，不冒充本次独立复跑。NOP 推荐，Oracle 非必交，0 分不能独立判定链路是否正常。
+
+还需填写 `harbor.hidden_review`，而不是检查固定目录名：
+
+```json
+{
+  "hidden_review": {
+    "mode": "prebuilt",
+    "summary": "说明私有材料如何进入 Verifier、评分器在哪里读取，以及为何 Agent 不可见。",
+    "evidence": ["workspace/harbor_task/tests/Dockerfile", "workspace/harbor_task/tests/grader.py"],
+    "asset_paths": ["workspace/harbor_task/tests/private_cases.json"]
+  },
+  "submission_paths": ["/workspace/solution"]
+}
+```
+
+路径均为真实包内引用。`mode` 可为 prebuilt/generated/injected；仅 prebuilt 要求实际非空 asset_paths，其他方式须有准备实现、调用入口与安全边界证据，不能只写“平台会注入”。自动脚本校验引用存在，内容与调用语义仍由复核者判断。缺证据保留 manual。
+
+`submission_paths` 指 Verifier 实际需要接收的 Agent 绝对路径，默认 `/workspace/solution`；脚本核对 task.toml 顶层 artifacts 源路径覆盖情况，并认可默认移交的 `/logs/artifacts/`；完全使用该默认目录时无需额外声明。任务采用其他接口应据实填写。`artifact_override={summary,evidence}` 可记录目标版本 Job 覆盖，未获静态解析的覆盖仍 manual；不能用文字覆盖确定缺漏。
+
+历史 Trial 路径与解压路径不同，可用 `trial_task_binding={summary,evidence}` 提供真实任务/版本映射证据；校验信息应来自运行/打包材料，不为通过编造。仅名称一致不证明版本一致，有明确不同任务或校验冲突须解释或退回。任务身份自动核验不鉴定日志真伪。
 
 ## format_review
 
-status为aligned/aligned_with_extras/deviations/manual，summary说明语义复核结果，additional_suggestions数组每项path/classification/recommendation。classification为extra_allowed/merge_candidate/misplaced/obsolete_layout。额外项与启发式观察不直接扣错；明确必需证据缺失/实际调用失败映射至对应QA/G/H，等价实现不得因名字不同而失败。
+status为aligned/aligned_with_extras/deviations/manual，summary说明语义复核结果，additional_suggestions数组每项path/classification/recommendation。classification为extra_allowed/merge_candidate/misplaced/obsolete_layout。八字段轨迹会根据 overview 中两条 source_path 重新解析，确定缺失/坏 JSON/字段错误影响 QA18/QA21，手填 pass 不能覆盖。额外项与一般布局观察不直接扣错；明确必需证据缺失/实际调用失败映射至对应QA/G/H，等价实现不得因名字不同而失败。
 
 ## 总评与输出
 

@@ -8,7 +8,7 @@
   "turn": {"seconds": 5400, "grace_seconds": 1},
   "context": {"max_tokens": 32768, "compact_at_tokens": 24576, "reserve_tokens": 4096, "required": true, "auto_compact": false, "summary_seconds": 60},
   "heartbeat": {"required": true, "interval_seconds": 1, "stale_after_seconds": 300, "controller_stale_seconds": 30},
-  "policy": {"max_turns": 10000, "max_turn_retries": 1, "retry_backoff_seconds": 5},
+  "policy": {"retry_backoff_seconds": 5},
   "output": {"max_run_bytes": 1073741824, "min_free_bytes": 134217728},
   "storage": {"data_mount": "/mnt/data"},
   "env": {}

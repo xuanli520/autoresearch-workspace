@@ -66,13 +66,12 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 | `credit_policy: running` | 按观测到的 worker 执行区间记活动时间；故障未知区间不记 |
 | `credit_policy: successful_turn` | 退出 0、上下文报告有效、收到 `turn.completed` 且 `credit: true`、清理成功后才记活动时间 |
 | `runtime_seconds` / `credited_seconds` | 分别展示观测执行量和已确认信用；运行中 `active_seconds` 含当前暂计区间 |
-| `policy.max_turns` | 整个 run 的轮数上限；达到后暂停，无自动追加 |
 | `turn.seconds` | 每轮上限，不能超过 5400 秒或 run 的硬截止 |
-| `policy.max_turn_retries` / `retry_backoff_seconds` | 单轮异常后的有界重试次数（默认 1 次，最多 5 次）与退避秒数 |
+| `policy.retry_backoff_seconds` | 单轮可恢复异常后的重试退避秒数；重试次数不设上限，由原目标和硬截止约束 |
 
 单调时钟控制执行间隔，绝对截止与单调时间取更严格者。停止、压缩等待、恢复均不延后截止；系统重启后旧 run 到期，不凭跨 boot 的计时推断信用。`successful_turn` 在完整轮结束判断目标，可超过目标到当前轮结束，但绝不突破硬截止。worker 到期立即取消计算；内核调度和进程回收存在少量延迟，外部资源取消另有有界超时。
 
-成功轮可在冻结配置的同一预算内续轮。默认对进程非零退出、worker 意外退出、缺少完成事件/上下文报告、心跳丢失、worker 错误及单轮超时各重试一次；重试次数受冻结配置限制，仍受原目标和墙钟截止约束。每次失败 attempt 独立留档且不获得成功轮信用。清理钩子收到 `AUTORESEARCH_RETRY_PENDING=1` 时应保留跨轮运行资源，仅清理本轮资源；最终失败、guard 丢失、人工停止、存储/挂载异常、hard limit 和清理失败不会重试，并执行最终清理。研究排队、工具阻塞等轮内细分、可信评分和 QA16 科研有效时间仍需任务适配器另留证据；进程活动秒数不自动等于科研有效时间。
+成功轮可在冻结配置的同一预算内续轮。进程非零退出、worker 意外退出、显式 `turn.failed`、缺少完成事件/上下文报告、心跳丢失、worker 错误及单轮超时默认持续重试，不设次数上限；每次失败 attempt 独立留档且不获得成功轮信用。清理钩子收到 `AUTORESEARCH_RETRY_PENDING=1` 时应保留跨轮运行资源，仅清理本轮资源。人工停止、预算或硬截止、guard 丢失、存储/挂载异常、清理失败及其他不可恢复错误不会重试，并按合同收尾。研究排队、工具阻塞等轮内细分、可信评分和 QA16 科研有效时间仍需任务适配器另留证据；进程活动秒数不自动等于科研有效时间。
 
 ## Agent 接入协议
 
