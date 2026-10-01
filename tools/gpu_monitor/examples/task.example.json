@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "interval_seconds": 60,
+  "timeout_seconds": 30,
+  "connection_attempts": 2,
+  "retry_delay_seconds": 2,
+  "max_hours": 24,
+  "state_dir": ".state",
+  "hosts": {
+    "my-cloud": {
+      "transport": "ssh",
+      "python": "python3",
+      "connect_timeout_seconds": 10,
+      "options": []
+    }
+  },
+  "tasks": [
+    {
+      "id": "my-experiment-seed1",
+      "host": "my-cloud",
+      "root": "/absolute/remote/experiment",
+      "protocol": "fill frozen protocol ID",
+      "gpu_uuids": [],
+      "status": {
+        "path": "status.json",
+        "key": "state"
+      },
+      "exit": {
+        "path": "worker.json",
+        "key": "exit_code"
+      },
+      "launch": {
+        "path": "launch.json"
+      },
+      "budget_key": "budget_seconds",
+      "processes": [
+        {
+          "pid_file": "launch.json",
+          "pid_key": "pid",
+          "contains": [
+            "train.py",
+            "--out /absolute/remote/experiment"
+          ],
+          "cwd": "."
+        }
+      ],
+      "streams": [
+        {
+          "id": "train",
+          "path": "train.jsonl",
+          "format": "jsonl",
+          "fields": {
+            "step": "step",
+            "elapsed_seconds": "elapsed_seconds",
+            "metric": "loss"
+          },
+          "metric_name": "loss",
+          "direction": "min",
+          "total_steps": 10000,
+          "stale_seconds": 900
+        }
+      ]
+    }
+  ]
+}

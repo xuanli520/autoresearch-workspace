@@ -1,0 +1,1 @@
+"""Generic AutoResearch controller primitives."""

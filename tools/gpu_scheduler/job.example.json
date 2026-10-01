@@ -1,0 +1,12 @@
+{
+  "request_id": "task-a/run-001/agent-a/eval-001",
+  "owner": "task-a/agent-a",
+  "command": ["/usr/bin/python3", "evaluate.py", "--config", "eval.json"],
+  "cwd": "/mnt/data/autoresearch/tasks/task-a/workspace",
+  "memory_mib": 20000,
+  "compute_units": 50,
+  "cpu_cores": 8,
+  "ram_mib": 16384,
+  "max_runtime_seconds": 1800,
+  "queue_timeout_seconds": 3600
+}

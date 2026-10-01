@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "auth_file": "../../auth.txt",
+  "python": "/usr/bin/python3",
+  "cli": "/mnt/data/autoresearch/releases/gpu-scheduler-v2-blocking/tools/gpu_scheduler/cli.py",
+  "root": "/mnt/data/autoresearch/gpu-queue",
+  "timeout_seconds": 20,
+  "wait_timeout_seconds": 43210
+}

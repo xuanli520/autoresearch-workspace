@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "root": "/mnt/data/autoresearch/gpu-queue",
+  "data_mount": "/mnt/data",
+  "gpus": [
+    {
+      "uuid": "GPU-REPLACE-WITH-REAL-UUID",
+      "memory_mib": 44000,
+      "compute_units": 100
+    }
+  ],
+  "cpu_cores": 16,
+  "ram_mib": 65536,
+  "poll_seconds": 1,
+  "service_seconds": 43200,
+  "max_bypass": 2,
+  "max_jobs": 10000,
+  "min_free_disk_mib": 4096
+}

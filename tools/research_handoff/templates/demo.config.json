@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "task_id": "local-smoke",
+  "root": ".",
+  "command": ["python3", "-B", "demo_agent.py"],
+  "budget": {"mode": "active", "window_seconds": 1, "hard_limit_seconds": 10, "credit_policy": "successful_turn"},
+  "turn": {"seconds": 2},
+  "context": {"max_tokens": 4096, "compact_at_tokens": 3000, "reserve_tokens": 256, "auto_compact": true},
+  "heartbeat": {"interval_seconds": 0.1, "stale_after_seconds": 2}
+}

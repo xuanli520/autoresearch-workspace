@@ -1,0 +1,66 @@
+# Local credentials and machine-specific configuration
+api_key.txt
+auth.txt
+*.pem
+*.key
+*.secret
+.env
+.env.*
+
+# Concrete task packages, submissions, research runs, and private evidence
+/7686036052687064883/
+/7686036056655892251/
+/7686036061013954313/
+/autoresearch_三期/
+/example/
+/autoresearch_三期-formal-v2-status-*.json
+
+# Bundled example/task content and binary teaching attachments
+/materials/example/
+/materials/规范格式/图片和附件/
+/materials/AutoResearch 专家线下标注教程/图片和附件/
+/materials/AutoResearch 项目培训/图片和附件/
+
+# Generated state, caches, archives, evidence, and runtime output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.log
+*.jsonl
+*.lock
+*.pid
+*.out
+*.tgz
+*.tar
+*.zip
+*.pt
+*.pth
+*.safetensors
+*.npz
+*.npy
+*.vcf
+*.pdf
+/tools/gpu_monitor/.state/
+/tools/gpu_monitor/archive/
+/tools/gpu_monitor/verification/
+/tools/gpu_monitor/tasks.json
+/tools/gpu_monitor/verification.json
+/tools/research_handoff/incidents/
+/notes/maintenance/
+/notes/*/evidence/
+/notes/*/scratch/
+/notes/*/releases/
+/ops/__pycache__/
+
+# Test projects and generated test artifacts
+**/tests/
+**/test_*.py
+**/*_test.py
+
+# Keep only source/docs/config examples in the general QA skill tree.
+/materials/autoresearch-qa-skills/**/scripts/test_*.py

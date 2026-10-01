@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "controller": "autoresearch-longrun",
+  "replaced_legacy_task_specific_components": true,
+  "legacy_compatibility": false,
+  "credentials_included": false,
+  "launch_performed": false,
+  "launch_scope": "No formal research agent or cloud GPU run launched; local simulated fault tests and demo only.",
+  "local_smoke_performed": true,
+  "platform": "linux-pidfd",
+  "notes": "Generic local smoke and cloud-resident SSH control plane. No sol/seed, Docker, Harbor, model, metric, or task adapter assumptions. Cloud GPU, provider cleanup, VRAM enforcement, Harbor evidence and scientific validity require separate task/provider acceptance."
+}
