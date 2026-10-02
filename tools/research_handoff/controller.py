@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import signal
@@ -38,6 +39,11 @@ RETRYABLE_TURN_REASONS = frozenset({
     'agent_exit_nonzero', 'completion_missing', 'context_usage_missing', 'invalid_agent_event',
     'agent_reported_failure', 'heartbeat_stale', 'controller_lost', 'worker_error',
     'worker_exit_missing', 'turn_timeout',
+})
+CONTEXT_BOUNDARY_REASONS = frozenset({
+    'turn_completed', 'context_window', 'completion_missing',
+    'agent_reported_failure', 'agent_exit_nonzero', 'worker_exit_missing',
+    'turn_timeout', 'invalid_agent_event', 'heartbeat_stale', 'worker_error',
 })
 
 
@@ -149,6 +155,7 @@ class LongRunController:
         self.dropping_line = False
         self.last_disk_check = 0
         self.retry_pending = False
+        self.context_guard_triggered = False
 
     def save(self):
         self.state['controller_heartbeat_monotonic'] = time.monotonic()
@@ -218,6 +225,8 @@ class LongRunController:
 
     def start_turn(self):
         self.process = None
+        self._context_completion_deadline = None
+        self.context_guard_triggered = False
         number = self.state['turn']['number'] + 1
         while (self.run_dir / 'turns' / f'{number:06d}').exists():
             number += 1
@@ -250,6 +259,9 @@ class LongRunController:
                'AUTORESEARCH_TURN': str(number), 'AUTORESEARCH_TURN_DIR': str(turn_dir),
                'AUTORESEARCH_CONTEXT_FILE': str(context_file),
                'AUTORESEARCH_CONTEXT_GENERATION': str(self.state['context']['generation']),
+               'AUTORESEARCH_CONTEXT_MAX_TOKENS': str(self.state['context']['max_tokens']),
+               'AUTORESEARCH_CONTEXT_COMPACT_AT_TOKENS': str(self.state['context']['compact_at_tokens']),
+               'AUTORESEARCH_CONTEXT_RESERVE_TOKENS': str(self.state['context']['reserve_tokens']),
                'AUTORESEARCH_REMAINING_SECONDS': str(seconds),
                'AUTORESEARCH_PROCESS_TOKEN': self.state['turn']['token']}
         check_storage(self.config['storage']['data_mount'], *(Path(env[name]) for name in (
@@ -303,6 +315,11 @@ class LongRunController:
             if kind == 'turn.completed':
                 if type(value.get('credit')) is not bool:
                     raise ControllerError('turn.completed requires boolean credit')
+                if self.config['budget']['credit_policy'] == 'reported':
+                    seconds = value.get('credited_seconds')
+                    if (type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds < 0
+                            or not isinstance(value.get('credit_evidence'), str) or not value['credit_evidence'].strip()):
+                        raise ControllerError('reported credit requires finite nonnegative seconds and credit_evidence')
                 self.result = value
             if kind == 'turn.failed':
                 self.pending_reason = 'agent_reported_failure'
@@ -327,6 +344,74 @@ class LongRunController:
                     self.ingest_line(self.fragment)
                 self.fragment, self.dropping_line = b'', False
 
+    def fallback_compaction_summary(self, reason: str) -> str:
+        """Build a bounded, explicitly incomplete handoff when the agent did not."""
+        context = self.state['context']
+        max_summary_bytes = self.config['context']['max_summary_bytes']
+        previous_summary = None
+        relative = context.get('last_snapshot')
+        if relative:
+            try:
+                snapshot_path = (self.run_dir / relative).resolve()
+                if snapshot_path.is_relative_to(self.run_dir / 'context'):
+                    previous_summary = read_json(snapshot_path).get('summary')
+            except (OSError, ControllerError, TypeError, ValueError):
+                previous_summary = None
+        method_summary = self.result.get('method_summary')
+        if not isinstance(method_summary, str) or not method_summary.strip():
+            method_summary = None
+
+        def clip(value: str | None, byte_limit: int = 12000) -> str | None:
+            if value is None:
+                return None
+            encoded = value.encode('utf-8')
+            if len(encoded) <= byte_limit:
+                return value
+            marker = '\n[truncated]'.encode('utf-8')
+            return (encoded[:max(0, byte_limit - len(marker))].decode('utf-8', errors='ignore')
+                    + marker.decode('utf-8'))
+
+        def render(value: dict[str, Any]) -> str:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+        payload = {
+            'controller_fallback': 'context_guard',
+            'complete': False,
+            'reason': reason,
+            'generation': context['generation'],
+            'turn': self.state['turn']['number'],
+            'used_tokens': context['used_tokens'],
+            'max_tokens': context['max_tokens'],
+            'evidence_dir': self.state['turn']['dir'],
+            'method_summary': clip(method_summary),
+            'previous_handoff': clip(previous_summary if isinstance(previous_summary, str) else None),
+            'next_steps': 'Start a fresh generation, inspect the retained turn evidence, and do not assume this turn succeeded.',
+        }
+
+        summary = render(payload)
+        if len(summary.encode('utf-8')) > max_summary_bytes:
+            payload['method_summary'] = None
+            payload['previous_handoff'] = None
+            summary = render(payload)
+        if len(summary.encode('utf-8')) > max_summary_bytes:
+            payload = {'controller_fallback': 'context_guard', 'complete': False,
+                       'generation': context['generation'], 'turn': self.state['turn']['number'],
+                       'reason': reason}
+            summary = render(payload)
+        if len(summary.encode('utf-8')) > max_summary_bytes:
+            payload = {'controller_fallback': 'context_guard', 'complete': False}
+            summary = render(payload)
+        if len(summary.encode('utf-8')) > max_summary_bytes:
+            payload = {'complete': False}
+            summary = render(payload)
+        if len(summary.encode('utf-8')) > max_summary_bytes:
+            raise ControllerError('context.max_summary_bytes is too small for controller fallback')
+        atomic_json(Path(self.state['turn']['dir']) / 'context-fallback.json', payload)
+        self.event('context.fallback_summary', turn=self.state['turn']['number'],
+                   generation=context['generation'], reason=reason,
+                   summary_sha256=hashlib.sha256(summary.encode()).hexdigest())
+        return summary
+
     def monitor(self):
         cfg = self.config
         turn = self.state['turn']
@@ -346,19 +431,42 @@ class LongRunController:
                     reason = 'hard_limit'
                 else:
                     reason = self.pending_reason
+
+            # Drain a worker that has already closed its stdout before applying
+            # the context guard. This preserves a completed turn whose final
+            # usage report arrived just before the process exited.
+            if reason is None and self.process.poll() is not None:
+                while self.offset < (Path(turn['dir']) / 'stdout.log').stat().st_size:
+                    self.ingest_output()
+                return self.finish_turn(None)
+
             ctx = self.state['context']
             if ctx['state'] == 'COMPACTION_REQUIRED':
                 if summary_deadline is None:
                     summary_deadline = now + cfg['context']['summary_seconds']
                     atomic_json(Path(turn['dir']) / 'context-request.json', {'generation': ctx['generation'],
                         'action': 'summarize_and_exit', 'remaining_tokens': max(0, ctx['max_tokens']-ctx['used_tokens'])})
-                if reason is None and (ctx['used_tokens'] >= ctx['max_tokens'] or now >= summary_deadline):
+                # A well-behaved adapter emits its compact summary and
+                # completion event together, but stdout delivery can split
+                # those records. Allow only the normal turn grace period for
+                # the completion record; a non-cooperative process is still
+                # hard-stopped at the context boundary.
+                if self.summary is not None:
+                    completion_deadline = getattr(self, '_context_completion_deadline', None)
+                    if completion_deadline is None:
+                        completion_deadline = now + cfg['turn']['grace_seconds']
+                        self._context_completion_deadline = completion_deadline
+                    if reason is None and now >= completion_deadline:
+                        reason = 'context_window'
+                elif reason is None and (ctx['used_tokens'] >= ctx['max_tokens'] or now >= summary_deadline):
                     reason = 'context_window'
-            if reason is None and self.process.poll() is not None:
-                # Drain the bounded remainder before evaluating completion.
-                while self.offset < (Path(turn['dir']) / 'stdout.log').stat().st_size:
-                    self.ingest_output()
-                return self.finish_turn(None)
+            if reason == 'context_window' and not self.context_guard_triggered:
+                self.context_guard_triggered = True
+                ctx['guard_triggered_at'] = utc_now()
+                self.event('context.guard_triggered', turn=turn['number'], generation=ctx['generation'],
+                           used_tokens=ctx['used_tokens'], max_tokens=ctx['max_tokens'],
+                           summary_present=self.summary is not None,
+                           completion_present=self.result.get('credit') is True)
             if reason is None and now >= turn['deadline_monotonic']:
                 reason = turn['deadline_reason']
             if reason is None and cfg['heartbeat']['required'] and now-self.state['heartbeat']['last_monotonic'] >= cfg['heartbeat']['stale_after_seconds']:
@@ -392,6 +500,14 @@ class LongRunController:
         worker = read_json(Path(turn['dir']) / 'worker-exit.json', {})
         code = worker.get('returncode', self.process.poll())
         reason = reason or self.pending_reason
+        # Context accounting can race the final process-exit event. If the
+        # adapter supplied a complete, credited turn and a non-empty compact
+        # summary, preserve that successful boundary for auto-compaction.
+        if (reason == 'context_window' and worker.get('reason') in ('process_exit', 'signal_stop') and code == 0
+                and self.summary and self.context_reported and self.result.get('credit') is True):
+            self.event('context.completion_recovered', turn=turn['number'], generation=turn['generation'],
+                       used_tokens=self.state['context']['used_tokens'])
+            reason = None
         if reason is None:
             if not worker:
                 reason = 'worker_exit_missing'
@@ -401,21 +517,30 @@ class LongRunController:
                 reason = 'agent_exit_nonzero'
             elif self.config['context']['required'] and not self.context_reported:
                 reason = 'context_usage_missing'
-            elif self.config['budget']['credit_policy'] == 'successful_turn' and self.result.get('credit') is not True:
+            elif self.config['budget']['credit_policy'] in ('successful_turn', 'reported') and self.result.get('credit') is not True:
                 reason = 'completion_missing'
             else:
                 reason = 'turn_completed'
         retry_state = self.state.setdefault('retry', {'anchor_turn': None, 'used': 0})
         view = budget_view(self.state)
         target_reached = view['target_reached']
-        if self.config['budget']['mode'] == 'active' and self.config['budget']['credit_policy'] == 'successful_turn':
+        if self.config['budget']['mode'] == 'active' and self.config['budget']['credit_policy'] in ('successful_turn', 'reported'):
             target_reached = self.state['budget']['active_seconds'] >= self.state['budget']['window_seconds']
         retry_pending = (reason in RETRYABLE_TURN_REASONS and
                          stop_reason(self.run_dir) is None and not self.signalled and
                          not view['hard_reached'] and not target_reached and
                          self.state['context']['state'] != 'COMPACTION_REQUIRED')
         process_cleanup_ok = terminate_scope(turn['token'], 0)
-        task_cleanup_ok = cleanup_task(Path(turn['dir']), retry_pending=retry_pending)
+        # Automatic compaction needs the same task resources in its next generation.
+        retain_for_compaction = (
+            self.config['context']['auto_compact']
+            and self.state['context']['state'] == 'COMPACTION_REQUIRED'
+            and reason in CONTEXT_BOUNDARY_REASONS
+            and not budget_view(self.state)['hard_reached']
+            and stop_reason(self.run_dir) is None
+            and not self.signalled
+        )
+        task_cleanup_ok = cleanup_task(Path(turn['dir']), retry_pending=retry_pending or retain_for_compaction)
         if not process_cleanup_ok or not task_cleanup_ok:
             reason = 'cleanup_incomplete'
             retry_pending = False
@@ -424,9 +549,17 @@ class LongRunController:
         if reason in ('controller_lost', 'cleanup_incomplete', 'invalid_agent_event', 'context_usage_missing'):
             credit = False
         duration = worker.get('runtime_seconds', 0)
-        elapsed = finish_active_interval(self.state, credit=credit, duration=duration)
+        reported = None
+        if self.config['budget']['credit_policy'] == 'reported':
+            observed = min(duration, max(0, time.monotonic() - self.state['budget']['active_monotonic']))
+            reported = self.result.get('credited_seconds', 0) if credit else 0
+            if reported > observed:
+                reason, credit, completed, reported, retry_pending = 'invalid_agent_event', False, False, 0, False
+                self.event('agent.credit_rejected', reported_seconds=self.result.get('credited_seconds'), observed_seconds=observed)
+        elapsed = finish_active_interval(self.state, credit=credit, duration=duration, credited_duration=reported)
         turn.update(status='COMPLETED' if completed else 'STOPPED', ended_at=utc_now(), returncode=code,
-                    reason=reason, elapsed_seconds=elapsed, credited=credit, result=self.result)
+                    reason=reason, elapsed_seconds=elapsed, credited=credit,
+                    credited_seconds=(reported if reported is not None else elapsed) if credit else 0, result=self.result)
         atomic_json(Path(turn['dir']) / 'exit.json', turn)
         self.save()
         self.event('turn.finished', **turn)
@@ -487,11 +620,14 @@ class LongRunController:
                     self.state.update(status='COMPLETED', stop_reason=reason)
                     return
                 continue
-            if reason in ('turn_completed', 'context_window') and self.state['context']['state'] == 'COMPACTION_REQUIRED':
+            if (reason in CONTEXT_BOUNDARY_REASONS
+                    and self.state['context']['state'] == 'COMPACTION_REQUIRED'):
                 self.state.update(status='WAITING_COMPACTION', stop_reason='context_window')
                 self.save()
-                if self.summary and reason == 'turn_completed' and self.config['context']['auto_compact']:
-                    compact_context(self.run_dir, self.summary, expected_generation=self.state['context']['generation'],
+                if self.config['context']['auto_compact']:
+                    summary = self.summary or self.fallback_compaction_summary(reason)
+                    self.summary = summary
+                    compact_context(self.run_dir, summary, expected_generation=self.state['context']['generation'],
                                     controller_owned=True)
                     self.state = load_state(self.run_dir)
                     self.state['status'] = 'RUNNING'

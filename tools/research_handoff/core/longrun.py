@@ -28,6 +28,13 @@ CONTROLLER_NAME = "autoresearch-longrun"
 RUN_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
 TERMINAL_STATES = frozenset({"COMPLETED", "STOPPED", "FAILED", "EXPIRED"})
 
+# These defaults leave enough headroom for the provider response, tool output,
+# and a durable handoff summary. A task may override them when its provider has
+# a different context contract.
+DEFAULT_CONTEXT_MAX_TOKENS = 150_000
+DEFAULT_CONTEXT_COMPACT_AT_TOKENS = 120_000
+DEFAULT_CONTEXT_RESERVE_TOKENS = 16_384
+
 
 class ControllerError(ValueError):
     """A user-actionable configuration or state error."""
@@ -117,12 +124,16 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
             and not k.startswith("AUTORESEARCH_") and isinstance(v, str) and "\0" not in v for k, v in env.items()):
         raise ControllerError("env requires valid string keys/values; AUTORESEARCH_* is reserved")
     budget = section("budget", {"mode": "active", "window_seconds": 39600,
-                                "hard_limit_seconds": 43200, "credit_policy": "running"})
+                                "hard_limit_seconds": 43200, "credit_policy": "running",
+                                "allow_extended_hard_limit": False})
     window = positive_number(budget["window_seconds"], "budget.window_seconds")
     hard = positive_number(budget["hard_limit_seconds"], "budget.hard_limit_seconds")
-    if not window <= hard <= 43200:
-        raise ControllerError("0 < window_seconds <= hard_limit_seconds <= 43200 is required")
-    if budget["mode"] not in ("active", "wall") or budget["credit_policy"] not in ("running", "successful_turn"):
+    if type(budget["allow_extended_hard_limit"]) is not bool:
+        raise ControllerError("budget.allow_extended_hard_limit must be boolean")
+    hard_cap = 86400 if budget["allow_extended_hard_limit"] else 43200
+    if not window <= hard <= hard_cap:
+        raise ControllerError(f"0 < window_seconds <= hard_limit_seconds <= {hard_cap} is required")
+    if budget["mode"] not in ("active", "wall") or budget["credit_policy"] not in ("running", "successful_turn", "reported"):
         raise ControllerError("invalid budget mode/credit_policy")
     budget.update(window_seconds=window, hard_limit_seconds=hard)
     turn = section("turn", {"seconds": min(5400, hard), "grace_seconds": 1})
@@ -130,13 +141,12 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     turn["grace_seconds"] = finite_number(turn["grace_seconds"], "turn.grace_seconds")
     if turn["seconds"] > min(5400, hard) or turn["grace_seconds"] > 30:
         raise ControllerError("turn.seconds must be <= 5400 and fit hard limit; grace_seconds must be <= 30")
-    context = section("context", {"max_tokens": None, "compact_at_tokens": None,
-        "reserve_tokens": None, "required": True, "auto_compact": False, "summary_seconds": 60,
-        "max_summary_bytes": 65536})
-    # Context capacity belongs to the selected provider/adapter, never a model default.
-    for name in ("max_tokens", "compact_at_tokens", "reserve_tokens"):
-        if context[name] is None:
-            raise ControllerError(f"context.{name} must be explicitly configured for the chosen model")
+    context = section("context", {"max_tokens": DEFAULT_CONTEXT_MAX_TOKENS,
+        "compact_at_tokens": DEFAULT_CONTEXT_COMPACT_AT_TOKENS,
+        "reserve_tokens": DEFAULT_CONTEXT_RESERVE_TOKENS, "required": True, "auto_compact": True,
+        "summary_seconds": 60, "max_summary_bytes": 65536})
+    # Defaults are conservative for the standard 150K contract; adapters should
+    # override them when the selected provider has a smaller real capacity.
     for name in ("max_tokens", "compact_at_tokens", "reserve_tokens", "max_summary_bytes"):
         integer(context[name], "context." + name, 1)
     if context["compact_at_tokens"] + context["reserve_tokens"] > context["max_tokens"]:
@@ -300,6 +310,8 @@ def new_state(config: dict[str, Any], run: str, run_dir: Path) -> dict[str, Any]
             "input_tokens": 0,
             "output_tokens": 0,
             "state": "OPEN",
+            "limit_exceeded": False,
+            "guard_triggered_at": None,
             "last_report_at": None,
             "last_snapshot": None,
             "last_reopen_at": None,
@@ -377,7 +389,7 @@ def budget_view(state: dict[str, Any], now_epoch: float | None = None) -> dict[s
     wall = 0 if started is None else max(0, now - started)
     if now_epoch is None and b.get("boot_id") == boot_id() and b.get("started_monotonic") is not None:
         wall = max(wall, time.monotonic() - b["started_monotonic"])
-    active = active_elapsed(state, now_epoch)
+    active = float(b["active_seconds"]) if b["credit_policy"] == "reported" else active_elapsed(state, now_epoch)
     progress = active if b["mode"] == "active" else wall
     remaining = max(0, b["hard_limit_seconds"] - wall)
     if b.get('started_at') and b.get('boot_id') != boot_id():
@@ -405,6 +417,8 @@ def context_view(state: dict[str, Any]) -> dict[str, Any]:
         "remaining_tokens": max(0, maximum - used),
         "compaction_required": used >= compact_at or context.get("state") == "COMPACTION_REQUIRED",
         "state": context.get("state", "OPEN"),
+        "limit_exceeded": bool(context.get("limit_exceeded", used > maximum)),
+        "guard_triggered_at": context.get("guard_triggered_at"),
         "last_snapshot": context.get("last_snapshot"),
     }
 
@@ -420,16 +434,19 @@ def begin_run(state: dict[str, Any], now: str | None = None) -> None:
 
 
 def finish_active_interval(state: dict[str, Any], ended_at: str | None = None, *, credit: bool = True,
-                           duration: float | None = None) -> float:
+                           duration: float | None = None, credited_duration: float | None = None) -> float:
     b = state["budget"]
     if b.get("active_started_at") is None:
         return 0.0
     elapsed = max(0, active_elapsed(state, epoch(ended_at) if ended_at else None) - b["active_seconds"])
     if duration is not None:
         elapsed = min(elapsed, finite_number(duration, "duration"))
+    confirmed = elapsed if credited_duration is None else finite_number(credited_duration, "credited_duration")
+    if not 0 <= confirmed <= elapsed:
+        raise ControllerError("reported credit must be between zero and observed runtime")
     b["runtime_seconds"] += elapsed
     if credit:
-        b["active_seconds"] += elapsed
+        b["active_seconds"] += confirmed
     b["active_started_at"] = b["active_monotonic"] = None
     return elapsed
 
@@ -485,7 +502,8 @@ def _rotate_context(run_dir: Path, summary: str, *, reason: str, conversation_id
         atomic_json(run_dir / "context/latest.json", snapshot)
         ctx.update(previous_conversation_id=ctx.get('conversation_id'),
                    generation=generation, conversation_id=conversation_id, used_tokens=0,
-                   input_tokens=0, output_tokens=0, state="OPEN", last_snapshot=relative,
+                   input_tokens=0, output_tokens=0, state="OPEN", limit_exceeded=False,
+                   guard_triggered_at=None, last_snapshot=relative,
                    last_report_at=None, last_reopen_at=utc_now(), summary_deadline_monotonic=None)
         if state["status"] in ("WAITING_COMPACTION", "CONTEXT_COMPACTION_REQUIRED", "READY"):
             state.update(status="READY", stop_reason=None)
@@ -531,8 +549,11 @@ def apply_context_usage(state: dict[str, Any], used_tokens: int, *, generation: 
             ctx[name] = integer(value, name)
     if used_tokens >= ctx["compact_at_tokens"]:
         ctx["state"] = "COMPACTION_REQUIRED"
+    if used_tokens > ctx["max_tokens"]:
+        ctx["limit_exceeded"] = True
     return {"generation": ctx["generation"], "used_tokens": used_tokens,
-            "compaction_required": ctx["state"] == "COMPACTION_REQUIRED"}
+            "compaction_required": ctx["state"] == "COMPACTION_REQUIRED",
+            "limit_exceeded": bool(ctx.get("limit_exceeded", False))}
 
 
 def record_context_usage(run_dir: Path, used_tokens: int, *, generation: int,
@@ -540,17 +561,35 @@ def record_context_usage(run_dir: Path, used_tokens: int, *, generation: int,
                          conversation_id: str | None = None, source: str = "operator") -> dict[str, Any]:
     # All external state writers share the same lifecycle lock as the controller.
     run_dir = Path(run_dir)
+    auto_compact = False
     with file_lock(run_dir / ".controller.lock", blocking=False), file_lock(run_dir / ".state.lock"):
         state = load_state(run_dir)
+        config = validate_config(read_json(run_dir / "config.json"))
         if state.get("controller_pid") or state["status"] in TERMINAL_STATES:
             raise ControllerError("stop/recover the controller before reporting context")
         result = apply_context_usage(state, used_tokens, generation=generation, input_tokens=input_tokens,
                                      output_tokens=output_tokens, conversation_id=conversation_id)
         if result["compaction_required"]:
             state["status"] = "WAITING_COMPACTION"
+            auto_compact = config["context"]["auto_compact"]
         save_state(run_dir, state)
         append_event(run_dir, "context.usage", source=source, **result)
-        return result
+    if auto_compact:
+        context = state["context"]
+        payload = {"controller_fallback": "context_report", "complete": False,
+                   "generation": context["generation"], "used_tokens": context["used_tokens"],
+                   "next_steps": "Inspect retained evidence before continuing the new generation."}
+        summary = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        if len(summary.encode("utf-8")) > config["context"]["max_summary_bytes"]:
+            payload = {"complete": False}
+            summary = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        if len(summary.encode("utf-8")) > config["context"]["max_summary_bytes"]:
+            raise ControllerError("context.max_summary_bytes is too small for controller fallback")
+        atomic_json(run_dir / "context" / "operator-fallback.json", payload)
+        append_event(run_dir, "context.fallback_summary", generation=context["generation"],
+                     reason="context_report", summary_sha256=hashlib.sha256(summary.encode()).hexdigest())
+        compact_context(run_dir, summary, expected_generation=generation, controller_owned=True)
+    return result
 
 
 def safe_summary(state: dict[str, Any]) -> dict[str, Any]:

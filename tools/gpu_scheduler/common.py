@@ -119,7 +119,8 @@ def atomic_json(path, value):
 
 def validate_config(raw, *, local_test=False):
     fields(raw, {"version", "root", "data_mount", "gpus", "cpu_cores", "ram_mib"},
-           {"poll_seconds", "service_seconds", "max_bypass", "max_jobs", "min_free_disk_mib"})
+           {"poll_seconds", "service_seconds", "max_bypass", "max_jobs", "min_free_disk_mib",
+            "external_process_policy", "shared_headroom_mib"})
     if type(raw["version"]) is not int or raw["version"] != 1:
         raise ValueError("version must be 1")
     cfg = dict(raw, root=absolute(raw["root"], "root"), local_test=local_test)
@@ -129,6 +130,12 @@ def validate_config(raw, *, local_test=False):
     cfg["max_bypass"] = integer(raw.get("max_bypass", 2), "max_bypass", 0, 100)
     cfg["max_jobs"] = integer(raw.get("max_jobs", 10000), "max_jobs", 1, 100000)
     cfg["min_free_disk_mib"] = integer(raw.get("min_free_disk_mib", 1024), "min_free_disk_mib", 0)
+    cfg["external_process_policy"] = raw.get("external_process_policy", "exclusive_admission")
+    if cfg["external_process_policy"] not in ("exclusive_admission", "shared"):
+        raise ValueError("invalid external_process_policy")
+    cfg["shared_headroom_mib"] = integer(raw.get("shared_headroom_mib", 2048), "shared_headroom_mib", 0)
+    if cfg["external_process_policy"] == "shared" and cfg["shared_headroom_mib"] < 1024:
+        raise ValueError("shared admission requires at least 1024 MiB headroom")
     for key in ("cpu_cores", "ram_mib"):
         integer(cfg[key], key)
     if not isinstance(cfg["gpus"], list) or not cfg["gpus"]:

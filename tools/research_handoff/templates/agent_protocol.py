@@ -48,4 +48,10 @@ def fits_request(used_tokens: int, next_input_tokens: int, max_output_tokens: in
     values = (used_tokens, next_input_tokens, max_output_tokens)
     if any(type(v) is not int or v < 0 for v in values):
         raise ValueError('token counts must be nonnegative integers')
-    return sum(values) <= cfg['compact_at_tokens'] and not compaction_requested()
+    # Keep the request below the controller's compaction line and fail closed
+    # if a previous report already crossed the provider's hard capacity.
+    maximum = int(cfg['max_tokens'])
+    compact_at = int(cfg['compact_at_tokens'])
+    if used_tokens > maximum or next_input_tokens + max_output_tokens > maximum:
+        return False
+    return sum(values) <= compact_at and not compaction_requested()

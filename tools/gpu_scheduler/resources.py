@@ -58,7 +58,9 @@ def choose_gpu(spec, active, config, snapshot, quarantined):
         if live is None or gpu["memory_mib"] > live["total_mib"]:
             reasons.append(f"{uuid}:missing_or_capacity_mismatch")
             continue
-        if any(p["pid"] not in known_pids for p in live["processes"]):
+        external = any(p["pid"] not in known_pids for p in live["processes"])
+        shared = config.get("external_process_policy", "exclusive_admission") == "shared"
+        if external and not shared:
             reasons.append(f"{uuid}:external_or_unidentified_process")
             continue
         assigned = [j for j in active if j["gpu_uuid"] == uuid]
@@ -66,6 +68,8 @@ def choose_gpu(spec, active, config, snapshot, quarantined):
         # Start with all measured usage (including driver overhead). Add every
         # unconsumed reservation, so a lazy allocator cannot lend its future peak.
         committed = live["used_mib"]
+        if shared:
+            committed += config.get("shared_headroom_mib", 2048)
         for job in assigned:
             measured = sum(p["memory_mib"] for p in live["processes"] if p["pid"] in pid_sets[job["id"]])
             committed += max(0, job["spec"]["memory_mib"] - measured)

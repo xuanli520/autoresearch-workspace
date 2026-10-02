@@ -1,5 +1,7 @@
 # AutoResearch Workspace Tools
 
+完整题目包校验、双 Agent 长跑、监护和回收统一执行 [双 Agent 长跑与题包验收规范](双Agent长跑与题目包验收规范.md)，必须使用工作区官方任务 Agent 控制器、GPU 调度器和监控工具，不得自建替代控制链。
+
 本仓库保存 AutoResearch 工作区的通用工具、运行治理脚本、质量规范和协作文档。
 
 仓库范围仅保留可复用的源码和文档：

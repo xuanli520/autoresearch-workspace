@@ -6,7 +6,7 @@
   "command": ["python3", "agent.py"],
   "budget": {"mode": "active", "window_seconds": 39600, "hard_limit_seconds": 43200, "credit_policy": "successful_turn"},
   "turn": {"seconds": 5400, "grace_seconds": 1},
-  "context": {"max_tokens": 32768, "compact_at_tokens": 24576, "reserve_tokens": 4096, "required": true, "auto_compact": false, "summary_seconds": 60},
+  "context": {"max_tokens": 150000, "compact_at_tokens": 120000, "reserve_tokens": 16384, "required": true, "auto_compact": true, "summary_seconds": 60},
   "heartbeat": {"required": true, "interval_seconds": 1, "stale_after_seconds": 300, "controller_stale_seconds": 30},
   "policy": {"retry_backoff_seconds": 5},
   "output": {"max_run_bytes": 1073741824, "min_free_bytes": 134217728},

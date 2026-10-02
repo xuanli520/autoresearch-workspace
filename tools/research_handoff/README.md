@@ -1,10 +1,12 @@
 # 通用 AutoResearch 长程 Agent 控制器
 
+本工具是 [统一双 Agent 长跑规范](../../双Agent长跑与题目包验收规范.md) 强制采用的任务控制入口。题目只写薄适配器，不复制控制状态机；GPU 作业必须接入受管 gpu_scheduler，巡检/登记使用 gpu_monitor。下文描述工具能力，正式运行还须满足工作区预算、隔离和真实验收要求。
+
 本工具负责一个研究任务的启动、续轮、停止、上下文交接和故障接管。任务通过 argv 命令和 JSONL 事件接入；模型、研究框架、容器和评分器由任务适配器提供。不保留旧任务、旧 profile 或旧运行目录兼容层。
 
 工作区共享 GPU 要求：不因其他计算进程出现自动停止自己的训练，在不影响他人的前提下继续共享；显存余量、实测峰值、并发/CPU负载与共享观察由题目适配器落实。本控制器不因未知 GPU PID 停训，硬截止、明确安全风险和用户停止仍按合同执行。历史发布 bundle 保留当时内容，不热改。
 
-题目适配器接入 [gpu_scheduler](../gpu_scheduler/README.md) 时，本地控制 Agent 优先使用阻塞式 `submit`，等 GPU 作业完成或关键中断再继续；只有需要持续跟踪进度或同时编排多个任务时才调用 `submit_async`/`enqueue`。资源暂不足的合法请求进入队列，排队仍受原预算约束；等待中断不等于作业已取消，先查询同一 request/job。阻塞期间需由适配器独立维护真实心跳与定向清理，SDK 不会自动替代本控制器心跳；该调用规范不表示本控制器自动接管了 GPU 调度器生命周期。
+题目适配器必须通过 [gpu_scheduler](../gpu_scheduler/README.md) 提交 GPU 训练、评分和复验；本地控制 Agent 优先使用阻塞式 `submit`，等 GPU 作业完成或关键中断再继续；只有需要持续跟踪进度或同时编排多个任务时才调用 `submit_async`/`enqueue`。资源暂不足的合法请求进入队列，排队仍受原预算约束；等待中断不等于作业已取消，先查询同一 request/job。阻塞期间需由适配器独立维护真实心跳与定向清理，SDK 不会自动替代本控制器心跳；该调用规范不表示本控制器自动接管了 GPU 调度器生命周期。
 
 **执行端要求 Linux 5.3+、Python 3.10+、可读取同用户 `/proc`、支持 pidfd；仅用 Python 标准库。** 控制器源码版本与配置在 `init` 时记录哈希，正在运行的版本应使用独立发布目录。当前状态 schema 为 2，配置 version 为 1。
 
@@ -23,7 +25,7 @@ flowchart LR
     G --> S
 ```
 
-先复制并填写 [连接配置](connection.example.json) 和 [任务配置](controller.example.json)。连接配置只放主机、用户、端口、解释器和目录；认证沿用 SSH key/agent，首次连接前建立可信 known_hosts。任务配置中的 `context.max_tokens`、`compact_at_tokens`、`reserve_tokens` 必须按实际模型显式填写，缺失即拒绝初始化；示例数值仅用于展示格式。以下命令在工具目录执行：
+先复制并填写 [连接配置](connection.example.json) 和 [任务配置](controller.example.json)。连接配置只放主机、用户、端口、解释器和目录；认证沿用 SSH key/agent，首次连接前建立可信 known_hosts。控制器默认使用 `150000` token 上限、`120000` 触发压缩、`16384` 保留区并启用自动压缩；若实际 provider 容量不同，必须在任务配置中显式覆盖这些字段。以下命令在工具目录执行：
 
 ```bash
 python3 -B controller.py --remote connection.json deploy
@@ -61,15 +63,18 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 | 字段 / 行为 | 含义 |
 |---|---|
 | `budget.window_seconds` | active 目标或 wall 窗口 |
-| `budget.hard_limit_seconds` | 从首次 start 起固定墙钟上限，至多 43,200 秒，所有 mode 均适用 |
+| `budget.hard_limit_seconds` | 从首次 start 起固定墙钟上限；工作区正式运行不得超过 43,200 秒，不启用 `allow_extended_hard_limit`。工具底层虽支持扩展到 86,400 秒，该能力不是正式运行默认授权 |
 | `turn.seconds` | 每轮最长执行时间，实际取本轮、目标窗口与剩余硬预算的适用最小值 |
 | `credit_policy: running` | 按观测到的 worker 执行区间记活动时间；故障未知区间不记 |
 | `credit_policy: successful_turn` | 退出 0、上下文报告有效、收到 `turn.completed` 且 `credit: true`、清理成功后才记活动时间 |
-| `runtime_seconds` / `credited_seconds` | 分别展示观测执行量和已确认信用；运行中 `active_seconds` 含当前暂计区间 |
+| `credit_policy: reported` | 满足成功轮条件后，只计适配器报告的有限非负 `credited_seconds`；要求非空 `credit_evidence`，报告不能超过本轮真实执行时间 |
+| `runtime_seconds` / `credited_seconds` | 分别展示观测执行量和已确认信用；`reported` 不暂计未完成轮，其他策略的运行中 `active_seconds` 可含当前暂计区间 |
 | `turn.seconds` | 每轮上限，不能超过 5400 秒或 run 的硬截止 |
 | `policy.retry_backoff_seconds` | 单轮可恢复异常后的重试退避秒数；重试次数不设上限，由原目标和硬截止约束 |
 
 单调时钟控制执行间隔，绝对截止与单调时间取更严格者。停止、压缩等待、恢复均不延后截止；系统重启后旧 run 到期，不凭跨 boot 的计时推断信用。`successful_turn` 在完整轮结束判断目标，可超过目标到当前轮结束，但绝不突破硬截止。worker 到期立即取消计算；内核调度和进程回收存在少量延迟，外部资源取消另有有界超时。
+
+`reported` 适合由任务原始事件独立审计有效时间的适配器。`turn_complete(credit=True, credited_seconds=..., credit_evidence=...)` 只报告该轮新增信用，不重复提交历史结转；将目标设为原目标减去已核验结转。排队、安装、基础设施故障和其他排除区间由适配器记在证据中；控制器校验数值边界，不自行判断证据是否构成科研闭环。
 
 成功轮可在冻结配置的同一预算内续轮。进程非零退出、worker 意外退出、显式 `turn.failed`、缺少完成事件/上下文报告、心跳丢失、worker 错误及单轮超时默认持续重试，不设次数上限；每次失败 attempt 独立留档且不获得成功轮信用。清理钩子收到 `AUTORESEARCH_RETRY_PENDING=1` 时应保留跨轮运行资源，仅清理本轮资源。人工停止、预算或硬截止、guard 丢失、存储/挂载异常、清理失败及其他不可恢复错误不会重试，并按合同收尾。研究排队、工具阻塞等轮内细分、可信评分和 QA16 科研有效时间仍需任务适配器另留证据；进程活动秒数不自动等于科研有效时间。
 
@@ -100,7 +105,9 @@ turn_complete(credit=True)
 1. `compact_at_tokens + reserve_tokens <= max_tokens`，给工具返回与摘要保留空间。
 2. 达到阈值后写本轮 `context-request.json`，要求总结并退出；最多等待 `summary_seconds`，仍受本轮/总截止限制，达到 `max_tokens` 立即停。
 3. 适配器可用 `compaction_requested()` 观察请求，生成摘要、调用 `compact(summary)` 和 `turn_complete(credit=True)`，然后正常退出。
-4. `auto_compact: true` 时，成功轮及有效摘要触发快照 → generation + 1 → 新轮；默认 false 则进入 `WAITING_COMPACTION` 人工交接。没有摘要不会清空旧对话。
+4. `auto_compact: true` 时，成功轮及有效摘要触发快照 → generation + 1 → 新轮。控制器在达到 `max_tokens` 时立即执行硬兜底；若 agent 未提交摘要，会写入明确标注为不完整的控制器交接摘要并自动开启新代际，失败轮不计信用。只有关闭自动压缩或发生不可恢复的状态/存储故障时才进入 `WAITING_COMPACTION`；没有摘要不会伪造研究结论。
+
+`start_turn` 会把 `AUTORESEARCH_CONTEXT_MAX_TOKENS`、`AUTORESEARCH_CONTEXT_COMPACT_AT_TOKENS` 和 `AUTORESEARCH_CONTEXT_RESERVE_TOKENS` 注入适配器环境。适配器应在每次 provider 请求前用真实 tokenizer 计数调用 `fits_request`；即使适配器失守，控制器仍会在硬上限触发后终止本轮并保全日志。
 
 人工压缩或主动重开必须先等 controller/worker 退出，并携带当前 generation 和摘要文件：
 
@@ -137,7 +144,7 @@ python3 -B controller.py --remote connection.json start --run-id trial-01 --resu
 | `heartbeat_stale` | stdout 是否持续产生协议心跳；普通日志不续命 |
 | `context_usage_missing` / `invalid_agent_event` | 查事件 generation、总 token、会话 ID，修适配器 |
 | `completion_missing` | 没收到可信 `turn.completed` / boolean credit，退出 0 不足以证明完整轮 |
-| `WAITING_COMPACTION` | 查 pending-summary、原日志；提交当前 generation 的摘要 |
+| `WAITING_COMPACTION` | 仅在关闭自动压缩或不可恢复故障时出现；查 pending-summary、原日志，提交当前 generation 的摘要 |
 | `cleanup_incomplete` | 查 cleanup.log/receipt；外部资源确认回收前不继续 |
 | `storage_limit` / `storage_changed` | 查 run 字节数、剩余空间、实际挂载；不自动删历史证据 |
 | `hard_limit` | 本 run 到期，保全证据与未完成项；不能延长原预算 |
