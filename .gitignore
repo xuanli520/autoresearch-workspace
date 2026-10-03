@@ -92,6 +92,9 @@
 !/tools/research_handoff/core/
 /tools/research_handoff/core/*
 !/tools/research_handoff/core/*.py
+!/tools/research_handoff/providers/
+/tools/research_handoff/providers/*
+!/tools/research_handoff/providers/*.py
 !/tools/research_handoff/templates/
 /tools/research_handoff/templates/*
 !/tools/research_handoff/templates/*.py

@@ -29,6 +29,16 @@ def turn_complete(*, credit: bool = True, **fields: Any) -> None:
     emit('turn.completed', credit=credit, **fields)
 
 
+def turn_credit(*, credited_seconds: float, credit_evidence: str, **fields: Any) -> None:
+    """Report auditable research time from a turn that did not close normally.
+
+    The controller still records the turn as failed/stopped and only accepts
+    this event when the frozen run explicitly enables partial credit.
+    """
+    emit('turn.credit', credited_seconds=credited_seconds,
+         credit_evidence=credit_evidence, **fields)
+
+
 def compact(summary: str) -> None:
     """Persist the summary through the controller, then exit the current turn."""
     emit('context.compact', summary=summary)

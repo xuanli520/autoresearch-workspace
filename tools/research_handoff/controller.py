@@ -27,9 +27,11 @@ sys.path.insert(0, str(HERE / 'core'))
 from longrun import (ControllerError, TERMINAL_STATES, append_event, apply_context_usage, atomic_json,
     begin_run, budget_view, check_storage, compact_context, epoch, file_lock, finish_active_interval,
     load_config, load_state, new_state, read_json, record_context_usage, reopen_context, safe_summary,
-    save_state, start_active_interval, state_path, utc_now, validate_config)
+    run_config, save_state, start_active_interval, state_path, utc_now, validate_config)
 from processes import boot_id, pid_matches, process_start_ticks, scope_members, signal_identity, terminate_scope
 from cleanup import cleanup_task
+from credit import partial_report, validate_evidence, validate_intervals
+from docker_network import bridge_preflight
 
 STOP_FILE = 'STOP'
 DEFAULT_STATE_DIR = '.autoresearch-controller'
@@ -56,11 +58,7 @@ def sha256(path: Path) -> str:
 
 
 def task_config(run_dir: Path) -> dict[str, Any]:
-    config = validate_config(read_json(run_dir / 'config.json'))
-    state = load_state(run_dir)
-    if sha256(run_dir / 'config.json') != state['config_sha256']:
-        raise ControllerError('frozen config changed; create a new run')
-    return config
+    return run_config(run_dir)
 
 
 def stop_reason(run_dir: Path) -> str | None:
@@ -136,6 +134,106 @@ def recover_run(run_dir: Path) -> dict:
         return recover_locked(run_dir)
 
 
+def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_turn: int,
+              reason: str, credit: dict | None = None) -> dict:
+    if not isinstance(reason, str) or not reason.strip():
+        raise ControllerError('amend requires an explicit authorization reason')
+    with file_lock(run_dir / '.controller.lock', blocking=False), file_lock(run_dir / '.state.lock'):
+        state = load_state(run_dir)
+        old = task_config(run_dir)
+        if state['config_sha256'] != expected_sha256 or state['turn']['number'] != expected_turn:
+            raise ControllerError('stale amendment; reload state before applying')
+        if (state.get('controller_pid') or state['budget'].get('active_started_at')
+                or pid_matches(state.get('guard_pid'), state.get('guard_start_ticks'), state.get('process_boot_id'))
+                or scope_members(state['turn'].get('token', ''))):
+            raise ControllerError('stop and confirm controller/guard/worker cleanup before amending')
+        if state['status'] in ('COMPLETED', 'EXPIRED') or budget_view(state)['hard_reached']:
+            raise ControllerError('cannot amend a completed or expired budget')
+        config = validate_config(config)
+        for key in ('task_id', 'root', 'workdir', 'storage', 'context'):
+            if config[key] != old[key]:
+                raise ControllerError('amend cannot change task identity, storage or context contract')
+        for key in ('mode', 'window_seconds', 'credit_policy'):
+            if config['budget'][key] != old['budget'][key]:
+                raise ControllerError('amend preserves budget mode, target and credit policy')
+        started = epoch(state['budget']['started_at'])
+        if started is None:
+            raise ControllerError('amend requires an already started run')
+        deadline = started + config['budget']['hard_limit_seconds']
+        if deadline <= time.time():
+            raise ControllerError('amended deadline must be in the future')
+        storage = check_storage(config['storage']['data_mount'], run_dir, Path(config['root']))
+        if storage != state['storage']:
+            raise ControllerError('data device changed')
+        credit = credit or {'run_id': state['run_id'], 'turns': [], 'evidence': []}
+        if credit.get('run_id') != state['run_id'] or not isinstance(credit.get('turns'), list):
+            raise ControllerError('credit audit belongs to another run or has invalid turns')
+        previous = {n for adjustment in state.get('credit_adjustments', []) for n in adjustment['turns']}
+        intervals, numbers = [], []
+        for item in credit['turns']:
+            number = item.get('turn')
+            if type(number) is not int or not 1 <= number <= expected_turn or number in previous or number in numbers:
+                raise ControllerError('duplicate, already audited or invalid credit turn')
+            exited = read_json(run_dir / 'turns' / f'{number:06d}' / 'exit.json')
+            if exited.get('credited_seconds', 0) != 0 or exited.get('credited'):
+                raise ControllerError('credit adjustment cannot recount a credited turn')
+            lower, upper = epoch(exited['started_at']), epoch(exited['ended_at'])
+            pairs = item.get('intervals')
+            if not isinstance(pairs, list):
+                raise ControllerError('credit intervals must be an array')
+            subtotal = 0
+            for pair in pairs:
+                if (not isinstance(pair, list) or len(pair) != 2
+                        or any(type(v) not in (int, float) or not math.isfinite(v) for v in pair)
+                        or not lower <= pair[0] < pair[1] <= upper):
+                    raise ControllerError('credit interval falls outside its recorded turn')
+                intervals.append(pair)
+                subtotal += pair[1] - pair[0]
+            if subtotal > exited.get('elapsed_seconds', 0) + .001:
+                raise ControllerError('credit exceeds recorded worker runtime')
+            numbers.append(number)
+        ordered = sorted(intervals)
+        if any(left[1] > right[0] for left, right in zip(ordered, ordered[1:])):
+            raise ControllerError('credit intervals overlap')
+        evidence = credit.get('evidence')
+        if not isinstance(evidence, list) or (intervals and not evidence):
+            raise ControllerError('credit requires hashed evidence')
+        try:
+            validate_evidence(evidence, config['storage']['data_mount'] or config['root'], required=bool(intervals))
+        except (OSError, ValueError, KeyError) as exc:
+            raise ControllerError(str(exc)) from exc
+        delta = sum(b - a for a, b in ordered)
+        from bundle import render
+        sources = {name: hashlib.sha256(data).hexdigest() for name, data in render().items()}
+        number = 1
+        while (run_dir / 'amendments' / f'{number:06d}').exists():
+            number += 1
+        folder = run_dir / 'amendments' / f'{number:06d}'
+        folder.mkdir(parents=True)
+        atomic_json(folder / 'previous-state.json', state)
+        atomic_json(folder / 'previous-config.json', old)
+        atomic_json(folder / 'credit-audit.json', credit)
+        atomic_json(folder / 'config.json', config)
+        relative = str((folder / 'config.json').relative_to(run_dir))
+        import datetime
+        new_deadline = datetime.datetime.fromtimestamp(deadline, datetime.timezone.utc).isoformat()
+        receipt = {'at': utc_now(), 'reason': reason, 'previous_deadline_at': state['budget']['hard_deadline_at'],
+                   'hard_deadline_at': new_deadline, 'credited_seconds_added': delta, 'turns': numbers,
+                   'previous_config_sha256': state['config_sha256'], 'config_sha256': sha256(folder / 'config.json'),
+                   'controller_release': str(HERE), 'source_sha256': sources}
+        atomic_json(folder / 'receipt.json', receipt)
+        state['budget'].update(hard_limit_seconds=config['budget']['hard_limit_seconds'], hard_deadline_at=new_deadline,
+                               active_seconds=state['budget']['active_seconds'] + delta)
+        state['paths']['config'] = relative
+        state.update(config_sha256=receipt['config_sha256'], source_sha256=sources,
+                     controller_release=str(HERE), resume_required=True)
+        state.setdefault('credit_adjustments', []).append({'path': str(folder / 'credit-audit.json'),
+            'sha256': sha256(folder / 'credit-audit.json'), 'turns': numbers, 'credited_seconds': delta})
+        save_state(run_dir, state)
+        append_event(run_dir, 'run.amended', **receipt)
+        return {'amendment': receipt, 'status': safe_summary(state)}
+
+
 class LongRunController:
     def __init__(self, run_dir: Path, *, resume=False, with_guard=True, request_id=None):
         self.run_dir = run_dir.resolve()
@@ -149,6 +247,7 @@ class LongRunController:
         self.pending_reason = None
         self.summary = None
         self.result = {}
+        self.partial_credit = {}
         self.context_reported = False
         self.offset = 0
         self.fragment = b''
@@ -225,6 +324,10 @@ class LongRunController:
 
     def start_turn(self):
         self.process = None
+        self.partial_credit = {}
+        if self.config['docker_network']['enabled']:
+            receipt = bridge_preflight(self.config['docker_network'])
+            self.event('docker.network_preflight', **receipt)
         self._context_completion_deadline = None
         self.context_guard_triggered = False
         number = self.state['turn']['number'] + 1
@@ -272,6 +375,7 @@ class LongRunController:
                   'boot_id': boot_id(), 'token': self.state['turn']['token'], 'seconds': seconds,
                   'grace_seconds': self.config['turn']['grace_seconds'],
                   'cleanup': self.config['cleanup'],
+                  'docker_network': self.config['docker_network'],
                   'hard_deadline_epoch': epoch(self.state['budget']['hard_deadline_at'])}
         atomic_json(turn_dir / 'launch.json', launch)
         with (turn_dir / 'stdout.log').open('xb') as out, (turn_dir / 'stderr.log').open('xb') as err:
@@ -321,6 +425,13 @@ class LongRunController:
                             or not isinstance(value.get('credit_evidence'), str) or not value['credit_evidence'].strip()):
                         raise ControllerError('reported credit requires finite nonnegative seconds and credit_evidence')
                 self.result = value
+            if kind == 'turn.credit':
+                seconds = value.get('credited_seconds')
+                if (not self.config['budget']['allow_partial_credit']
+                        or type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds < 0
+                        or not isinstance(value.get('credit_evidence'), str) or not value['credit_evidence'].strip()):
+                    raise ControllerError('partial credit requires explicit policy, finite seconds and evidence')
+                self.partial_credit = value
             if kind == 'turn.failed':
                 self.pending_reason = 'agent_reported_failure'
         except (ControllerError, TypeError) as exc:
@@ -545,14 +656,35 @@ class LongRunController:
             reason = 'cleanup_incomplete'
             retry_pending = False
         completed = reason == 'turn_completed'
+        partial_error = None
+        if not completed and self.config['budget']['allow_partial_credit'] and process_cleanup_ok and task_cleanup_ok:
+            report_path = self.partial_credit.get('credit_evidence') or str(Path(turn['dir']) / 'partial-credit.json')
+            if self.partial_credit or Path(report_path).is_file():
+                try:
+                    self.partial_credit = partial_report(report_path, run_id=self.state['run_id'], turn=turn['number'],
+                        lower=epoch(turn['started_at']), upper=epoch(worker.get('at')) or time.time(),
+                        maximum=worker.get('runtime_seconds', 0),
+                        allowed=self.config['storage']['data_mount'] or self.config['root'],
+                        expected_sha256=self.partial_credit.get('credit_evidence_sha256'),
+                        expected_seconds=self.partial_credit.get('credited_seconds'))
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    partial_error = str(exc)
+                    self.partial_credit = {}
+                    self.event('agent.partial_credit_rejected', error=partial_error)
         credit = self.config['budget']['credit_policy'] == 'running' or (completed and self.result.get('credit') is True)
+        partial = (not completed and bool(self.partial_credit)
+                   and self.config['budget']['allow_partial_credit']
+                   and reason in RETRYABLE_TURN_REASONS | {'operator_stop', 'hard_limit', 'context_window'}
+                   and process_cleanup_ok and task_cleanup_ok)
+        credit = credit or partial
         if reason in ('controller_lost', 'cleanup_incomplete', 'invalid_agent_event', 'context_usage_missing'):
             credit = False
         duration = worker.get('runtime_seconds', 0)
         reported = None
         if self.config['budget']['credit_policy'] == 'reported':
             observed = min(duration, max(0, time.monotonic() - self.state['budget']['active_monotonic']))
-            reported = self.result.get('credited_seconds', 0) if credit else 0
+            report = self.partial_credit if partial else self.result
+            reported = report.get('credited_seconds', 0) if credit else 0
             if reported > observed:
                 reason, credit, completed, reported, retry_pending = 'invalid_agent_event', False, False, 0, False
                 self.event('agent.credit_rejected', reported_seconds=self.result.get('credited_seconds'), observed_seconds=observed)
@@ -560,6 +692,10 @@ class LongRunController:
         turn.update(status='COMPLETED' if completed else 'STOPPED', ended_at=utc_now(), returncode=code,
                     reason=reason, elapsed_seconds=elapsed, credited=credit,
                     credited_seconds=(reported if reported is not None else elapsed) if credit else 0, result=self.result)
+        if partial:
+            turn['partial_credit'] = self.partial_credit
+        if partial_error:
+            turn['partial_credit_error'] = partial_error
         atomic_json(Path(turn['dir']) / 'exit.json', turn)
         self.save()
         self.event('turn.finished', **turn)
@@ -807,7 +943,9 @@ def doctor_run(run_dir: Path):
         for name, expected in state['source_sha256'].items():
             if sha256(HERE / name) != expected:
                 errors.append(f'source changed: {name}')
-    except (OSError, ControllerError) as exc:
+        if config['docker_network']['enabled']:
+            bridge_preflight(config['docker_network'])
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         errors.append(str(exc))
     if state.get('controller_pid') and not pid_matches(state['controller_pid'], state['controller_start_ticks'], state['process_boot_id']):
         errors.append('controller lost; recover before resuming')
@@ -868,6 +1006,9 @@ def build_parser():
     parser.add_argument('--remote', type=Path, help='SSH connection config; supervisor remains on the execution host')
     sub = parser.add_subparsers(dest='action', required=True)
     sub.add_parser('deploy', help='install a new immutable controller release using --remote')
+    network = sub.add_parser('docker-network', help='inspect default bridge; optionally repair only its missing interface')
+    network.add_argument('--config', type=Path, required=True)
+    network.add_argument('--repair', action='store_true')
     init = sub.add_parser('init'); init.add_argument('--config', type=Path, required=True); init.add_argument('--run-id', required=True)
     for name in ('start', 'run'):
         cmd = sub.add_parser(name); cmd.add_argument('--run-id', required=True)
@@ -882,6 +1023,10 @@ def build_parser():
     cmd.add_argument('--interval', type=float, default=5); cmd.add_argument('--seconds', type=float); cmd.add_argument('--json', action='store_true')
     cmd = sub.add_parser('stop'); cmd.add_argument('--run-id', required=True); cmd.add_argument('--reason', required=True)
     cmd.add_argument('--no-signal', action='store_true')
+    cmd = sub.add_parser('amend'); cmd.add_argument('--run-id', required=True)
+    cmd.add_argument('--config', type=Path, required=True); cmd.add_argument('--credit-file', type=Path)
+    cmd.add_argument('--expected-config-sha256', required=True); cmd.add_argument('--expected-turn', type=int, required=True)
+    cmd.add_argument('--reason', required=True)
     cmd = sub.add_parser('logs'); cmd.add_argument('--run-id', required=True)
     cmd.add_argument('--stream', choices=('stdout', 'stderr', 'controller', 'guard', 'events'), default='stderr')
     cmd.add_argument('--bytes', type=int, default=16384)
@@ -903,6 +1048,9 @@ def build_parser():
 def dispatch(args, *, remote_payload=None):
     if args.action == 'deploy':
         raise ControllerError('deploy requires --remote')
+    if args.action == 'docker-network':
+        config = remote_payload['network_config'] if remote_payload else read_json(args.config)
+        return bridge_preflight(config, repair=args.repair), 0
     state_dir = Path(args.state_dir or DEFAULT_STATE_DIR).expanduser().resolve()
     run_dir = state_path(state_dir, args.run_id)
     if args.action == 'init':
@@ -917,6 +1065,11 @@ def dispatch(args, *, remote_payload=None):
         result = doctor_run(run_dir); return result, 0 if result['ok'] else 1
     if args.action == 'stop': return operator_stop(run_dir, args.reason, signal_controller=not args.no_signal), 0
     if args.action == 'recover': return recover_run(run_dir), 0
+    if args.action == 'amend':
+        config = remote_payload['config'] if remote_payload else load_config(args.config)
+        credit = remote_payload.get('credit') if remote_payload else read_json(args.credit_file) if args.credit_file else None
+        return amend_run(run_dir, config, expected_sha256=args.expected_config_sha256,
+                         expected_turn=args.expected_turn, reason=args.reason, credit=credit), 0
     if args.action == 'guard': return None, guard_loop(run_dir, args.attempt)
     if args.action == 'watch':
         if not .05 <= args.interval <= 3600 or args.seconds is not None and not 0 < args.seconds <= 43200:

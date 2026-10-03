@@ -8,5 +8,5 @@
   "launch_scope": "No formal research agent or cloud GPU run launched; local simulated fault tests and demo only.",
   "local_smoke_performed": true,
   "platform": "linux-pidfd",
-  "notes": "Generic local smoke and cloud-resident SSH control plane. No sol/seed, Docker, Harbor, model, metric, or task adapter assumptions. Cloud GPU, provider cleanup, VRAM enforcement, Harbor evidence and scientific validity require separate task/provider acceptance."
+  "notes": "Generic SSH control plane, native-session research interval auditor and hashed partial-credit/amendment contracts. Optional Harbor Docker provider builds on the default bridge and enforces namespace-local Agent egress. No task/model/GPU address assumptions. Real cloud network, external cleanup, VRAM and scientific validity require target acceptance."
 }

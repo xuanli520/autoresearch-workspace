@@ -20,7 +20,10 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from processes import boot_id, pid_matches
+try:
+    from .processes import boot_id, pid_matches
+except ImportError:
+    from processes import boot_id, pid_matches
 
 
 SCHEMA_VERSION = 2
@@ -34,6 +37,10 @@ TERMINAL_STATES = frozenset({"COMPLETED", "STOPPED", "FAILED", "EXPIRED"})
 DEFAULT_CONTEXT_MAX_TOKENS = 150_000
 DEFAULT_CONTEXT_COMPACT_AT_TOKENS = 120_000
 DEFAULT_CONTEXT_RESERVE_TOKENS = 16_384
+# A model turn is allowed to run for 90 minutes by default.  Task adapters may
+# choose a shorter value for probes, but the generic contract never defaults
+# to the old 55-minute Harbor limit.
+DEFAULT_TURN_SECONDS = 5_400
 
 
 class ControllerError(ValueError):
@@ -94,7 +101,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(config, dict) or type(config.get("version")) is not int or config["version"] != 1:
         raise ControllerError("config requires version=1")
     allowed = {"version", "task_id", "root", "workdir", "command", "env", "budget", "turn",
-               "context", "heartbeat", "policy", "output", "storage", "cleanup"}
+               "context", "heartbeat", "policy", "output", "storage", "cleanup", "docker_network"}
     unknown = set(config) - allowed
     if unknown:
         raise ControllerError(f"unknown config fields: {sorted(unknown)}; use --remote for SSH control")
@@ -125,21 +132,23 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ControllerError("env requires valid string keys/values; AUTORESEARCH_* is reserved")
     budget = section("budget", {"mode": "active", "window_seconds": 39600,
                                 "hard_limit_seconds": 43200, "credit_policy": "running",
-                                "allow_extended_hard_limit": False})
+                                "allow_extended_hard_limit": False, "allow_partial_credit": False})
     window = positive_number(budget["window_seconds"], "budget.window_seconds")
     hard = positive_number(budget["hard_limit_seconds"], "budget.hard_limit_seconds")
     if type(budget["allow_extended_hard_limit"]) is not bool:
         raise ControllerError("budget.allow_extended_hard_limit must be boolean")
+    if type(budget["allow_partial_credit"]) is not bool or (budget["allow_partial_credit"] and budget["credit_policy"] != "reported"):
+        raise ControllerError("budget.allow_partial_credit requires boolean and reported credit policy")
     hard_cap = 86400 if budget["allow_extended_hard_limit"] else 43200
     if not window <= hard <= hard_cap:
         raise ControllerError(f"0 < window_seconds <= hard_limit_seconds <= {hard_cap} is required")
     if budget["mode"] not in ("active", "wall") or budget["credit_policy"] not in ("running", "successful_turn", "reported"):
         raise ControllerError("invalid budget mode/credit_policy")
     budget.update(window_seconds=window, hard_limit_seconds=hard)
-    turn = section("turn", {"seconds": min(5400, hard), "grace_seconds": 1})
+    turn = section("turn", {"seconds": min(DEFAULT_TURN_SECONDS, hard), "grace_seconds": 1})
     turn["seconds"] = positive_number(turn["seconds"], "turn.seconds")
     turn["grace_seconds"] = finite_number(turn["grace_seconds"], "turn.grace_seconds")
-    if turn["seconds"] > min(5400, hard) or turn["grace_seconds"] > 30:
+    if turn["seconds"] > min(DEFAULT_TURN_SECONDS, hard) or turn["grace_seconds"] > 30:
         raise ControllerError("turn.seconds must be <= 5400 and fit hard limit; grace_seconds must be <= 30")
     context = section("context", {"max_tokens": DEFAULT_CONTEXT_MAX_TOKENS,
         "compact_at_tokens": DEFAULT_CONTEXT_COMPACT_AT_TOKENS,
@@ -180,9 +189,17 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     cleanup['timeout_seconds'] = positive_number(cleanup['timeout_seconds'], 'cleanup.timeout_seconds')
     if cleanup['timeout_seconds'] > 30:
         raise ControllerError('cleanup.timeout_seconds must be <= 30')
+    try:
+        try:
+            from .docker_network import validate_network_config
+        except ImportError:
+            from docker_network import validate_network_config
+        network = validate_network_config(config.get('docker_network', {}))
+    except (ValueError, TypeError) as exc:
+        raise ControllerError(str(exc)) from exc
     return dict(version=1, task_id=task, root=root, workdir=workdir, command=list(command), env=dict(env),
                 budget=budget, turn=turn, context=context, heartbeat=heartbeat, policy=policy, output=output,
-                storage=storage, cleanup=cleanup)
+                storage=storage, cleanup=cleanup, docker_network=network)
 
 
 def check_storage(mount: str | None, *paths: Path) -> dict[str, Any]:
@@ -358,6 +375,17 @@ def load_state(run_dir: Path) -> dict[str, Any]:
     return state
 
 
+def run_config(run_dir: Path, state: dict[str, Any] | None = None) -> dict[str, Any]:
+    state = state or load_state(run_dir)
+    relative = _relative_path(state.get('paths', {}).get('config', 'config.json'), 'paths.config')
+    path = (Path(run_dir) / relative).resolve(strict=True)
+    if not path.is_relative_to(Path(run_dir).resolve()):
+        raise ControllerError('run config escaped run directory')
+    if hashlib.sha256(path.read_bytes()).hexdigest() != state['config_sha256']:
+        raise ControllerError('frozen config changed; use an authorized amendment')
+    return validate_config(read_json(path))
+
+
 def append_event(run_dir: Path, event: str, **fields: Any) -> dict[str, Any]:
     record = {"at": utc_now(), "event": event, **fields}
     run_dir = Path(run_dir)
@@ -465,7 +493,7 @@ def _rotate_context(run_dir: Path, summary: str, *, reason: str, conversation_id
     ownership = contextlib.nullcontext() if controller_owned else file_lock(run_dir / ".controller.lock", blocking=False)
     with ownership, file_lock(run_dir / ".state.lock"):
         state = load_state(run_dir)
-        cfg = validate_config(read_json(run_dir / "config.json"))
+        cfg = run_config(run_dir, state)
         ctx = state["context"]
         if ctx["generation"] != expected_generation:
             raise ControllerError("stale generation: reload context status before rotating")
@@ -564,7 +592,7 @@ def record_context_usage(run_dir: Path, used_tokens: int, *, generation: int,
     auto_compact = False
     with file_lock(run_dir / ".controller.lock", blocking=False), file_lock(run_dir / ".state.lock"):
         state = load_state(run_dir)
-        config = validate_config(read_json(run_dir / "config.json"))
+        config = run_config(run_dir, state)
         if state.get("controller_pid") or state["status"] in TERMINAL_STATES:
             raise ControllerError("stop/recover the controller before reporting context")
         result = apply_context_usage(state, used_tokens, generation=generation, input_tokens=input_tokens,

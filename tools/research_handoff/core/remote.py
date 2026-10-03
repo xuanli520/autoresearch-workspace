@@ -153,9 +153,11 @@ def remote_dispatch(args):
     values = {name: str(value) if isinstance(value, Path) else value for name, value in vars(args).items()}
     values.update(remote=None, state_dir=cfg['state_dir'])
     payload = {'args': values, 'data_mount': cfg['data_mount']}
+    if args.action == 'docker-network':
+        payload['network_config'] = read_json(args.config)
     if args.action == 'start':
         values['background'] = True
-    if args.action == 'init':
+    if args.action in ('init', 'amend'):
         config = validate_config(read_json(args.config))
         if not Path(config['root']).is_absolute():
             raise ControllerError('remote task root must be absolute')
@@ -163,6 +165,10 @@ def remote_dispatch(args):
             raise ControllerError('task and connection data_mount differ')
         config['storage']['data_mount'] = cfg['data_mount']
         payload['config'] = config
+        if args.action == 'amend' and args.credit_file:
+            if args.credit_file.stat().st_size > 1048576:
+                raise ControllerError('credit file exceeds 1 MiB')
+            payload['credit'] = read_json(args.credit_file)
     if args.action == 'context' and args.context_action in ('compact', 'reopen'):
         if args.summary_file.stat().st_size > 131072:
             raise ControllerError('summary file too large')

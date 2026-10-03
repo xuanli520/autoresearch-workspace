@@ -10,6 +10,8 @@
 
 **执行端要求 Linux 5.3+、Python 3.10+、可读取同用户 `/proc`、支持 pidfd；仅用 Python 标准库。** 控制器源码版本与配置在 `init` 时记录哈希，正在运行的版本应使用独立发布目录。当前状态 schema 为 2，配置 version 为 1。
 
+默认单轮为 90 分钟（5400 秒），所有模型一致。适配器必须从本轮 `launch.json.seconds` 读取实际限额并传给 Harbor/provider；它可能因父级余额而更短，不能另写固定的 3300 秒时限。
+
 ## 从本地控制云端
 
 controller、guard、worker 和原始日志全部常驻执行主机。SSH 只承载短控制请求，本地终端或 SSH 断开不影响已经启动的云端任务。重新打开终端后，使用相同连接配置和 run-id 查询即可。
@@ -75,6 +77,38 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 单调时钟控制执行间隔，绝对截止与单调时间取更严格者。停止、压缩等待、恢复均不延后截止；系统重启后旧 run 到期，不凭跨 boot 的计时推断信用。`successful_turn` 在完整轮结束判断目标，可超过目标到当前轮结束，但绝不突破硬截止。worker 到期立即取消计算；内核调度和进程回收存在少量延迟，外部资源取消另有有界超时。
 
 `reported` 适合由任务原始事件独立审计有效时间的适配器。`turn_complete(credit=True, credited_seconds=..., credit_evidence=...)` 只报告该轮新增信用，不重复提交历史结转；将目标设为原目标减去已核验结转。排队、安装、基础设施故障和其他排除区间由适配器记在证据中；控制器校验数值边界，不自行判断证据是否构成科研闭环。
+
+显式启用 `budget.allow_partial_credit: true`（仅限 `reported`）后，失败或超时轮可另记研究信用，轮次失败原因和分数保持真实。可信宿主适配器的 cleanup hook 在回收资源后写 `turn_dir/partial-credit.json`：`version:1`、`run_id`、`turn`、`intervals:[[UTC_epoch_start,UTC_epoch_end]]`、`credited_seconds`、`evidence:[{path,sha256}]`。控制器核对本轮身份、区间边界、不重叠、总秒数及可信宿主原件哈希；报告不能超过 worker runtime。可用 `turn.credit` 提前提供该报告路径/哈希，但清理完成后仍重新验证。原生会话审计可复用 `core/research_time.py`，由题目回调核对真实 GPU 反馈；未结束工具调用、排队、安装和故障等排除区间必须留证，信用不代表完整评分闭环。
+
+已停止且确认 controller/guard/worker 均回收的 run，可通过 `amend` 切换不可变发布、配置和历史信用审计。命令需要当前 `--expected-config-sha256`、`--expected-turn` 及非空授权理由；身份、起点、目标和上下文不变，旧配置、状态、原始 exit 不覆盖，修订收据保存在 `amendments/NNNNNN/`。历史审计只补原零信用且未调整过的轮次，拒绝重计。截止修改须在原预算到期前执行并有明确用户授权；默认上限仍为 12h，工具可在显式例外授权下启用 `allow_extended_hard_limit`，最高 24h。
+
+```bash
+python3 -B controller.py --remote connection.json amend --run-id trial-01 \
+  --config amended-controller.json --credit-file historical-credit.json \
+  --expected-config-sha256 <current-sha256> --expected-turn <current-turn> \
+  --reason "用户授权暂停迁移与历史信用修订"
+python3 -B controller.py --remote connection.json start --run-id trial-01 --resume --background
+```
+
+## Docker 构建与运行网络
+
+可选 `providers.harbor_docker.ManagedDockerEnvironment` 统一提供 Harbor Docker 网络边界。构建使用 BuildKit 支持的 `build.network: default`（Docker 默认网桥）；不要写 `bridge`，该值会被当前 BuildKit 拒绝。运行时主容器共享 Harbor egress sidecar 的网络命名空间；只允许配置中固定 IP 的模型 HTTPS 443，普通外网、DNS、宿主网关和其他容器地址被拒绝。无模型通道时采用 `NO_NETWORK`，独立 `tests/` verifier 使用 `network_mode: none`。solver 无 NET_ADMIN、无任意 sudo、无 Docker socket是题包必须提供的配套权限边界。provider 不改宿主全局防火墙。
+
+控制器配置增加：
+
+```json
+"docker_network": {
+  "enabled": true,
+  "docker_host": "unix:///var/run/docker.sock",
+  "build_network": "default",
+  "runtime_mode": "isolated",
+  "model_host_addresses": {"model.example.com": "203.0.113.8"}
+}
+```
+
+Harbor `environment.import_path` 指向 `tools.research_handoff.providers.harbor_docker:ManagedDockerEnvironment`，`kwargs.network_config` 传本轮 `launch.json.docker_network`，`kwargs.ownership_root` 指向可信数据盘归属目录。该 provider 依赖已验收的 Harbor Docker API；普通 CPU 控制器不导入 Harbor。任务多服务自定义网络须另行验收，不能据主容器隔离推断所有 side service 都隔离。
+
+`doctor` 和每轮启动前核对 Docker 的默认 bridge 元数据、实际内核桥接口及网关。网桥丢失会阻断启动而非连续产生模型空转轮。`docker-network --config network.json` 是只读预检；`--repair` 仅在默认桥无附着容器且内核接口确实缺失时补建该接口、其原网关和 MTU，不重启公共 daemon、不替换防火墙规则。预检不代替真实构建、模型允许访问和普通外网拒绝探针。
 
 成功轮可在冻结配置的同一预算内续轮。进程非零退出、worker 意外退出、显式 `turn.failed`、缺少完成事件/上下文报告、心跳丢失、worker 错误及单轮超时默认持续重试，不设次数上限；每次失败 attempt 独立留档且不获得成功轮信用。清理钩子收到 `AUTORESEARCH_RETRY_PENDING=1` 时应保留跨轮运行资源，仅清理本轮资源。人工停止、预算或硬截止、guard 丢失、存储/挂载异常、清理失败及其他不可恢复错误不会重试，并按合同收尾。研究排队、工具阻塞等轮内细分、可信评分和 QA16 科研有效时间仍需任务适配器另留证据；进程活动秒数不自动等于科研有效时间。
 
