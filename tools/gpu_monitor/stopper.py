@@ -21,24 +21,12 @@ def identity(pid):
 def request_stop(task, reason, dry_run):
     spec = task.get('stop')
     if not spec:
-        raise ValueError('task has no explicit stop contract; configure its controller first')
+        raise ValueError('task has no custom stop contract; use the official controller')
+    raise ValueError('custom stop contracts are unsupported; use the official controller')
+
     root = Path(task['root']).resolve()
     receipt = {'task': task['id'], 'time': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                'reason': reason, 'dry_run': dry_run, 'mode': spec['mode'], 'training_stopped_confirmed': False}
-    if spec['mode'] == 'marker':
-        marker = (root / spec['path']).resolve()
-        if not marker.is_relative_to(root) or not marker.parent.is_dir():
-            raise ValueError('stop marker must have an existing parent inside task root')
-        receipt['marker'] = str(marker)
-        receipt['already_exists'] = marker.exists()
-        if not dry_run and not marker.exists():
-            # A single small write; O_EXCL preserves the first request as evidence.
-            with marker.open('x') as f:
-                f.write(json.dumps(receipt) + '\n')
-        receipt['result'] = 'WOULD_REQUEST_STOP' if dry_run else 'STOP_REQUESTED'
-        return receipt
-    if spec['mode'] != 'process_groups':
-        raise ValueError('unknown stop mode')
     checked = []
     for target in spec['targets']:
         if target.get('pid_file'):

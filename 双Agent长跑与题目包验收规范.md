@@ -12,7 +12,7 @@
 |---|---|---|
 | Agent 启停、续轮、上下文交接、硬截止、独立 guard | [research_handoff](tools/research_handoff/README.md)：`controller.py` | 每组独立 run-id、配置、状态和退出证据；本地 CLI 控制执行主机常驻进程 |
 | GPU 准入、排队、等待、取消与执行器回收 | [gpu_scheduler](tools/gpu_scheduler/README.md)：CLI、`Client` / `RemoteClient` | GPU 训练、评分和复验统一入队，默认阻塞 `submit` |
-| 主机资源、活动登记、只读巡检与归档 | [gpu_monitor](tools/gpu_monitor/README.md)：`monitor.py` / `registry.py` | 不启动、不恢复、不重试研究；run 和 job 仍由各自官方工具查询 |
+| 主机资源、活动登记、只读巡检与归档 | [gpu_monitor](tools/gpu_monitor/README.md)：`monitor.py` / `registry.py` | 只读聚合已登记的官方 run/job；不启动、不恢复、不重试研究；run 和 job 仍由各自官方工具查询 |
 | 模型研究、Harbor 与可信评分 | 实际可用的模型/Harness、Harbor 和题目薄适配器 | 只连接模型、合法候选、评分、事件、计时和资源取消，不复制控制状态机 |
 | 内容和材料 QA | [总体 QA](materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md)、[Baseline QA](materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md) | 使用时先读 Skill，按真实接口只读检查；静态通过不代替动态运行 |
 
@@ -101,6 +101,14 @@ python3 -B tools/research_handoff/controller.py --remote <connection.json> statu
 ## 6. 监护、重试与异常接管
 
 controller/guard 执行预算和保护，GPU 服务管理作业，monitor 默认每 60 秒合并只读采集。记录采样间隙、最后进展和有界日志尾部，不重复拉完整模型；停止采集不停止研究。新控制器不能套用旧 supervisor 的 Sol/Seed 状态字段或 STOP 路径，适配缺失保留未知，用官方 `status/watch/doctor` 查实际状态。
+
+长时间 Agent 的统一监护入口是：
+
+```text
+python3 -B tools/gpu_monitor/monitor.py watch --view agents --interval 60 --max-hours 12
+```
+
+该视图只聚合登记表中可回查的 `research_handoff` `run_id` 与 `gpu_scheduler` `job_id`/`request_id`，不会自动发现未登记任务。停止任务时仍须调用对应官方 `controller stop` 或 scheduler `cancel`，并把上述轮询命令告知接管者。`marker`、`process_groups` 和其他自定义兼容任务语义已删除；旧登记必须先修订并通过 `validate`，不能用监控器恢复旧停止路径。
 
 完成登记和只读查询后，使用官方后台采集入口；按实际范围指定 `--task`，查询和停止采集时使用同一范围。采集寿命不代替训练硬截止。
 

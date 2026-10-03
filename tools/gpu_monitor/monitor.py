@@ -201,6 +201,23 @@ def load_config(path, auth=None):
         if not re.fullmatch(r'[\w.-]+', task['id']) or task['id'] in ids:
             raise ValueError('task IDs must be unique simple names')
         ids.add(task['id'])
+        # Every registered long-running agent has one official lifecycle
+        # identity.  Compatibility stop markers are intentionally rejected;
+        # they made the same task represent two different control contracts.
+        controller = task.get('controller')
+        scheduler = task.get('scheduler')
+        if controller is not None:
+            if not isinstance(controller, dict) or controller.get('type') != 'research_handoff' or not controller.get('run_id'):
+                raise ValueError(f"{task['id']}: controller must be research_handoff with run_id")
+        if scheduler is not None:
+            if not isinstance(scheduler, dict) or scheduler.get('type') != 'gpu_scheduler':
+                raise ValueError(f"{task['id']}: scheduler must be gpu_scheduler")
+            job_ids = scheduler.get('job_ids', scheduler.get('job_id', scheduler.get('request_ids', scheduler.get('request_id'))))
+            if isinstance(job_ids, str):
+                job_ids = [job_ids]
+            if not isinstance(job_ids, list) or not job_ids or not all(isinstance(j, str) and j for j in job_ids):
+                raise ValueError(f"{task['id']}: scheduler requires job_id or nonempty job_ids")
+            scheduler['job_ids'] = job_ids
         if task['host'] not in cfg['hosts'] or not Path(task['root']).is_absolute():
             raise ValueError(f"{task['id']}: unknown host or nonabsolute root")
         paths = [task[k]['path'] for k in ('status', 'exit', 'launch', 'deadline_file') if task.get(k)]
@@ -211,20 +228,7 @@ def load_config(path, auth=None):
                 paths.append(selector['pid_file'])
         stop = task.get('stop')
         if stop:
-            if stop['mode'] == 'marker':
-                paths.append(stop['path'])
-            elif stop['mode'] == 'process_groups':
-                if not stop.get('targets'):
-                    raise ValueError('stop targets cannot be empty')
-                for target in stop['targets']:
-                    if not target.get('contains') or not target.get('cwd'):
-                        raise ValueError('stop targets require contains and cwd')
-                    if target.get('pid_file'):
-                        paths.append(target['pid_file'])
-                    elif not isinstance(target.get('pid'), int) or target['pid'] <= 1:
-                        raise ValueError('stop target requires a valid PID or PID file')
-            else:
-                raise ValueError('stop mode must be marker or process_groups')
+            raise ValueError(f"{task['id']}: custom stop contracts are unsupported; use the official controller")
         stream_ids = set()
         for stream in task.get('streams', []):
             if stream['id'] in stream_ids:
@@ -398,6 +402,16 @@ def probe_host(host, tasks, cfg):
 
 
 def stop_task(cfg, task, reason, dry_run, state):
+    monitor_cmd = f"python3 tools/gpu_monitor/monitor.py watch --view agents --task {task['id']}"
+    if not task.get('controller') and not task.get('scheduler'):
+        raise ValueError(f"{task['id']}: stopping requires an official controller registration")
+    if not task.get('stop'):
+        print(dump({'task': task['id'], 'result': 'OFFICIAL_STOP_REQUIRED',
+                    'reason': reason, 'dry_run': dry_run,
+                    'advice': '请调用 research_handoff stop 或 gpu_scheduler cancel；监控器保持只读。',
+                    'monitor_command': monitor_cmd}))
+        print('停止后轮询监控命令: ' + monitor_cmd)
+        return 2
     host = cfg['hosts'][task['host']]
     code = (HERE / 'stopper.py').read_text() + '\nprint(json.dumps(request_stop(json.loads(' + repr(json.dumps(task)) + '), ' + repr(reason) + ', ' + repr(dry_run) + ')))\n'
     if host.get('transport', 'ssh') == 'local':
@@ -424,6 +438,9 @@ def stop_task(cfg, task, reason, dry_run, state):
     with (state / 'stop-requests.jsonl').open('a') as f:
         f.write(dump(receipt) + '\n')
     print(dump(receipt))
+    # Stopping a task should leave operators with the one canonical read-only
+    # command needed to confirm the controller's eventual terminal state.
+    print('停止后轮询监控命令: ' + monitor_cmd)
     return 1 if failed else 0
 
 
@@ -690,8 +707,37 @@ def snapshot(cfg, previous=None):
                          'running_tasks': running, 'unknown_processes': unknown})
         host_views[name] = {'state': 'OK', 'gpu_count': len(gpus), 'gpus': gpus,
                             'process_query_error': raw.get('gpu_processes', {}).get('error')}
+    agents = aggregate_agents(evaluated)
     return {'schema_version': 1, 'collected_at': utc(), 'read_only': True,
-            'hosts': host_views, 'tasks': evaluated}
+            'hosts': host_views, 'tasks': evaluated, 'agents': agents}
+
+
+def aggregate_agents(tasks):
+    """Build the official-controller view from one probe snapshot.
+
+    This is deliberately a pure projection: lifecycle state still comes from
+    the registered task probe, while controller/scheduler identities are
+    retained as provenance for operators and machine consumers.
+    """
+    agents = []
+    for task in tasks:
+        controller = task.get('controller')
+        scheduler = task.get('scheduler')
+        if controller is None and scheduler is None:
+            continue
+        identity = {}
+        if controller is not None:
+            identity['controller'] = {'type': 'research_handoff', 'run_id': controller.get('run_id')}
+        if scheduler is not None:
+            ids = scheduler.get('job_ids', scheduler.get('job_id', []))
+            identity['scheduler'] = {'type': 'gpu_scheduler', 'job_ids': [ids] if isinstance(ids, str) else list(ids or [])}
+        agents.append({
+            'id': task['id'], 'label': task.get('label', task['id']), 'host': task.get('host'),
+            'state': task.get('state', 'UNKNOWN'), 'observed_at': task.get('observed_at'),
+            'alerts': list(task.get('alerts', [])), 'processes': task.get('processes', []),
+            **identity,
+        })
+    return agents
 
 
 def atomic_json(path, value):
@@ -798,6 +844,7 @@ def render_tasks(data, color='auto'):
     rule = colors.dim('─' * min(max(width, 48), 96))
     tasks = data.get('tasks', [])
     print()
+
     print(colors.bold(colors.blue('AutoResearch GPU 任务详情')))
     print(colors.dim(f"采集时间 {data.get('collected_at', '?')}   只读模式   任务 {len(tasks)} 个"))
     print(rule)
@@ -845,6 +892,27 @@ def render_tasks(data, color='auto'):
                     print(colors.yellow(line))
         if index != len(tasks) - 1:
             print(rule)
+    print()
+
+
+def render_agents(data, color='auto'):
+    """Render the official research_handoff/gpu_scheduler task registry."""
+    colors = Colors(_color_enabled(color))
+    agents = data.get('agents') or aggregate_agents(data.get('tasks', []))
+    print()
+    print(colors.bold(colors.blue('AutoResearch 官方长时间 Agent 总览')))
+    print(colors.dim(f"采集时间 {data.get('collected_at', '?')}   只读模式   Agent {len(agents)} 个"))
+    for agent in agents:
+        state = _state_style(colors, agent.get('state', 'UNKNOWN'))
+        refs = []
+        if agent.get('controller'):
+            refs.append(f"research_handoff:{agent['controller'].get('run_id')}")
+        if agent.get('scheduler'):
+            refs.append('gpu_scheduler:' + ','.join(agent['scheduler'].get('job_ids', [])))
+        print(f"  {colors.bold(agent.get('id', '?'))}  {state}  主机 {agent.get('host', '?')}")
+        print(f"    官方身份  {'; '.join(refs) or '?'}   进程 {len(agent.get('processes', []))} 个")
+        if agent.get('alerts'):
+            print(colors.yellow('    告警  ' + ' '.join(agent['alerts'])))
     print()
 
 
@@ -939,6 +1007,8 @@ def render(data, color='auto', view='gpu'):
     """Render a human view; ``gpu`` is the default and ``tasks`` is diagnostic."""
     if view == 'tasks':
         return render_tasks(data, color)
+    if view == 'agents':
+        return render_agents(data, color)
     return render_gpu(data, color)
 
 
@@ -960,7 +1030,7 @@ def refresh_auth(cfg, auth_path):
         cfg['hosts'][name] = apply_auth(host, auth)
 
 
-def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None, auth_path=None):
+def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None, auth_path=None, view='gpu'):
     state.mkdir(parents=True, exist_ok=True)
     with (state / 'watch.lock').open('a') as lock:
         try:
@@ -982,7 +1052,7 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
                 previous = load_latest(state)
                 data = snapshot(cfg, previous)
                 persist(state, data, previous)
-                render(data)
+                render(data, view=view)
                 count += 1
                 info.update(last_poll_at=data['collected_at'], polls=count)
                 atomic_json(state / 'watch.json', info)
@@ -1030,7 +1100,7 @@ def main():
                    help='凭据文件，默认工作区根目录 auth.txt（可用 AUTORESEARCH_AUTH_FILE 覆盖）')
     p.add_argument('--task', action='append', help='task ID; repeat to select several')
     p.add_argument('--json', action='store_true', help='machine-readable output')
-    p.add_argument('--view', choices=['gpu', 'tasks'], default='gpu',
+    p.add_argument('--view', choices=['gpu', 'tasks', 'agents'], default='gpu',
                    help='human view: GPU ownership summary (default) or task details')
     p.add_argument('--color', choices=['auto', 'always', 'never'], default='auto',
                    help='terminal colors for human output; JSON is never colored')
@@ -1080,7 +1150,7 @@ def main():
             if not cfg['tasks']:
                 print('没有活动任务，无需启动监控器。')
                 return 0
-            watch(cfg, state, interval, hours, a.max_polls, a.until_terminal, a.token, auth_path)
+            watch(cfg, state, interval, hours, a.max_polls, a.until_terminal, a.token, auth_path, a.view)
         elif a.action == 'monitor-status':
             info = json.loads((state / 'watch.json').read_text()) if (state / 'watch.json').exists() else {}
             print(dump({'collector_alive': monitor_alive(state), 'watch': info, 'state_dir': str(state)}))
@@ -1102,7 +1172,7 @@ def main():
             token = uuid.uuid4().hex
             command = [sys.executable, '-u', str(Path(__file__).resolve()), 'watch', '--config', str(a.config.resolve()),
                        '--auth', str(auth_path),
-                       '--interval', str(interval), '--max-hours', str(hours), '--token', token]
+                       '--interval', str(interval), '--max-hours', str(hours), '--token', token, '--view', a.view]
             for task_id in a.task or []:
                 command += ['--task', task_id]
             if a.until_terminal:

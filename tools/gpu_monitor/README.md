@@ -2,9 +2,11 @@
 
 本工具是正式双 Agent 长跑的受管巡检/登记入口，不另造轮询守护脚本。整体运行、OOM/无进展判断和资源边界见 [统一规范](../../双Agent长跑与题目包验收规范.md)，日志归档与临时文件规则见 [目录治理](../../notes/长程Agent脚本与目录治理.md)。监控观察不等于科研有效时间、GPU硬限额执行或平台验收。
 
+登记表只接受官方任务身份：`research_handoff` 的 `run_id` 与 `gpu_scheduler` 的 `job_id`/`request_id` 必须可回查。监控是只读聚合视图，不启动、恢复、重试、追加训练或自行解释控制器状态；任务停止仍由对应官方控制器执行。旧 `marker`、进程组和自定义停止合同不再是兼容入口，遇到这些字段应先修订登记并通过 `validate`。
+
 共享 GPU 最新要求：在不影响他人的前提下继续自己的训练，其他计算进程出现本身不触发停训；监控只记录占用/余量/负载，不自动发停止指令。真正安全风险、用户停止和预算到期由对应任务合同处理，不干预他人。
 
-用于专家和协作 Agent 在多个题目、多个 SSH 云主机间查询、轮询和接管任务。默认 **60 秒轮询、GPU 资源总览＋严格 JSON、轻量本地记录**：先显示主机数、GPU 数量，再按 GPU 显示显存/利用率/温度、已识别运行任务和未归属进程。只有手动调用 `stop-task` 才会写远端停止标记或发送定向 TERM。监控不启动、恢复、重试或追加训练。
+用于专家和协作 Agent 在多个题目、多个 SSH 云主机间查询、轮询和接管任务。默认 **60 秒轮询、GPU 资源总览＋严格 JSON、轻量本地记录**：先显示主机数、GPU 数量，再按 GPU 显示显存/利用率/温度、已识别运行任务和未归属进程。只有手动调用 `stop-task` 才会向登记的官方控制器提交定向停止请求。监控不启动、恢复、重试或追加训练。
 
 依赖：本地和远端 Linux、Python **3.9+** 标准库；SSH 主机需 `ssh`，GPU 遥测使用已有 `nvidia-smi`。无需安装监控服务、修改训练器、安装 Python 包或上传脚本文件。只读探针通过 SSH 标准输入运行，一台主机每轮一次连接；多个主机并发查询。
 
@@ -33,6 +35,9 @@ python3 tools/gpu_monitor/monitor.py status --task <task-id> --json --check
 
 # 前台轮询；Ctrl-C 只结束本地监控。
 python3 tools/gpu_monitor/monitor.py watch
+
+# 持续轮询所有已登记的官方长时间 Agent 任务；Ctrl-C 只结束本地监控。
+python3 tools/gpu_monitor/monitor.py watch --view agents --interval 60 --max-hours 12
 
 # 启动／维持后台只读监控，默认最长 24h。重复调用不会启动同目录的第二个监控器。
 python3 tools/gpu_monitor/monitor.py maintain
@@ -98,20 +103,11 @@ python3 tools/gpu_monitor/monitor.py stop-task --task <task-id> \
 python3 tools/gpu_monitor/monitor.py status --task <task-id>
 ```
 
-必须指定恰好一个 `--task` 和非空 `--reason`。配置没有 `stop` 合同时拒绝执行；`--dry-run` 可先审查。
-
-| 停止模式 | 执行和边界 |
-|---|---|
-| `marker` | 在任务根内创建预先约定的停止标记，已有标记保留；由原控制器停止自己的任务。控制器若已退出，标记本身不会清理孤儿进程。 |
-| `process_groups` | 按声明的 PID／launch 文件、命令特征、cwd、PGID=PID、可选 `start_ticks` 核验全部目标后，仅向这些组发送 CONT、TERM；发送前重验身份。身份不符拒绝操作，不使用全局 pkill、不自动 KILL。 |
-
-新任务使用官方 research_handoff 的 stop 接口；下述 marker/process_groups 仅适用于已验证的兼容登记，不能为接入 monitor 另造控制器或假设官方控制器识别历史 STOP 路径。使用进程组时需要独立会话／进程组，并在配置中列全会派生新进程组的控制器；子进程若自行脱离该组，TERM 不能覆盖它，必须另登记。Linux 进程组与路径检查是操作保护，不是恶意多用户安全沙箱；发信号与进程退出存在系统级竞态，必须复查。具有串行后续任务的 supervisor 应优先停止其整体调度合同，再复查各方法进程。
-
-停止合同只作用于配置中已核验的 task/job 和其声明的进程组；历史 PID 不适用于替代接管器。监控与停止记录都不能取代原实验的独立 watchdog。
+必须指定恰好一个 `--task` 和非空 `--reason`。停止请求只转交该任务登记的官方 `research_handoff stop` 或 `gpu_scheduler cancel` 合同；没有官方合同时拒绝执行。`--dry-run` 只能审查归属，不会写远端文件或发信号。发送请求不等于训练已退出，随后必须用同一任务范围执行 `status` 或 `watch --view agents` 复核。
 
 ## 保持 tasks.json 只包含当前任务
 
-`tasks.json` 是活动登记表。每次新增/接续运行，登记新的 run ID、真实进程、预算模式/有效目标（或兼容墙钟截止）和当前容器归属；同一研究 Agent 保留一个当前条目，两组按各自官方 run-id 分开登记。停止使用该 run 的 controller stop；只有旧登记确实使用并验证过 marker 时才保留原 STOP 路径，不把历史 sol/seed/STOP 套到新控制器。任务独立移交到新 run 后，更新对应模型的条目；不要继续监控旧组级停止路径。
+`tasks.json` 是活动登记表。每次新增/接续运行，登记唯一的官方 `run_id`，以及可回查的 scheduler `job_id`/`request_id`、真实进程、预算模式/有效目标和当前容器归属；同一研究 Agent 保留一个当前条目，两组按各自官方 run-id 分开登记。任务独立移交到新 run 后，更新对应条目；旧条目不得通过自定义停止字段继续接管新控制器。包含 `marker`、`process_groups` 或其他自定义停止语义的登记直接视为无效，不能迁移成隐式兼容模式。
 
 任务完成、明确停止或过期且确认无存活进程后，及时移出活动表。历史条目保存到 `archive/tasks-<UTC>-<id>.json`，原始日志、`.state` 和远端证据不删除。`registry.py` 只操作本地配置，不连接 SSH，也不会停止训练。
 
@@ -222,4 +218,4 @@ python3 -m unittest discover -s tools/gpu_monitor/tests -v
 python3 tools/gpu_monitor/monitor.py validate
 ```
 
-本地检查覆盖断连、旧状态、退出码、残留进程、NaN、半行日志、轮转、停滞、预算、路径边界、PID 身份与显式停止；真实信号仅用于测试创建的本地睡眠进程组。云端验证仅查询和停止预览，没有启动、停止或恢复训练。云端记录见 [verification.json](verification.json)。
+本地检查覆盖断连、旧状态、退出码、残留进程、NaN、半行日志、轮转、停滞、预算、路径边界、PID 身份与官方停止请求；云端验证仅查询和停止预览，没有启动、停止或恢复训练。云端记录见 [verification.json](verification.json)。

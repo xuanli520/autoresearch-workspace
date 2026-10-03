@@ -20,6 +20,15 @@
       "host": "my-cloud",
       "root": "/absolute/remote/experiment",
       "protocol": "fill frozen protocol ID",
+      "project": "fill project ID",
+      "controller": {
+        "type": "research_handoff",
+        "run_id": "fill-official-run-id"
+      },
+      "scheduler": {
+        "type": "gpu_scheduler",
+        "job_ids": ["fill-official-job-id"]
+      },
       "gpu_uuids": [],
       "status": {
         "path": "status.json",
