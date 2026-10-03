@@ -719,13 +719,16 @@ class LongRunController:
         deadline = time.monotonic() + self.config['policy']['retry_backoff_seconds']
         while time.monotonic() < deadline:
             reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None)
+            if reason == 'hard_limit' or budget_view(self.state)['hard_reached']:
+                self.state.update(status='EXPIRED', stop_reason='hard_limit')
+                return False
             if reason:
                 self.state.update(status='STOPPED', stop_reason=reason, resume_required=True)
                 return False
-            if budget_view(self.state)['hard_reached']:
-                self.state.update(status='EXPIRED', stop_reason='hard_limit')
-                return False
-            time.sleep(min(.2, max(.01, deadline - time.monotonic())))
+            # Backoff is controller activity, but grants no worker heartbeat or credit.
+            self.save()
+            time.sleep(min(.2, self.config['heartbeat']['interval_seconds'],
+                           max(.01, deadline - time.monotonic())))
         return True
 
     def loop(self):

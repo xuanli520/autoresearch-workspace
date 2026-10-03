@@ -74,6 +74,8 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 | `turn.seconds` | 每轮上限，不能超过 5400 秒或 run 的硬截止 |
 | `policy.retry_backoff_seconds` | 单轮可恢复异常后的重试退避秒数；重试次数不设上限，由原目标和硬截止约束 |
 
+重试退避期间控制器持续刷新自身心跳，独立 guard 仍可停止冻结或失联的控制器。退避不刷新 Agent 心跳，不获得运行或研究信用；人工停止和原硬截止仍生效。
+
 单调时钟控制执行间隔，绝对截止与单调时间取更严格者。停止、压缩等待、恢复均不延后截止；系统重启后旧 run 到期，不凭跨 boot 的计时推断信用。`successful_turn` 在完整轮结束判断目标，可超过目标到当前轮结束，但绝不突破硬截止。worker 到期立即取消计算；内核调度和进程回收存在少量延迟，外部资源取消另有有界超时。
 
 `reported` 适合由任务原始事件独立审计有效时间的适配器。`turn_complete(credit=True, credited_seconds=..., credit_evidence=...)` 只报告该轮新增信用，不重复提交历史结转；将目标设为原目标减去已核验结转。排队、安装、基础设施故障和其他排除区间由适配器记在证据中；控制器校验数值边界，不自行判断证据是否构成科研闭环。
