@@ -2,7 +2,7 @@
 
 本工具是 [统一双 Agent 长跑规范](../../双Agent长跑与题目包验收规范.md) 强制采用的 GPU 入口；题目不得另建队列或直接启动训练绕过调度。任务生命周期由 research_handoff 管理，观测/登记由 gpu_monitor 管理；资源预约不等于硬隔离，容器/provider 取消适配须另行完成真实验收。
 
-单机、单个常驻 Python 进程、内存队列，**所有接入 Agent 合计最多同时运行 2 个 GPU 作业**。支持两份作业共享同一张 GPU，也支持从配置的多张卡中选择一张。每个作业只用一张物理 GPU。多个本地客户端可通过 SSH 共用该服务；8 个长期 Agent 会话不受接入数量限制，GPU 请求统一排队。默认提交调用会阻塞到作业终态；只有需要持续跟踪进度或同时编排多个任务时才使用异步入队接口。无数据库，无自动恢复队列，无自动重试训练。
+单机、单个常驻 Python 进程、内存队列，**所有接入 Agent 的全局并发由 `max_running` 配置（1–32，兼容默认 2）**。实际准入还须满足显存、计算份额、CPU、RAM 与遥测检查。支持多份作业共享同一张 GPU，也支持从配置的多张卡中选择一张。每个作业只用一张物理 GPU。多个本地客户端可通过 SSH 共用该服务；8 个长期 Agent 会话不受接入数量限制，GPU 请求统一排队。默认提交调用会阻塞到作业终态；只有需要持续跟踪进度或同时编排多个任务时才使用异步入队接口。无数据库，无自动恢复队列，无自动重试训练。
 
 用户确认的退出策略：正常退出清理本服务的作业；调度器异常退出时，已经启动的独立执行器继续监督原作业，在既定截止内完成或回收。排队请求丢失，日志和退出回执保留。
 
@@ -24,13 +24,13 @@ python3 -B tools/gpu_scheduler/cli.py validate --config /mnt/data/ops/gpu-config
 python3 -B tools/gpu_scheduler/cli.py serve --config /mnt/data/ops/gpu-config.json
 ```
 
-服务不自动后台化、不安装系统服务、不启动训练。建议通过数据盘日志的 tmux 会话或既有受管启动器运行；服务端阻塞等待不会占用 GPU，但会保持本地 Unix/SSH 请求直到作业终态。启动输出 `ready: true` 只证明接口已就绪，GPU 遥测和可调度性看 `status`。模型、数据、镜像准备应在占用 GPU 前完成。
+`cli serve` 前台运行，不启动训练。持久服务使用下述官方 lifecycle 安装入口；有时限的临时服务也可通过数据盘日志的 tmux 会话或既有受管启动器运行；服务端阻塞等待不会占用 GPU，但会保持本地 Unix/SSH 请求直到作业终态。启动输出 `ready: true` 只证明接口已就绪，GPU 遥测和可调度性看 `status`。模型、数据、镜像准备应在占用 GPU 前完成。
 
 `root` 是私有运行根，要求本用户拥有且权限 0700。正式模式强制 `data_mount` 是不同于系统盘的真实挂载，运行根和作业 `cwd` 均在该设备。运行中持续核验挂载及磁盘余量。模块设置常见临时、Python/模型/编译缓存目录到各作业的数据盘目录；自定义程序的绝对输出路径仍须由适配器检查。它不是文件系统沙箱，不会迁移公共 Docker/containerd。
 
 一个主机用户只能启动一个正式调度服务，即使更换 `root` 也不能再开第二个。多个 Agent 使用同一服务用户和 socket，才能共同遵守全局上限。不同 Unix 用户、其他网络命名空间和调度器外部作业不属于该全局上限；部署时应统一入口。
 
-服务最多保留 32 个阻塞等待请求、64 个总请求，额外容量留给查询、取消和停止；等待连接断开后释放请求槽，但不取消作业。这些是控制连接保护，不改变全局 GPU 并发 2，也不把控制连接数量当作研究 Agent 数量。
+服务最多保留 32 个阻塞等待请求、64 个总请求，额外容量留给查询、取消和停止；等待连接断开后释放请求槽，但不取消作业。这些是控制连接保护，不改变 `max_running` 指定的 GPU 并发上限，也不把控制连接数量当作研究 Agent 数量。
 
 | 配置 | 含义 |
 |---|---|
@@ -39,12 +39,24 @@ python3 -B tools/gpu_scheduler/cli.py serve --config /mnt/data/ops/gpu-config.js
 | `gpus[].compute_units` | 1–100 的计算预约总份额；通常设置为 100 |
 | `cpu_cores / ram_mib` | 全服务 CPU、RAM 声明额度，留出宿主余量 |
 | `poll_seconds` | 调度与遥测间隔，0.05–10 秒；默认 1 秒 |
-| `service_seconds` | 本次服务阶段硬截止，默认/最大 43200 秒；重启不接续旧队列 |
-| `max_bypass` | 暂时不能运行的早到作业最多被后续作业越过次数，默认 2；0 为严格 FIFO |
+| `service_seconds` | 普通服务阶段硬截止，默认/最大 43200 秒；持久服务使用 `persistent: true`，此字段不适用，作业与研究上限不变；重启不接续旧队列 |
+| `persistent` | 显式启用无服务级截止的 GPU 队列；应由受管 systemd 单元以 `Restart=always` 管理，作业仍受自身预算约束 |
+| `max_running` | 全局并发上限 1–32，兼容默认 2；资源不足时仍排队 |
+| `scheduling_policy` | `fifo` 保持原队列策略；`fair_share` 按 owner 当前最大资源占比和轮转次序选择，保护久等请求 |
+| `starvation_seconds` | 排队达到该秒数后优先保护，默认 300 秒；不延长排队/研究截止 |
+| `max_bypass` | 早到请求被越过多少次后获得保护，默认 2；0 严格 FIFO。fair_share 模式保护后仅允许不推迟预测开跑时刻的回填 |
 | `max_jobs` | 单次服务会话最多接收的不同请求，默认 10000；保留历史以维持幂等 |
 | `min_free_disk_mib` | 数据盘空余阈值，低于时拒绝新作业并停止已有作业；属于采样保护，不是磁盘硬 quota |
 | `external_process_policy` | 默认 `exclusive_admission` 对未知计算进程暂停新作业；显式 `shared` 允许按实时余量与预约额度共享，不停止外部进程 |
 | `shared_headroom_mib` | `shared` 准入额外保留的显存余量，默认 2048 MiB、最小 1024 MiB；不是显存硬隔离 |
+
+### 无需续期的持久服务
+
+GPU 配置设置 `persistent: true`，省略 `service_seconds` 和 `infrastructure_lease`。`status` 返回 `persistent: true`、`deadline_epoch: null`。服务没有续期定时器，各作业仍受原来的排队超时、运行上限（最多 43200 秒）和可选父级截止约束。
+
+通过 `lifecycle.py install-gpu-plan --config <plan.json>` 安装唯一 systemd 单元。plan 包含 `version: 1`、数据盘上的 `root` 和 `gpu_config`、绝对 `python` 路径、`unit_name`、明确 `authorization`、全套调度源码和 GPU 配置的 `source_sha256`。先校验 GPU 配置；plan 的 root、tmp、cache 预先由服务用户创建。单元使用 `RequiresMountsFor`、开机自启、`Restart=always`；仅 systemd 控制元数据写入 `/etc/systemd/system`，全部任务日志和缓存保留在数据盘。
+
+持久服务的维护入口为 `systemctl status/restart/stop <unit_name>.service`；显式 `systemctl stop` 不会触发自动重启。队列 CLI 的 `stop` 仅结束当前 session，systemd 会重新拉起空 session。异常退出后，旧执行器继续受原截止监督，必须取得其 cleanup 回执才能开新队列；清理失败或配置/GPU 身份冲突停止自动恢复并报错。主机重启允许以新 session 启动，旧作业不恢复、不自动重放。旧 session 客户端会被身份校验拒绝，必须先对账再连接新 session。
 
 ## 2. 提交、查询、取消
 
@@ -135,7 +147,7 @@ result = client.wait(queued['id'], timeout=4000)
 
 ```text
 本地客户端 A ── SSH 控制/等待 ─┐
-                             ├─ 云端唯一调度服务 ─ 内存队列 ─ 最多 2 个 GPU 作业
+                             ├─ 云端唯一调度服务 ─ 内存队列 ─ 至多 max_running 个 GPU 作业
 本地客户端 B ── SSH 控制/等待 ─┘
               8 个 Agent 按需提交，排队期间不占 GPU
 ```
@@ -179,7 +191,15 @@ jobs = client.jobs()
 
 **显存 MiB、计算份额、CPU 和 RAM 均为合作式预约额度，不是硬隔离。** `CUDA_VISIBLE_DEVICES` 选择设备，线程变量提供默认线程数；它们不能阻止候选修改行为。没有 MPS/MIG/cgroup 显存强制限额，也不会凭瞬时低利用率撤销已有预约。作业超报/漏报峰值可能导致干扰/OOM，需先测量再配置。不能用本工具直接证明题面的进程显存硬上限已执行。
 
-队列按到达顺序运行；队首暂时装不下时，允许后续可运行作业最多越过 `max_bypass` 次，此后保留队首机会。没有预估时长排序、预约开跑时间保证、抢占、按 Agent 权重分配或多卡 gang scheduling。`owner` 用于追踪归属，不限制 Agent 接入数量。
+`fifo` 保留原有到达顺序和越过次数限制。`fair_share` 在每次分配后重新计算 owner 的显存/计算/CPU/RAM 占比，优先当前最大占比较低者，占比相同时优先最久未获调度者。稳定的 owner 由可信适配器提供，不能每次换 owner 规避公平规则。
+
+等待超过 `starvation_seconds` 或被后续请求越过 `max_bypass` 次的作业进入优先保护，受保护作业之间按到达时间排序。资源尚未释放时，后续任务仍可回填，但必须按已执行的硬运行上限和清理余量计算，证明不会推迟受保护请求的预测开跑时间；资源互不影响的其他 GPU 也可继续使用。没有可信释放预测（外部任务、UNKNOWN、清理未确认）时，只放行仍为受保护请求保留完整预约空间的任务，不借走未知资源。未知外部负载、虚报资源或物理容量不足都不能保证开跑时刻；无抢占，不取消其他任务。
+
+`get/list` 对排队请求增加 `queue.wait_seconds`、`protected`、`latest_start_epoch`、`projected_start_epoch`、`deadline_risk`。预测仅计算当前运行作业的硬上限，未包含前方排队任务和未来外部负载，因此是诊断值，不能当作承诺；没有可信预测时为 null。排队超时和父级截止仍如实产生 EXPIRED，不静默延长。
+
+增加并发必须同时核验主机资源。建议共享部署先设 `max_running: 4`，按实测设置 CPU/RAM/GPU 总额；4 只是上限。例如 32 GiB 主机给调度器 24 GiB RAM 后，8 GiB 的请求最多 3 份，剩余槽可供较小请求。仅改并发数而保持计算总份额50、每作业25和RAM总额16GiB、每作业8GiB，仍只能运行2份。
+
+当前调用方如果将模型请求、容器准备、CPU 分析和训练全部打包为一个70分钟GPU作业，会在无GPU计算时仍占预约。调度器不能仅凭瞬时低利用率释放其未来显存峰值。后续接入应把受管提交缩小到真正训练/评分阶段，并让排队预算覆盖合理等待；15分钟排队上限无法保证等到70分钟的前序任务完成。调整调用粒度和预算须在新配置/适配器上实施，不改写活动作业或旧失败结果。
 
 ## 5. 退出、异常与边界
 
@@ -221,7 +241,7 @@ QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
 python3 -B -W error::ResourceWarning -m unittest discover -s tools/gpu_scheduler/tests -v
 ```
 
-测试通过模拟 GPU 遥测和真实本地 CPU 子进程验证阻塞提交、事件唤醒、资源排队、校验拒绝、幂等、取消、超时、断线释放、可恢复中断、后代清理、服务崩溃与旧会话拒绝；临时文件集中于 `notes/gpu-scheduler-v1/scratch/` 并由测试清理。`serve/validate --local-test` 仅用于 CPU 诊断，跳过数据盘校验并模拟 GPU，不能用于真实实验。真实 GPU/SSH 验收脚本需要持续采样和并行故障注入，因此显式使用 `submit_async`，不代表普通控制 Agent 应默认异步提交。
+测试通过模拟 GPU 遥测和真实本地 CPU 子进程验证四并发、owner 公平、等待老化、持续短作业下的大作业保护、多GPU回填、持久服务与作业预算隔离，以及阻塞提交、事件唤醒、资源排队、校验拒绝、幂等、取消、超时、断线释放、可恢复中断、后代清理、服务崩溃与旧会话拒绝；临时文件集中于 `notes/gpu-scheduler-v1/scratch/` 并由测试清理。`serve/validate --local-test` 仅用于 CPU 诊断，跳过数据盘校验并模拟 GPU，不能用于真实实验。真实 GPU/SSH 验收脚本需要持续采样和并行故障注入，因此显式使用 `submit_async`，不代表普通控制 Agent 应默认异步提交。
 
 部署保持相对结构：`tools/gpu_scheduler/*.py` 与唯一依赖 `tools/research_handoff/core/processes.py`，另带 README 和示例。复制到新的不可变数据盘发布目录，核对文件哈希；运行服务的 `service.json` 自动记录实际代码哈希。不要热覆盖已有执行器的源码。没有自动部署、购买或云 API 调用。
 

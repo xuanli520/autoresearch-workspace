@@ -15,7 +15,8 @@ from pathlib import Path
 from .common import (TERMINAL, WAITABLE_TERMINAL, PROCESS_SOURCE, JobWaitInterrupted,
                      JobWaitTimeout, atomic_json, check_storage, processes, read_json,
                      validate_job, validate_wait_timeout)
-from .resources import choose_gpu
+from .resources import choose_gpu, process_map
+from .fairness import order_queue, projected_start, protected, safe_backfill
 
 
 class Scheduler:
@@ -32,11 +33,25 @@ class Scheduler:
         self.quarantined = set()
         self.closing = False
         self.shutdown_reason = None
-        self.deadline_epoch = time.time() + config["service_seconds"]
-        self.deadline_mono = time.monotonic() + config["service_seconds"]
+        self.owner_dispatch = {}
+        self.dispatch_count = 0
+        if config.get("persistent"):
+            self.deadline_epoch = None
+            self.deadline_mono = None
+        else:
+            seconds = config["service_seconds"]
+            lease = config.get("infrastructure_lease")
+            if lease is not None:
+                seconds = min(seconds, lease["deadline_epoch"] - time.time())
+                if seconds <= 0:
+                    raise ValueError("infrastructure lease has expired")
+            self.deadline_epoch = time.time() + seconds
+            self.deadline_mono = time.monotonic() + seconds
         sources = sorted(Path(__file__).parent.glob("*.py")) + [PROCESS_SOURCE]
         atomic_json(self.directory / "service.json", {
             "session_id": self.id, "pid": os.getpid(), "at": time.time(), "config": config,
+            "identity": {"pid": os.getpid(), "start_ticks": processes.process_start_ticks(os.getpid()),
+                         "boot_id": processes.boot_id()},
             "deadline_epoch": self.deadline_epoch,
             "source_sha256": {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
         })
@@ -50,6 +65,18 @@ class Scheduler:
         result.update(session_id=self.id, request_id=job["spec"]["request_id"], owner=job["spec"]["owner"],
                       resources={k: job["spec"][k] for k in ("memory_mib", "compute_units", "cpu_cores", "ram_mib")},
                       exit=job.get("exit"))
+        if job["state"] == "QUEUED":
+            now = time.monotonic()
+            cutoff = job["submitted_at"] + job["spec"]["queue_timeout_seconds"]
+            if job["deadline_epoch"] is not None:
+                cutoff = min(cutoff, job["deadline_epoch"] - job["spec"]["max_runtime_seconds"])
+            estimate = job.get("projected_start_mono")
+            estimate_epoch = None if estimate is None else time.time() + max(0, estimate - now)
+            result["queue"] = {"wait_seconds": max(0, now - job["submitted_mono"]),
+                               "protected": protected(job, self.config, now),
+                               "latest_start_epoch": cutoff, "projected_start_epoch": estimate_epoch,
+                               "deadline_risk": None if estimate_epoch is None else estimate_epoch >= cutoff,
+                               "projection_scope": "active_job_runtime_bounds; external_usage_may_change"}
         return result
 
     def transition(self, job, state, reason):
@@ -82,8 +109,10 @@ class Scheduler:
             return self.view(old)
         if len(self.jobs) >= self.config["max_jobs"]:
             raise ValueError("session max_jobs reached; history is retained for idempotency")
-        deadline = min(spec.get("deadline_epoch", self.deadline_epoch), self.deadline_epoch)
-        if deadline - time.time() < spec["max_runtime_seconds"]:
+        requested_deadline = spec.get("deadline_epoch", self.deadline_epoch)
+        deadline = (None if requested_deadline is None else
+                    min(requested_deadline, self.deadline_epoch) if self.deadline_epoch is not None else requested_deadline)
+        if deadline is not None and deadline - time.time() < spec["max_runtime_seconds"]:
             raise ValueError("remaining parent/service budget cannot fit max_runtime_seconds")
         check_storage(self.config, self.directory)
         if shutil.disk_usage(self.directory).free < self.config["min_free_disk_mib"] * 1024**2:
@@ -95,7 +124,8 @@ class Scheduler:
         job = dict(id=job_id, spec=spec, state=None, reason=None, gpu_uuid=None,
                    submitted_at=time.time(), submitted_mono=time.monotonic(),
                    deadline_epoch=deadline,
-                   deadline_mono=time.monotonic() + max(0, deadline - time.time()),
+                   deadline_mono=(None if deadline is None else
+                                  time.monotonic() + max(0, deadline - time.time())),
                    started_at=None, finished_at=None, bypasses=0, revision=0, directory=str(directory),
                    token=uuid.uuid4().hex, process=None)
         self.jobs[job_id] = job
@@ -165,9 +195,12 @@ class Scheduler:
         seconds = job["spec"]["max_runtime_seconds"]
         launch = {"id": job["id"], "token": job["token"], "gpu_uuid": gpu_uuid,
                   "spec": job["spec"], "config": self.config,
-                  "deadline_epoch": min(time.time() + seconds, job["deadline_epoch"]),
-                  "deadline_monotonic": min(time.monotonic() + seconds, job["deadline_mono"]),
+                  "deadline_epoch": (min(time.time() + seconds, job["deadline_epoch"])
+                                     if job["deadline_epoch"] is not None else time.time() + seconds),
+                  "deadline_monotonic": (min(time.monotonic() + seconds, job["deadline_mono"])
+                                          if job["deadline_mono"] is not None else time.monotonic() + seconds),
                   "at": time.time()}
+        job["execution_deadline_mono"] = launch["deadline_monotonic"]
         atomic_json(directory / "launch.json", launch)
         self.transition(job, "STARTING", "executor_starting")
         env = os.environ.copy()
@@ -215,7 +248,8 @@ class Scheduler:
     def tick(self, snapshot=None, error=None):
         self.snapshot, self.probe_error = snapshot, error
         self.reconcile()
-        if time.monotonic() >= self.deadline_mono or time.time() >= self.deadline_epoch:
+        if (self.deadline_mono is not None and time.monotonic() >= self.deadline_mono) or \
+                (self.deadline_epoch is not None and time.time() >= self.deadline_epoch):
             self.begin_shutdown("service_deadline")
         if self.closing:
             return
@@ -225,34 +259,64 @@ class Scheduler:
             return
         queue = [j for j in self.jobs.values() if j["state"] == "QUEUED"]
         for job in queue:
-            remaining = min(job["deadline_epoch"] - time.time(), job["deadline_mono"] - time.monotonic())
+            remaining = (min(job["deadline_epoch"] - time.time(), job["deadline_mono"] - time.monotonic())
+                         if job["deadline_epoch"] is not None else float("inf"))
             if time.monotonic() - job["submitted_mono"] >= job["spec"]["queue_timeout_seconds"]:
                 self.transition(job, "EXPIRED", "queue_timeout")
             elif remaining < job["spec"]["max_runtime_seconds"]:
                 self.transition(job, "EXPIRED", "insufficient_remaining_budget")
         queue = [j for j in queue if j["state"] == "QUEUED"]
-        skipped = []
-        for job in queue:
-            gpu, reason = choose_gpu(job["spec"], self.active(), self.config, snapshot, self.quarantined)
-            if gpu is not None:
+        # Inspect /proc once per tick, not once for every candidate/forecast.
+        pid_sets = process_map(self.active())
+        while queue:
+            now = time.monotonic()
+            active = self.active()
+            ordered = order_queue(queue, active, self.config, self.owner_dispatch, now)
+            skipped = []
+            for job in ordered:
+                gpu, reason = choose_gpu(job["spec"], active, self.config, snapshot,
+                                         self.quarantined, pid_sets=pid_sets)
+                blockers = [j for j in skipped if protected(j, self.config, now)]
+                if gpu is not None and blockers:
+                    # A different eligible GPU may avoid delaying a reservation.
+                    choices = [gpu] + [g["uuid"] for g in self.config["gpus"] if g["uuid"] != gpu
+                                       and job["spec"].get("gpu_uuid", g["uuid"]) == g["uuid"]]
+                    gpu = None
+                    for candidate_gpu in choices:
+                        fits, _ = choose_gpu({**job["spec"], "gpu_uuid": candidate_gpu}, active,
+                                             self.config, snapshot, self.quarantined, pid_sets=pid_sets)
+                        allow_backfill = self.config["scheduling_policy"] == "fair_share" and self.config["max_bypass"] > 0
+                        if allow_backfill and fits is not None and safe_backfill(
+                                job, fits, blockers, active, self.config,
+                                snapshot, self.quarantined, pid_sets, now):
+                            gpu = fits
+                            break
+                    if gpu is None:
+                        reason = "waiting_for_protected_earlier_job"
+                if gpu is None:
+                    job["projected_start_mono"] = projected_start(job["spec"], active, self.config,
+                                                                  snapshot, self.quarantined, pid_sets, now)
+                    self.transition(job, "QUEUED", reason)
+                    skipped.append(job)
+                    continue
                 self.launch(job, gpu)
-                for earlier in skipped:
-                    earlier["bypasses"] += 1
-                # Each bypass counts even when two slots can be filled this tick.
-                if any(j["bypasses"] >= self.config["max_bypass"] for j in skipped):
-                    break
+                self.dispatch_count += 1
+                self.owner_dispatch[job["spec"]["owner"]] = self.dispatch_count
+                # Count every overtaken older request, including fairness reordering.
+                for earlier in queue:
+                    if earlier is not job and earlier["submitted_mono"] < job["submitted_mono"]:
+                        earlier["bypasses"] += 1
+                queue = [j for j in queue if j["state"] == "QUEUED"]
+                break  # Recompute owner shares and protection after every allocation.
             else:
-                self.transition(job, "QUEUED", reason)
-                if job["bypasses"] >= self.config["max_bypass"]:
-                    for later in queue[queue.index(job) + 1:]:
-                        if later["state"] == "QUEUED":
-                            self.transition(later, "QUEUED", "waiting_for_protected_earlier_job")
-                    break
-                skipped.append(job)
+                break
 
     def status(self):
-        return {"session_id": self.id, "stopping": self.closing, "max_running": 2,
+        return {"session_id": self.id, "stopping": self.closing, "max_running": self.config["max_running"],
                 "active_count": len(self.active()), "queued_count": sum(j["state"] == "QUEUED" for j in self.jobs.values()),
                 "quarantined_gpus": sorted(self.quarantined), "telemetry": self.snapshot,
                 "telemetry_error": self.probe_error, "deadline_epoch": self.deadline_epoch,
+                "persistent": bool(self.config.get("persistent")),
+                "scheduling_policy": self.config["scheduling_policy"],
+                "starvation_seconds": self.config["starvation_seconds"],
                 "directory": str(self.directory), "local_test": self.config["local_test"]}

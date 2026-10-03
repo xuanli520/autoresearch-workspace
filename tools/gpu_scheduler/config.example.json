@@ -15,5 +15,8 @@
   "service_seconds": 43200,
   "max_bypass": 2,
   "max_jobs": 10000,
-  "min_free_disk_mib": 4096
+  "min_free_disk_mib": 4096,
+  "max_running": 4,
+  "scheduling_policy": "fair_share",
+  "starvation_seconds": 300
 }

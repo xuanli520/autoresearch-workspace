@@ -195,6 +195,7 @@ async def serve(raw, *, local_test=False):
                 atomic_json(scheduler.directory / "service-exit.json", {
                     "at": time.time(), "active_count": len(scheduler.active()),
                     "cleanup_confirmed": not scheduler.active(),
+                    "reason": scheduler.shutdown_reason,
                 })
             except (OSError, ValueError):
                 pass

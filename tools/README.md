@@ -4,7 +4,7 @@
 
 - [research_handoff](research_handoff/README.md)：通用local/SSH轮次控制、进程级预算、上下文交接与guard；通过bundle生成，不含历史题目profile、模型网关或科研评分适配。
 - [gpu_monitor](gpu_monitor/README.md)：跨题只读监控、定向停止，以及活动登记表 `tasks.json` 的归档维护。
-- [gpu_scheduler](gpu_scheduler/README.md)：单机内存队列，全局最多两个 GPU 作业、可配置同卡共享，本机或多客户端 SSH CLI/SDK 共用队列及独立执行器超时回收；默认 `submit` 阻塞到终态，只有需要跟踪进度或并行编排多个任务时才用 `submit_async`/`enqueue`；资源预约不等于硬隔离。
+- [gpu_scheduler](gpu_scheduler/README.md)：单机内存队列，可配置全局 GPU 并发、按 owner 公平调度与同卡共享，本机或多客户端 SSH CLI/SDK 共用队列及独立执行器超时回收；默认 `submit` 阻塞到终态，只有需要跟踪进度或并行编排多个任务时才用 `submit_async`/`enqueue`；资源预约不等于硬隔离。
 
 先核对对应题目进展清单中的授权、协议、资源和原截止。工具安装、组件生成或读取文档都不构成新的实验授权。当前任务写入活动登记表；已完成、过期或被替代条目及时归档，历史证据保留。
 

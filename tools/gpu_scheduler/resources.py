@@ -35,8 +35,12 @@ def simulated_probe(config):
     } for g in config["gpus"]}}
 
 
-def choose_gpu(spec, active, config, snapshot, quarantined):
-    if len(active) >= 2:
+def process_map(active):
+    return {j["id"]: {pid for pid, _ in processes.scope_members(j["token"])} for j in active}
+
+
+def choose_gpu(spec, active, config, snapshot, quarantined, *, pid_sets=None):
+    if len(active) >= config.get("max_running", 2):
         return None, "global_concurrency_limit"
     for key in ("cpu_cores", "ram_mib"):
         if sum(job["spec"][key] for job in active) + spec[key] > config[key]:
@@ -44,7 +48,7 @@ def choose_gpu(spec, active, config, snapshot, quarantined):
     if not snapshot or time.time() - snapshot["at"] > max(10, config["poll_seconds"] * 3):
         return None, "telemetry_unavailable_or_stale"
     # Associate only observable same-UID descendants retaining our random token.
-    pid_sets = {j["id"]: {pid for pid, _ in processes.scope_members(j["token"])} for j in active}
+    pid_sets = process_map(active) if pid_sets is None else pid_sets
     known_pids = set().union(*pid_sets.values()) if pid_sets else set()
     reasons, choices = [], []
     for gpu in config["gpus"]:
@@ -71,7 +75,7 @@ def choose_gpu(spec, active, config, snapshot, quarantined):
         if shared:
             committed += config.get("shared_headroom_mib", 2048)
         for job in assigned:
-            measured = sum(p["memory_mib"] for p in live["processes"] if p["pid"] in pid_sets[job["id"]])
+            measured = sum(p["memory_mib"] for p in live["processes"] if p["pid"] in pid_sets.get(job["id"], set()))
             committed += max(0, job["spec"]["memory_mib"] - measured)
         if committed + spec["memory_mib"] > gpu["memory_mib"]:
             reasons.append(f"{uuid}:insufficient_memory_reservation")

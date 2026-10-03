@@ -25,7 +25,7 @@ flowchart LR
     G --> S
 ```
 
-先复制并填写 [连接配置](connection.example.json) 和 [任务配置](controller.example.json)。连接配置只放主机、用户、端口、解释器和目录；认证沿用 SSH key/agent，首次连接前建立可信 known_hosts。控制器默认使用 `150000` token 上限、`120000` 触发压缩、`16384` 保留区并启用自动压缩；若实际 provider 容量不同，必须在任务配置中显式覆盖这些字段。以下命令在工具目录执行：
+先复制并填写 [连接配置](connection.example.json) 和 [任务配置](controller.example.json)。连接配置只放主机、用户、端口、解释器和目录；认证默认沿用 SSH key/agent，也可将 `auth_file` 指向工作区受管凭据（与 `gpu_monitor` 相同的密码认证入口），二者不能同时配置。控制器默认使用 `150000` token 上限、`120000` 触发压缩、`16384` 保留区并启用自动压缩；若实际 provider 容量不同，必须在任务配置中显式覆盖这些字段。以下命令在工具目录执行：
 
 ```bash
 python3 -B controller.py --remote connection.json deploy

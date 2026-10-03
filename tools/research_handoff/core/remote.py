@@ -13,10 +13,22 @@ from pathlib import Path
 from longrun import ControllerError, positive_number, read_json, validate_config
 
 
+def _monitor_module():
+    try:
+        from tools.gpu_monitor import monitor
+    except ModuleNotFoundError:
+        workspace = Path(__file__).resolve().parents[3]
+        if str(workspace) not in sys.path:
+            sys.path.insert(0, str(workspace))
+        from tools.gpu_monitor import monitor
+    return monitor
+
+
 def connection_config(path: Path) -> dict:
     value = read_json(path)
     defaults = {'port': 22, 'python': 'python3', 'connect_timeout_seconds': 10,
-                'command_timeout_seconds': 30, 'identity_file': None, 'known_hosts_file': None}
+                'command_timeout_seconds': 30, 'identity_file': None, 'known_hosts_file': None,
+                'auth_file': None}
     allowed = set(defaults) | {'host', 'user', 'controller_dir', 'state_dir', 'data_mount'}
     if not isinstance(value, dict) or set(value)-allowed:
         raise ControllerError('invalid SSH connection config fields')
@@ -37,13 +49,28 @@ def connection_config(path: Path) -> dict:
         cfg[name] = positive_number(cfg[name], name)
         if cfg[name] > 60:
             raise ControllerError(f'{name} must be <= 60')
-    for name in ('identity_file', 'known_hosts_file'):
+    for name in ('identity_file', 'known_hosts_file', 'auth_file'):
         if cfg[name] is not None and not isinstance(cfg[name], str):
             raise ControllerError(f'{name} must be a path')
+    if cfg['auth_file'] is not None:
+        cfg['auth_file'] = str((path.parent / cfg['auth_file']).resolve())
+        if cfg['identity_file'] is not None:
+            raise ControllerError('choose auth_file or identity_file, not both')
     return cfg
 
 
+def _password_host(cfg):
+    monitor = _monitor_module()
+    auth = monitor.load_auth(Path(cfg['auth_file']))
+    return monitor.apply_auth({'transport': 'ssh', 'hostname': cfg['host'],
+                               'user': cfg['user'], 'port': cfg['port'],
+                               'connect_timeout_seconds': int(cfg['connect_timeout_seconds'])}, auth)
+
+
 def ssh_command(cfg, argv):
+    if cfg.get('auth_file'):
+        monitor = _monitor_module()
+        return monitor.ssh_command(_password_host(cfg), shlex.join(argv), password_auth=True)
     args = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
             '-o', 'StrictHostKeyChecking=yes', '-o', f"ConnectTimeout={max(1, int(cfg['connect_timeout_seconds']))}",
             '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '-p', str(cfg['port'])]
@@ -56,15 +83,23 @@ def ssh_command(cfg, argv):
 
 def call(cfg, argv, payload):
     try:
-        result = subprocess.run(ssh_command(cfg, argv), input=json.dumps(payload).encode(),
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                timeout=cfg['command_timeout_seconds'])
+        data = json.dumps(payload)
+        if cfg.get('auth_file'):
+            monitor = _monitor_module()
+            result = monitor.run_ssh(_password_host(cfg), ssh_command(cfg, argv), data,
+                                     timeout=cfg['command_timeout_seconds'])
+        else:
+            result = subprocess.run(ssh_command(cfg, argv), input=data.encode(),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    timeout=cfg['command_timeout_seconds'])
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ControllerError('SSH result UNKNOWN; inspect status before repeating a mutation: '+type(exc).__name__) from exc
+    stderr = result.stderr.decode(errors='replace') if isinstance(result.stderr, bytes) else str(result.stderr or '')
+    stdout = result.stdout.decode(errors='replace') if isinstance(result.stdout, bytes) else str(result.stdout or '')
     if result.returncode == 255:
-        raise ControllerError('SSH result UNKNOWN; inspect status before retrying. '+result.stderr.decode(errors='replace')[-2048:])
+        raise ControllerError('SSH result UNKNOWN; inspect status before retrying. '+stderr[-2048:])
     try:
-        reply = json.loads(result.stdout)
+        reply = json.loads(stdout)
     except ValueError as exc:
         raise ControllerError('invalid remote response; inspect remote state before retrying') from exc
     if not isinstance(reply, dict):

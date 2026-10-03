@@ -119,15 +119,38 @@ def atomic_json(path, value):
 
 def validate_config(raw, *, local_test=False):
     fields(raw, {"version", "root", "data_mount", "gpus", "cpu_cores", "ram_mib"},
-           {"poll_seconds", "service_seconds", "max_bypass", "max_jobs", "min_free_disk_mib",
-            "external_process_policy", "shared_headroom_mib"})
+           {"poll_seconds", "service_seconds", "persistent", "max_running", "scheduling_policy",
+            "starvation_seconds", "max_bypass", "max_jobs", "min_free_disk_mib",
+            "external_process_policy", "shared_headroom_mib", "infrastructure_lease"})
     if type(raw["version"]) is not int or raw["version"] != 1:
         raise ValueError("version must be 1")
     cfg = dict(raw, root=absolute(raw["root"], "root"), local_test=local_test)
     cfg["data_mount"] = None if local_test else absolute(raw["data_mount"], "data_mount")
     cfg["poll_seconds"] = number(raw.get("poll_seconds", 1), "poll_seconds", .05, 10)
-    cfg["service_seconds"] = number(raw.get("service_seconds", 43200), "service_seconds", .1, 43200)
+    persistent = raw.get("persistent", False)
+    if type(persistent) is not bool:
+        raise ValueError("persistent must be a boolean")
+    if persistent and raw.get("service_seconds") is not None:
+        raise ValueError("omit service_seconds for a persistent service")
+    lease = raw.get("infrastructure_lease")
+    if persistent and lease is not None:
+        raise ValueError("persistent service cannot carry an infrastructure lease")
+    maximum = 43200
+    if lease is not None:
+        fields(lease, {"authorization", "deadline_epoch"})
+        if not isinstance(lease["authorization"], str) or not lease["authorization"].strip():
+            raise ValueError("infrastructure lease requires explicit authorization")
+        number(lease["deadline_epoch"], "infrastructure_lease.deadline_epoch", 1)
+        maximum = 172800
+    cfg["persistent"] = persistent
+    cfg["service_seconds"] = (None if persistent else
+                               number(raw.get("service_seconds", 43200), "service_seconds", .1, maximum))
     cfg["max_bypass"] = integer(raw.get("max_bypass", 2), "max_bypass", 0, 100)
+    cfg["max_running"] = integer(raw.get("max_running", 2), "max_running", 1, 32)
+    cfg["scheduling_policy"] = raw.get("scheduling_policy", "fifo")
+    if cfg["scheduling_policy"] not in ("fifo", "fair_share"):
+        raise ValueError("scheduling_policy must be fifo or fair_share")
+    cfg["starvation_seconds"] = number(raw.get("starvation_seconds", 300), "starvation_seconds", 0, 43200)
     cfg["max_jobs"] = integer(raw.get("max_jobs", 10000), "max_jobs", 1, 100000)
     cfg["min_free_disk_mib"] = integer(raw.get("min_free_disk_mib", 1024), "min_free_disk_mib", 0)
     cfg["external_process_policy"] = raw.get("external_process_policy", "exclusive_admission")
@@ -183,9 +206,10 @@ def validate_job(raw, config):
     if "deadline_epoch" in spec:
         number(spec["deadline_epoch"], "deadline_epoch", 1)
     eligible = [g for g in config["gpus"] if spec.get("gpu_uuid", g["uuid"]) == g["uuid"]]
-    if not any(spec["memory_mib"] <= g["memory_mib"] and spec["compute_units"] <= g["compute_units"]
+    headroom = config.get("shared_headroom_mib", 2048) if config.get("external_process_policy") == "shared" else 0
+    if not any(spec["memory_mib"] + headroom <= g["memory_mib"] and spec["compute_units"] <= g["compute_units"]
                for g in eligible):
-        raise ValueError("no configured GPU can fit this request")
+        raise ValueError("no configured GPU can fit this request including required shared headroom")
     return spec
 
 

@@ -22,7 +22,7 @@ from .server import serve
 
 
 def main():
-    parser = argparse.ArgumentParser(description="单机 GPU 内存队列；全局并发上限 2")
+    parser = argparse.ArgumentParser(description="单机 GPU 内存队列；资源约束、可配置并发与公平调度")
     commands = parser.add_subparsers(dest="command", required=True)
     rpc = commands.add_parser("rpc", help="SSH 桥接：从 stdin 接收一个请求并转发本机 socket")
     rpc.add_argument("--root", required=True)
