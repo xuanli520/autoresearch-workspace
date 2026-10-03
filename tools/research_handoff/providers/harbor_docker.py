@@ -1,7 +1,8 @@
 """Optional Harbor provider: default-bridge builds and isolated Agent execution.
 
 Requires the pinned Harbor Docker provider. The generic controller itself does
-not import Harbor. No host-wide firewall rules are changed by this provider.
+not import Harbor. Explicit recovery changes only its configured bridge and
+model HTTPS forwarding rules, never shared chain policies or daemon services.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from pathlib import Path
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.docker.docker import DockerEnvironment, _sanitize_docker_compose_project_name
 from harbor.models.task.config import NetworkMode
-from ..core.docker_network import egress_rules, validate_network_config
+from ..core.docker_network import bridge_preflight, egress_rules, validate_network_config
 
 
 class ManagedDockerEnvironment(DockerEnvironment):
@@ -43,6 +44,7 @@ class ManagedDockerEnvironment(DockerEnvironment):
     def _receipt(self, name, value):
         from ..core.longrun import atomic_json
         if self.ownership_root:
+            value = {"project": _sanitize_docker_compose_project_name(self.session_id), **value}
             atomic_json(self.ownership_root / f"{name}.json", value)
 
     def _requires_egress_control(self, startup_network_policy, phase_network_policies):
@@ -104,9 +106,26 @@ class ManagedDockerEnvironment(DockerEnvironment):
             hosts = set(network_policy.allowed_hosts)
             if not hosts or not hosts.issubset(self.model_host_addresses):
                 raise ValueError("only frozen model HTTPS endpoints may be allowed")
+            receipt = bridge_preflight(self.network_config,
+                                       repair_forwarding=self.network_config["repair_forwarding"])
+            self._receipt("bridge-" + _sanitize_docker_compose_project_name(self.session_id), receipt)
             script = "printf '%s\\n' " + shlex.quote(egress_rules(self.model_host_addresses[h] for h in hosts)) + " | nft --file -"
             await self._run_docker_compose_command([
                 "exec", "--no-TTY", self._EGRESS_CONTROL_SERVICE_NAME, "sh", "-c", script])
+            probe = (
+                "import json,socket,ssl; "
+                "addresses=" + repr({h: self.model_host_addresses[h] for h in sorted(hosts)}) + "; "
+                "context=ssl.create_default_context(); results=[]\n"
+                "for host,address in addresses.items():\n"
+                " with socket.create_connection((address,443),timeout=5) as raw:\n"
+                "  with context.wrap_socket(raw,server_hostname=host) as tls:\n"
+                "   results.append({'host':host,'address':address,'tls':tls.version()})\n"
+                "print(json.dumps({'ok':True,'endpoints':results}))"
+            )
+            checked = await self.exec("python3 -B -c " + shlex.quote(probe), user="solver", timeout_sec=15)
+            if checked.return_code:
+                raise RuntimeError("model HTTPS preflight failed before Agent requests: " + (checked.stderr or checked.stdout or "")[-1000:])
+            self._receipt("https-" + _sanitize_docker_compose_project_name(self.session_id), json.loads(checked.stdout))
         else:
             await super()._apply_network_policy(network_policy)
         self.logger.info('Managed Agent network policy applied: %s', network_policy.network_mode.value)

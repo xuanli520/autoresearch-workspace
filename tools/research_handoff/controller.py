@@ -326,7 +326,8 @@ class LongRunController:
         self.process = None
         self.partial_credit = {}
         if self.config['docker_network']['enabled']:
-            receipt = bridge_preflight(self.config['docker_network'])
+            receipt = bridge_preflight(self.config['docker_network'],
+                                       repair_forwarding=self.config['docker_network']['repair_forwarding'])
             self.event('docker.network_preflight', **receipt)
         self._context_completion_deadline = None
         self.context_guard_triggered = False
@@ -1006,7 +1007,7 @@ def build_parser():
     parser.add_argument('--remote', type=Path, help='SSH connection config; supervisor remains on the execution host')
     sub = parser.add_subparsers(dest='action', required=True)
     sub.add_parser('deploy', help='install a new immutable controller release using --remote')
-    network = sub.add_parser('docker-network', help='inspect default bridge; optionally repair only its missing interface')
+    network = sub.add_parser('docker-network', help='inspect bridge and model HTTPS forwarding; optionally repair scoped missing rules')
     network.add_argument('--config', type=Path, required=True)
     network.add_argument('--repair', action='store_true')
     init = sub.add_parser('init'); init.add_argument('--config', type=Path, required=True); init.add_argument('--run-id', required=True)

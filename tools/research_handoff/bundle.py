@@ -36,6 +36,7 @@ FILES = (
     "core/remote.py",
     "providers/__init__.py",
     "providers/harbor_docker.py",
+    "providers/codex_transport.py",
     "templates/agent_protocol.py",
     "templates/launch_controller.sh",
     "controller.example.json",
