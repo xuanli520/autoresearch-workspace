@@ -135,7 +135,7 @@ def recover_run(run_dir: Path) -> dict:
 
 
 def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_turn: int,
-              reason: str, credit: dict | None = None) -> dict:
+              reason: str, credit: dict | None = None, extend_expired_budget: bool = False) -> dict:
     if not isinstance(reason, str) or not reason.strip():
         raise ControllerError('amend requires an explicit authorization reason')
     with file_lock(run_dir / '.controller.lock', blocking=False), file_lock(run_dir / '.state.lock'):
@@ -147,8 +147,12 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
                 or pid_matches(state.get('guard_pid'), state.get('guard_start_ticks'), state.get('process_boot_id'))
                 or scope_members(state['turn'].get('token', ''))):
             raise ControllerError('stop and confirm controller/guard/worker cleanup before amending')
-        if state['status'] in ('COMPLETED', 'EXPIRED') or budget_view(state)['hard_reached']:
-            raise ControllerError('cannot amend a completed or expired budget')
+        view = budget_view(state)
+        expired = state['status'] == 'EXPIRED' or view['hard_reached']
+        if state['status'] == 'COMPLETED' or view['target_reached']:
+            raise ControllerError('cannot amend a completed budget')
+        if expired and not extend_expired_budget:
+            raise ControllerError('expired budget requires explicit --extend-expired-budget authorization')
         config = validate_config(config)
         for key in ('task_id', 'root', 'workdir', 'storage', 'context'):
             if config[key] != old[key]:
@@ -162,6 +166,12 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         deadline = started + config['budget']['hard_limit_seconds']
         if deadline <= time.time():
             raise ControllerError('amended deadline must be in the future')
+        if extend_expired_budget:
+            if (not config['budget']['allow_extended_hard_limit']
+                    or deadline <= epoch(state['budget']['hard_deadline_at'])):
+                raise ControllerError('explicit expiry extension requires opt-in and a later deadline')
+            if credit and credit.get('turns'):
+                raise ControllerError('expiry extension cannot add historical credit')
         storage = check_storage(config['storage']['data_mount'], run_dir, Path(config['root']))
         if storage != state['storage']:
             raise ControllerError('data device changed')
@@ -219,6 +229,7 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         new_deadline = datetime.datetime.fromtimestamp(deadline, datetime.timezone.utc).isoformat()
         receipt = {'at': utc_now(), 'reason': reason, 'previous_deadline_at': state['budget']['hard_deadline_at'],
                    'hard_deadline_at': new_deadline, 'credited_seconds_added': delta, 'turns': numbers,
+                   'expired_budget_extended': bool(expired and extend_expired_budget),
                    'previous_config_sha256': state['config_sha256'], 'config_sha256': sha256(folder / 'config.json'),
                    'controller_release': str(HERE), 'source_sha256': sources}
         atomic_json(folder / 'receipt.json', receipt)
@@ -227,6 +238,8 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         state['paths']['config'] = relative
         state.update(config_sha256=receipt['config_sha256'], source_sha256=sources,
                      controller_release=str(HERE), resume_required=True)
+        if state['status'] == 'EXPIRED':
+            state.update(status='PAUSED', stop_reason='authorized_deadline_extension')
         state.setdefault('credit_adjustments', []).append({'path': str(folder / 'credit-audit.json'),
             'sha256': sha256(folder / 'credit-audit.json'), 'turns': numbers, 'credited_seconds': delta})
         save_state(run_dir, state)
@@ -1013,6 +1026,8 @@ def build_parser():
     network = sub.add_parser('docker-network', help='inspect bridge and model HTTPS forwarding; optionally repair scoped missing rules')
     network.add_argument('--config', type=Path, required=True)
     network.add_argument('--repair', action='store_true')
+    network.add_argument('--restore-default-forwarding', action='store_true',
+                         help='explicitly restore docker0 egress for default-bridge builds; Agent namespace isolation still applies')
     init = sub.add_parser('init'); init.add_argument('--config', type=Path, required=True); init.add_argument('--run-id', required=True)
     for name in ('start', 'run'):
         cmd = sub.add_parser(name); cmd.add_argument('--run-id', required=True)
@@ -1031,6 +1046,8 @@ def build_parser():
     cmd.add_argument('--config', type=Path, required=True); cmd.add_argument('--credit-file', type=Path)
     cmd.add_argument('--expected-config-sha256', required=True); cmd.add_argument('--expected-turn', type=int, required=True)
     cmd.add_argument('--reason', required=True)
+    cmd.add_argument('--extend-expired-budget', action='store_true',
+                     help='explicitly authorize a later deadline for an expired, fully stopped run; preserves target and credit')
     cmd = sub.add_parser('logs'); cmd.add_argument('--run-id', required=True)
     cmd.add_argument('--stream', choices=('stdout', 'stderr', 'controller', 'guard', 'events'), default='stderr')
     cmd.add_argument('--bytes', type=int, default=16384)
@@ -1054,7 +1071,8 @@ def dispatch(args, *, remote_payload=None):
         raise ControllerError('deploy requires --remote')
     if args.action == 'docker-network':
         config = remote_payload['network_config'] if remote_payload else read_json(args.config)
-        return bridge_preflight(config, repair=args.repair), 0
+        return bridge_preflight(config, repair=args.repair,
+                                restore_default_forwarding=args.restore_default_forwarding), 0
     state_dir = Path(args.state_dir or DEFAULT_STATE_DIR).expanduser().resolve()
     run_dir = state_path(state_dir, args.run_id)
     if args.action == 'init':
@@ -1073,7 +1091,8 @@ def dispatch(args, *, remote_payload=None):
         config = remote_payload['config'] if remote_payload else load_config(args.config)
         credit = remote_payload.get('credit') if remote_payload else read_json(args.credit_file) if args.credit_file else None
         return amend_run(run_dir, config, expected_sha256=args.expected_config_sha256,
-                         expected_turn=args.expected_turn, reason=args.reason, credit=credit), 0
+                         expected_turn=args.expected_turn, reason=args.reason, credit=credit,
+                         extend_expired_budget=args.extend_expired_budget), 0
     if args.action == 'guard': return None, guard_loop(run_dir, args.attempt)
     if args.action == 'watch':
         if not .05 <= args.interval <= 3600 or args.seconds is not None and not 0 < args.seconds <= 43200:

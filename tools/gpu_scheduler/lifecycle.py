@@ -263,10 +263,14 @@ def status(path):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("operation", choices=("probe", "install", "status", "expire", "continue-gpu",
-                                        "install-gpu-plan", "serve-gpu-plan"))
+                                        "install-gpu-plan", "serve-gpu-plan",
+                                        "restart-runtime-plan", "runtime-plan-status"))
     p.add_argument("--config", required=True, type=Path)
     args = p.parse_args()
-    if args.operation in ("install-gpu-plan", "serve-gpu-plan"):
+    if args.operation in ('restart-runtime-plan', 'runtime-plan-status'):
+        from tools.gpu_scheduler.runtime import restart_plan, status_plan
+        result = {'restart-runtime-plan': restart_plan, 'runtime-plan-status': status_plan}[args.operation](args.config)
+    elif args.operation in ("install-gpu-plan", "serve-gpu-plan"):
         from tools.gpu_scheduler.managed_service import install_plan, serve_plan
         try:
             result = {"install-gpu-plan": install_plan, "serve-gpu-plan": serve_plan}[args.operation](args.config)

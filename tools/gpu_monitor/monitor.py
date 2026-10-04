@@ -537,6 +537,9 @@ def evaluate(task, host, previous=None):
     previous = previous or {}
     result = {'id': task['id'], 'host': task['host'], 'label': task.get('label', task['id']),
               'protocol': task.get('protocol'), 'alerts': []}
+    for name in ('controller', 'scheduler'):
+        if task.get(name) is not None:
+            result[name] = task[name]
     if host.get('error'):
         result.update(state='UNREACHABLE', observed_at=None, error=host['error'], processes=[], streams=[],
                       last_success_at=previous.get('last_success_at'),

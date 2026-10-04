@@ -139,7 +139,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ControllerError("budget.allow_extended_hard_limit must be boolean")
     if type(budget["allow_partial_credit"]) is not bool or (budget["allow_partial_credit"] and budget["credit_policy"] != "reported"):
         raise ControllerError("budget.allow_partial_credit requires boolean and reported credit policy")
-    hard_cap = 86400 if budget["allow_extended_hard_limit"] else 43200
+    hard_cap = 172800 if budget["allow_extended_hard_limit"] else 43200
     if not window <= hard <= hard_cap:
         raise ControllerError(f"0 < window_seconds <= hard_limit_seconds <= {hard_cap} is required")
     if budget["mode"] not in ("active", "wall") or budget["credit_policy"] not in ("running", "successful_turn", "reported"):

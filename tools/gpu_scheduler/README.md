@@ -258,3 +258,9 @@ python3 -B tools/gpu_scheduler/tests/cloud_smoke.py --config /mnt/data/ops/smoke
 使用合成张量、不下载模型或数据；总检查窗口 180 秒，默认单作业硬上限 40 秒，并执行主动取消和强杀调度器故障注入。脚本会启动、停止自己的服务，因此只应使用独立测试配置和明确测试授权。测试配置应把服务窗口也限定为 180 秒，并为两个作业各预留至少 2048 MiB。
 
 完整结果、原始退出回执及部署哈希见 [云端验收报告](../../notes/gpu-scheduler-v1/cloud-validation.md) 和 [开发与验证记录](../../notes/gpu-scheduler-v1/incident.md)。这次短测不证明训练吞吐提升、长时稳定性、显存硬隔离或容器/Harbor 兼容性。
+
+### 已到期专用容器运行时恢复
+
+明确授权延长研究截止时，必须同步核对专用 Docker/containerd 的期限。已停止的专用运行时可用 `lifecycle.py restart-runtime-plan --config <不可变计划>` 恢复，`runtime-plan-status` 查询同一计划。此入口使用 Python 3.11+ 和 systemd，保留既有 socket、隔离桥、Docker/containerd 数据与状态目录，核验原启动身份死亡、无其他 daemon 接管同一数据根、所有源码/输入哈希及真实数据盘。计划须声明授权、绝对截止（未来最多48h）、原运行合同/launch/config、独立 unit 前缀及证据目录。
+
+systemd 分别托管 containerd 与 dockerd，按剩余绝对期限设置 RuntimeMaxSec、准备/退出超时、数据盘日志和缓存；不自动重启 daemon，不修改 GPU 队列或公共服务。`planned.json` 在启动前持久化，`installed.json` 或 `failure.json` 留证。已尝试计划不能重放；未知结果先查询同一 unit。恢复后须核验网络、容器隔离和实际模型工具调用，启动受理不等于科研恢复。仅调用该运行时入口不会修改 Agent 截止，Agent 仍由官方 handoff 管理。

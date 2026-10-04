@@ -65,7 +65,7 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 | 字段 / 行为 | 含义 |
 |---|---|
 | `budget.window_seconds` | active 目标或 wall 窗口 |
-| `budget.hard_limit_seconds` | 从首次 start 起固定墙钟上限；工作区正式运行不得超过 43,200 秒，不启用 `allow_extended_hard_limit`。工具底层虽支持扩展到 86,400 秒，该能力不是正式运行默认授权 |
+| `budget.hard_limit_seconds` | 从首次 start 起固定墙钟上限；工作区正式运行默认不超过 43,200 秒，不启用 `allow_extended_hard_limit`。明确用户例外授权可显式扩展，工具最大 172,800 秒 |
 | `turn.seconds` | 每轮最长执行时间，实际取本轮、目标窗口与剩余硬预算的适用最小值 |
 | `credit_policy: running` | 按观测到的 worker 执行区间记活动时间；故障未知区间不记 |
 | `credit_policy: successful_turn` | 退出 0、上下文报告有效、收到 `turn.completed` 且 `credit: true`、清理成功后才记活动时间 |
@@ -82,7 +82,7 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 
 显式启用 `budget.allow_partial_credit: true`（仅限 `reported`）后，失败或超时轮可另记研究信用，轮次失败原因和分数保持真实。可信宿主适配器的 cleanup hook 在回收资源后写 `turn_dir/partial-credit.json`：`version:1`、`run_id`、`turn`、`intervals:[[UTC_epoch_start,UTC_epoch_end]]`、`credited_seconds`、`evidence:[{path,sha256}]`。控制器核对本轮身份、区间边界、不重叠、总秒数及可信宿主原件哈希；报告不能超过 worker runtime。可用 `turn.credit` 提前提供该报告路径/哈希，但清理完成后仍重新验证。原生会话审计可复用 `core/research_time.py`，由题目回调核对真实 GPU 反馈；未结束工具调用、排队、安装和故障等排除区间必须留证，信用不代表完整评分闭环。
 
-已停止且确认 controller/guard/worker 均回收的 run，可通过 `amend` 切换不可变发布、配置和历史信用审计。命令需要当前 `--expected-config-sha256`、`--expected-turn` 及非空授权理由；身份、起点、目标和上下文不变，旧配置、状态、原始 exit 不覆盖，修订收据保存在 `amendments/NNNNNN/`。历史审计只补原零信用且未调整过的轮次，拒绝重计。截止修改须在原预算到期前执行并有明确用户授权；默认上限仍为 12h，工具可在显式例外授权下启用 `allow_extended_hard_limit`，最高 24h。
+已停止且确认 controller/guard/worker 均回收的 run，可通过 `amend` 切换不可变发布、配置和历史信用审计。命令需要当前 `--expected-config-sha256`、`--expected-turn` 及非空授权理由；身份、起点、目标和上下文不变，旧配置、状态、原始 exit 不覆盖，修订收据保存在 `amendments/NNNNNN/`。历史审计只补原零信用且未调整过的轮次，拒绝重计。截止修改须有明确用户授权；默认上限仍为 12h，显式例外可启用 `allow_extended_hard_limit`，最高 48h。原预算到期后还须传入 `--extend-expired-budget`，仅允许已完全回收、目标未完成的 run 延长至未来且晚于旧截止；该操作不增加历史信用，保留首次起点、目标、旧状态/exit 和修订收据。EXPIRED 修订后为 PAUSED，仍须显式 `start --resume`。已达成目标的 COMPLETED 不可延期。
 
 ```bash
 python3 -B controller.py --remote connection.json amend --run-id trial-01 \
@@ -111,6 +111,9 @@ python3 -B controller.py --remote connection.json start --run-id trial-01 --resu
 Harbor `environment.import_path` 指向 `tools.research_handoff.providers.harbor_docker:ManagedDockerEnvironment`，`kwargs.network_config` 传本轮 `launch.json.docker_network`，`kwargs.ownership_root` 指向可信数据盘归属目录。该 provider 依赖已验收的 Harbor Docker API；普通 CPU 控制器不导入 Harbor。任务多服务自定义网络须另行验收，不能据主容器隔离推断所有 side service 都隔离。
 
 `doctor` 和每轮启动前核对默认 bridge 元数据、内核接口、网关、NAT 和模型转发。`doctor` 与 `docker-network --config network.json` 只读；缺失转发会直接报告，不能仅因桥仍存在就宣布网络健康。`--repair` 可补建无附着容器的缺失接口，并补齐明确配置的专用桥转发。配置 `bridge_interface` 为该专用桥名称、`repair_forwarding: true` 时，正式启动及 provider 模型阶段也可恢复缺失的端点规则；禁止自动修公共 `docker0`。宿主恢复仅增加本题桥、子网和模型 IP 的 HTTPS 规则，不清空链、不改变策略、不重启共享服务。provider 随后从受限 solver 内做有界 TCP/TLS 预检，失败时不启动模型请求；归属目录保留桥、HTTPS 与 namespace 策略回执。预检不代替真实模型工具调用与普通外网拒绝探针。
+
+复用公共 Docker 时，若其他运行时启动清除了 `docker0` 转发，显式执行 `docker-network --config network.json --repair --restore-default-forwarding` 可恢复默认桥构建的正常外网访问。配置必须启用网络且明确 `bridge_interface: docker0`；只增加匹配该接口和其实际子网的 NAT、出站及已建立连接返回规则，不修改其他桥、链策略或共享服务。Agent 仍由 sidecar namespace 的 nft 规则限制到冻结模型端点；这项恢复不会自动运行。`--repair` 单独使用只修公共缺失接口，转发保持只读检查。
+恢复规则追加到宿主现有转发规则之后，保留 `DOCKER-USER` 的策略和 MSS 修正；显式恢复同时会将本工具旧版本置于该链之前的同名规则移到其后。出口 MTU 小于网桥时，TCP 建连成功不能替代真实 TLS 验收。
 
 兼容 Responses 的外部模型可通过 `providers.codex_transport.transport_flags` 生成专用 `research_https` provider：HTTPS URL、`wire_api=responses`、`supports_websockets=false`，以及有界请求/流重试与读空闲窗口。API key 只引用环境变量，不进入参数；不使用已经 removed 的 `responses_websockets` feature 开关。任务薄适配器接受 `model_transport` 配置，并保留未显式配置模型的原有传输。
 
