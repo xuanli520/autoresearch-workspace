@@ -14,12 +14,14 @@ import hmac
 import json
 import math
 import os
+import posixpath
 import re
 import socket
 import stat
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 try:
     from .longrun import ControllerError, atomic_json, atomic_write, file_lock, read_json, utc_now
@@ -689,6 +691,9 @@ def validate_harbor(contract, harbor, final_score):
     if (parents[1] != trial_root or Path(harbor["reward"]["path"]).parent != trial_root / "verifier" or
             not Path(harbor["log"]["path"]).is_relative_to(trial_root)):
         fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor reward and final result must come from the same Trial directory")
+    if (Path(harbor["config"]["path"]).name != "config.json" or
+            Path(harbor["result"]["path"]).name != "result.json"):
+        fail("FINAL_SCORE_INVALID", "HARBOR_FILE_INVALID", "Harbor config and result must be the Trial's canonical files")
     config = read_json(within(root, harbor["config"]["path"]))
     result = read_json(within(root, harbor["result"]["path"]))
     if not isinstance(config, dict) or not isinstance(result, dict):
@@ -712,11 +717,67 @@ def validate_harbor(contract, harbor, final_score):
         if len(reward) != 1:
             fail("FINAL_SCORE_INVALID", "HARBOR_REWARD_INVALID", "reward must contain one scalar metric")
         reward = next(iter(reward.values()))
-    result_id = result.get("trial_id", result.get("id", result.get("trial_name")))
-    config_bound = (config.get("trial_id") == harbor["trial_id"] or result.get("config") == config or
-                    config.get("name") == result.get("trial_name") == trial_root.name)
-    if (not config_bound or result_id != harbor["trial_id"] or
-            result.get("exception_info") is not None):
+
+    # Harbor has two representations of a Trial configuration.  The exported
+    # config.json is intentionally compact, while result.json contains the
+    # same configuration after Harbor has filled in defaults.  Binding the
+    # dictionaries byte-for-byte therefore rejects a valid Trial. Archives may
+    # rename the copied directory, so bind the original identity and config.
+    config_trial_id = config.get("trial_id")
+    if "trial_id" in config and config_trial_id != harbor["trial_id"]:
+        fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor config Trial ID differs")
+    result_ids = [result[name] for name in ("id", "trial_id") if name in result]
+    if not result_ids or any(value != harbor["trial_id"] for value in result_ids):
+        fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor result Trial ID differs")
+
+    structured_identity = any(name in config for name in ("trial_name", "trials_dir")) or any(
+        name in result for name in ("trial_name", "trial_uri"))
+    if structured_identity:
+        trial_name = config.get("trial_name")
+        result_name = result.get("trial_name")
+        if (not isinstance(trial_name, str) or not LABEL.fullmatch(trial_name) or
+                result_name != trial_name):
+            fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor Trial name differs")
+
+        def absolute_remote_path(value, field):
+            if not isinstance(value, str) or not value or "\0" in value:
+                fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", f"Harbor {field} path is invalid")
+            normalized = posixpath.normpath(value)
+            if not normalized.startswith("/") or ".." in Path(normalized).parts:
+                fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", f"Harbor {field} path is invalid")
+            return normalized
+
+        uri = result.get("trial_uri")
+        parsed = urlparse(uri) if isinstance(uri, str) else None
+        if (parsed is None or parsed.scheme != "file" or parsed.netloc not in ("", "localhost") or
+                parsed.params or parsed.query or parsed.fragment):
+            fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor Trial URI does not identify the configured Trial")
+        trials_dir = absolute_remote_path(config.get("trials_dir"), "trials_dir")
+        uri_path = absolute_remote_path(unquote(parsed.path), "trial_uri")
+        if (posixpath.dirname(uri_path) != trials_dir or
+                uri_path != posixpath.join(trials_dir, trial_name)):
+            fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor Trial URI is outside its configured trials directory")
+
+        result_config = result.get("config")
+        if not isinstance(result_config, dict):
+            fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor result config must be an object")
+
+        def preserves_config(compact, expanded):
+            if isinstance(compact, dict):
+                return isinstance(expanded, dict) and all(
+                    key in expanded and preserves_config(value, expanded[key])
+                    for key, value in compact.items())
+            if isinstance(compact, list):
+                return isinstance(expanded, list) and len(compact) == len(expanded) and all(
+                    preserves_config(left, right) for left, right in zip(compact, expanded))
+            return type(compact) is type(expanded) and compact == expanded
+
+        if not preserves_config(config, result_config):
+            fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor config expansion changes an explicit setting")
+    elif not config_trial_id:
+        fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor Trial has no verifiable identity binding")
+
+    if result.get("exception_info") is not None:
         fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor Trial identity or exit status differs")
     verifier = result.get("verifier_result")
     rewards = verifier.get('rewards') if isinstance(verifier, dict) else None

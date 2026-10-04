@@ -567,8 +567,22 @@ class LongRunController:
                     raise ControllerError('partial credit requires explicit policy, finite seconds and evidence')
                 self.partial_credit = value
             if kind == 'turn.failed':
-                self.pending_reason = 'agent_reported_failure'
-        except (ControllerError, TypeError) as exc:
+                retryable = value.get('retryable', True)
+                if type(retryable) is not bool:
+                    raise ControllerError('turn.failed retryable must be boolean')
+                if not retryable:
+                    if value.get('reason') != 'deterministic_evidence_failure':
+                        raise ControllerError('nonretryable failure requires an explicit evidence failure reason')
+                    path = Path(value.get('failure_evidence', '')).resolve(strict=True)
+                    if (not path.is_relative_to(Path(self.state['turn']['dir']).resolve())
+                            or sha256(path) != value.get('failure_evidence_sha256')):
+                        raise ControllerError('failure evidence must match the current turn artifact')
+                    self.result = value
+                    self.state['failure'] = value
+                    self.pending_reason = 'deterministic_evidence_failure'
+                else:
+                    self.pending_reason = 'agent_reported_failure'
+        except (ControllerError, TypeError, OSError, ValueError) as exc:
             self.pending_reason = 'invalid_agent_event'
             self.event('agent.event_rejected', error=str(exc))
 
@@ -811,7 +825,8 @@ class LongRunController:
                    and reason in RETRYABLE_TURN_REASONS | {'operator_stop', 'hard_limit', 'context_window'}
                    and process_cleanup_ok and task_cleanup_ok)
         credit = credit or partial
-        if reason in ('controller_lost', 'cleanup_incomplete', 'invalid_agent_event', 'context_usage_missing'):
+        if reason in ('controller_lost', 'cleanup_incomplete', 'invalid_agent_event', 'context_usage_missing',
+                      'deterministic_evidence_failure'):
             credit = False
         duration = worker.get('runtime_seconds', 0)
         reported = None
@@ -823,7 +838,8 @@ class LongRunController:
                 reason, credit, completed, reported, retry_pending = 'invalid_agent_event', False, False, 0, False
                 self.event('agent.credit_rejected', reported_seconds=self.result.get('credited_seconds'), observed_seconds=observed)
         elapsed = finish_active_interval(self.state, credit=credit, duration=duration, credited_duration=reported)
-        turn.update(status='COMPLETED' if completed else 'STOPPED', ended_at=utc_now(), returncode=code,
+        turn.update(status='COMPLETED' if completed else (
+            'FAILED' if reason == 'deterministic_evidence_failure' else 'STOPPED'), ended_at=utc_now(), returncode=code,
                     reason=reason, elapsed_seconds=elapsed, credited=credit,
                     credited_seconds=(reported if reported is not None else elapsed) if credit else 0, result=self.result)
         if partial:
