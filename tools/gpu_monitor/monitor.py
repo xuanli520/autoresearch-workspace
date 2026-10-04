@@ -67,6 +67,10 @@ def utc(value=None):
 
 
 def timestamp(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if not math.isfinite(value):
+            raise ValueError('timestamps must be finite')
+        return float(value)
     if not value:
         return None
     parsed = dt.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
@@ -272,8 +276,11 @@ def purge_host_key(host):
     KNOWN_HOSTS.parent.mkdir(parents=True, exist_ok=True)
     KNOWN_HOSTS.touch(exist_ok=True)
     try:
+        # macOS ssh-keygen can emit locale-specific bytes that are not UTF-8;
+        # host-key cleanup is diagnostic and must not block the SSH attempt.
         subprocess.run(['ssh-keygen', '-R', spec, '-f', str(KNOWN_HOSTS)],
-                       capture_output=True, text=True, timeout=10)
+                       capture_output=True, text=True, encoding='utf-8',
+                       errors='replace', timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         pass
     # ssh-keygen -R backs the previous file up; keep the managed dir tidy.
@@ -537,9 +544,11 @@ def evaluate(task, host, previous=None):
     previous = previous or {}
     result = {'id': task['id'], 'host': task['host'], 'label': task.get('label', task['id']),
               'protocol': task.get('protocol'), 'alerts': []}
-    for name in ('controller', 'scheduler'):
-        if task.get(name) is not None:
-            result[name] = task[name]
+    if task.get('controller') is not None:
+        result['controller'] = {'type': 'research_handoff', 'run_id': task['controller'].get('run_id')}
+    if task.get('scheduler') is not None:
+        ids = task['scheduler'].get('job_ids', task['scheduler'].get('job_id', []))
+        result['scheduler'] = {'type': 'gpu_scheduler', 'job_ids': [ids] if isinstance(ids, str) else list(ids or [])}
     if host.get('error'):
         result.update(state='UNREACHABLE', observed_at=None, error=host['error'], processes=[], streams=[],
                       last_success_at=previous.get('last_success_at'),
@@ -569,6 +578,8 @@ def evaluate(task, host, previous=None):
             state = 'FAILED'
     elif alive:
         state = 'PAUSED' if all(p['state'] in ('T', 't') for p in processes) else 'RUNNING'
+    elif task.get('scheduler') is not None and declared in ('QUEUED', 'STARTING'):
+        state = declared
     elif declared is not None or rc is not None or any(s.get('text') for s in raw['files'].values()):
         state = 'EXITED_WITHOUT_RESULT'
         result['alerts'].append(state)
