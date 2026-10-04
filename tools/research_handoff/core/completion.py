@@ -336,15 +336,18 @@ def bindings(contract):
             "evaluator_hash": contract["completion"]["evaluator_hash"]}
 
 
-def protected_roots(contract):
+def protected_roots(contract, jobs=None):
+    """Roots from the signed ledger, or from proposed jobs before they are frozen."""
     cfg = contract["completion"]
-    ledger = read_json(within(cfg["evidence_root"], cfg["jobs_manifest"]))
-    verify_signed(contract, ledger)
-    check_identity(contract, ledger)
-    validate_jobs(contract, ledger["jobs"])
+    if jobs is None:
+        ledger = read_json(within(cfg["evidence_root"], cfg["jobs_manifest"]))
+        verify_signed(contract, ledger)
+        check_identity(contract, ledger)
+        jobs = ledger["jobs"]
+    validate_jobs(contract, jobs)
     return sorted({str(Path(p).resolve()) for p in (
         cfg["evidence_root"], str(Path(cfg["signing_key"]).parent), *cfg["private_roots"],
-        *(job["scheduler_root"] for job in ledger["jobs"]))})
+        *(job["scheduler_root"] for job in jobs))})
 
 
 def attest_docker_isolation(contract, containers, *, docker_host, public_image_digest):
@@ -425,6 +428,49 @@ def register_jobs(contract, jobs):
         else:
             atomic_json(path, signed(contract, payload))
     return payload
+
+
+def adopt_evaluation(contract, source_contract):
+    """Bind an already certified experiment to the research run that selected it."""
+    trust_boundary(contract)
+    trust_boundary(source_contract)
+    for name in ("task_id", "candidate_root", "stage", "score_expectation", "metric", "direction",
+                 "required_seeds", "protocol_hash", "deadline"):
+        if contract[name] != source_contract[name]:
+            raise ControllerError("selected experiment belongs to a different scientific contract")
+    for name in ("evidence_root", "signing_key", "data_hash", "evaluator_hash", "training", "private_roots"):
+        if contract["completion"][name] != source_contract["completion"][name]:
+            raise ControllerError("selected experiment has a different trust boundary")
+    receipt = issue_receipt(source_contract, live=True)
+    if receipt["status"] != "COMPLETED":
+        raise ControllerError("only a fully certified experiment can be selected")
+    root = contract["completion"]["evidence_root"]
+    ledger = read_json(within(root, source_contract["completion"]["jobs_manifest"]))
+    source_manifest = read_json(within(root, source_contract["candidate_manifest"]))
+    result = read_json(within(root, source_contract["completion"]["result"]))
+    # Validate everything before the first write, so a rejected source leaves
+    # no frozen jobs or manifest behind and another source can still be selected.
+    isolation = check_isolation(source_contract)
+    if isolation["protected_roots_hash"] != digest(protected_roots(contract, ledger["jobs"])):
+        raise ControllerError("selected experiment does not protect the research run's private roots")
+    target_manifest = within(root, contract["candidate_manifest"])
+    if target_manifest.exists() and read_json(target_manifest) != source_manifest:
+        raise ControllerError("selected candidate manifest is immutable")
+    target_isolation = within(root, contract["completion"]["isolation"])
+    payload = {k: v for k, v in isolation.items() if k != "signature"}
+    payload.update(**identity(contract), contract_hash=digest(contract),
+                   source_contract_hash=digest(source_contract), source_receipt_hash=digest(receipt))
+    if target_isolation.exists():
+        existing = read_json(target_isolation)
+        verify_signed(contract, existing)
+        if {k: v for k, v in existing.items() if k != "signature"} != payload:
+            raise ControllerError("selected isolation evidence is immutable")
+    register_jobs(contract, ledger["jobs"])
+    atomic_json(target_manifest, source_manifest)
+    if not target_isolation.exists():
+        atomic_json(target_isolation, signed(contract, payload))
+    write_score_result(contract, result["scientific_score"], result["seeds"], harbor=result.get("harbor"))
+    return issue_receipt(contract, live=True)
 
 
 def validate_jobs(contract, jobs):

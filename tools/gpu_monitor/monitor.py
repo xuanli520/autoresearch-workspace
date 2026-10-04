@@ -614,6 +614,23 @@ def evaluate(task, host, previous=None):
     effective = agent.get('effective_seconds')
     target = status_doc.get('effective_target_seconds')
     limit = status_doc.get('effective_limit_seconds')
+    controller = task.get('controller') if isinstance(task.get('controller'), dict) else {}
+    official = (controller.get('type') == 'research_handoff'
+                and status_doc.get('controller') == 'autoresearch-longrun'
+                and status_doc.get('run_id') == controller.get('run_id'))
+    if official:
+        budget = status_doc.get('budget', {})
+        mode = budget.get('mode')
+        if mode == 'active':
+            effective = budget.get('active_seconds')
+            target = budget.get('window_seconds')
+            limit = None
+            if not (finite(effective) and effective >= 0 and finite(target) and target > 0
+                    and finite(budget.get('hard_limit_seconds')) and budget['hard_limit_seconds'] > 0):
+                result['alerts'].append('OBSERVATION_ERROR')
+        result.update(current_turn=field(status_doc, 'turn.number'),
+                      heartbeat_stale=field(status_doc, 'heartbeat.stale'),
+                      scientific_score=field(status_doc, 'completion.scientific_score'))
     if mode == 'effective' and not (finite(effective) and effective >= 0 and finite(target) and finite(limit) and 39600 <= target < limit <= 43200):
         result['alerts'].append('OBSERVATION_ERROR')
     if finite(effective) and finite(target) and effective < target and (state in TERMINAL or state == 'EXITED_WITHOUT_RESULT'):
@@ -621,6 +638,8 @@ def evaluate(task, host, previous=None):
     if finite(effective) and finite(limit) and effective > limit:
         result['alerts'].append('EFFECTIVE_LIMIT_EXCEEDED')
     deadline = (task.get('deadline_at') or metadata(raw, task.get('deadline_file'))) if mode != 'effective' else None
+    if official:
+        deadline = status_doc.get('budget', {}).get('hard_deadline_at')
     deadline_ts = None
     try:
         if deadline:
@@ -749,6 +768,9 @@ def aggregate_agents(tasks):
             'id': task['id'], 'label': task.get('label', task['id']), 'host': task.get('host'),
             'state': task.get('state', 'UNKNOWN'), 'observed_at': task.get('observed_at'),
             'alerts': list(task.get('alerts', [])), 'processes': task.get('processes', []),
+            **{key: task[key] for key in ('budget_mode', 'effective_seconds', 'effective_target_seconds',
+                'effective_target_remaining_seconds', 'deadline_at', 'budget_remaining_seconds',
+                'current_turn', 'heartbeat_stale', 'scientific_score') if key in task},
             **identity,
         })
     return agents
@@ -872,6 +894,9 @@ def render_tasks(data, color='auto'):
         if t.get('budget_mode') == 'effective':
             print(f"  进程   {pids}    已计有效 {colors.bold(duration(t.get('effective_seconds')))} / 目标 {duration(t.get('effective_target_seconds'))} / 硬上限 {duration(t.get('effective_limit_seconds'))}")
             print(f"  预算   距有效目标 {duration(t.get('effective_target_remaining_seconds'))}    有效余额 {duration(t.get('effective_remaining_seconds'))}")
+        elif t.get('budget_mode') == 'active':
+            print(f"  进程   {pids}    已确认有效 {duration(t.get('effective_seconds'))} / 目标 {duration(t.get('effective_target_seconds'))}")
+            print(f"  预算   距有效目标 {duration(t.get('effective_target_remaining_seconds'))}    距墙钟截止 {duration(t.get('budget_remaining_seconds'))}")
         else:
             print(f"  进程   {pids}    距墙钟截止 {colors.bold(duration(t.get('budget_remaining_seconds')))}")
         if t.get('error'):
@@ -925,6 +950,9 @@ def render_agents(data, color='auto'):
             refs.append('gpu_scheduler:' + ','.join(agent['scheduler'].get('job_ids', [])))
         print(f"  {colors.bold(agent.get('id', '?'))}  {state}  主机 {agent.get('host', '?')}")
         print(f"    官方身份  {'; '.join(refs) or '?'}   进程 {len(agent.get('processes', []))} 个")
+        if agent.get('budget_mode') == 'active':
+            print(f"    有效时间  {duration(agent.get('effective_seconds'))}/{duration(agent.get('effective_target_seconds'))}"
+                  f"   墙钟余额 {duration(agent.get('budget_remaining_seconds'))}   当前轮 {agent.get('current_turn', '?')}")
         if agent.get('alerts'):
             print(colors.yellow('    告警  ' + ' '.join(agent['alerts'])))
     print()

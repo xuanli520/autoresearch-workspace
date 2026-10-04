@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -129,6 +130,42 @@ def unit_command(plan, name, *, now=None):
             *['--property=' + value for value in properties], executable, flag, config]
 
 
+def prepare_bridge(plan, docker):
+    name = docker.get('bridge')
+    if name in (None, 'none'):
+        return None
+    if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,15}', name) or name == 'docker0':
+        raise ValueError('runtime requires an exact dedicated bridge')
+    if 'bip' in docker:
+        raise ValueError('a named Docker bridge cannot also declare bip')
+    network = ipaddress.ip_network(docker['fixed-cidr'], strict=True)
+    address = str(network.network_address + 1) + '/' + str(network.prefixlen)
+    inspected = subprocess.run(['ip', '-j', '-d', 'link', 'show', name], capture_output=True, text=True, timeout=10)
+    if inspected.returncode == 0:
+        link = json.loads(inspected.stdout)
+        if len(link) != 1 or link[0].get('linkinfo', {}).get('info_kind') != 'bridge':
+            raise ValueError('dedicated runtime interface is not a bridge')
+        addresses = json.loads(subprocess.run(['ip', '-j', '-4', 'address', 'show', name],
+            capture_output=True, text=True, timeout=10, check=True).stdout)
+        present = [v['local'] + '/' + str(v['prefixlen']) for row in addresses for v in row.get('addr_info', [])]
+        if present != [address]:
+            raise ValueError('existing runtime bridge has a different address')
+        created = False
+    else:
+        routes = json.loads(subprocess.run(['ip', '-j', '-4', 'route', 'show'],
+            capture_output=True, text=True, timeout=10, check=True).stdout)
+        for route in routes:
+            if route.get('dst', 'default') != 'default' and network.overlaps(ipaddress.ip_network(route['dst'], strict=False)):
+                raise ValueError('new runtime bridge overlaps an existing route')
+        subprocess.run(['ip', 'link', 'add', name, 'type', 'bridge'], check=True, timeout=10)
+        subprocess.run(['ip', 'address', 'add', address, 'dev', name], check=True, timeout=10)
+        created = True
+    subprocess.run(['ip', 'link', 'set', name, 'mtu', str(docker.get('mtu', 1500)), 'up'], check=True, timeout=10)
+    receipt = {'name': name, 'address': address, 'created': created, 'at_epoch': time.time()}
+    atomic_json(Path(plan['root']) / 'bridge.json', receipt)
+    return receipt
+
+
 def restart_plan(path):
     if os.geteuid() != 0:
         raise ValueError('runtime restoration must run as root')
@@ -144,11 +181,15 @@ def restart_plan(path):
         if found != 'not-found':
             raise ValueError('runtime unit already exists; inspect its original launch')
     for directory in ('tmp', 'cache', 'docker-config'):
-        (root / directory).mkdir(parents=True, exist_ok=True)
+        target = root / directory
+        target.mkdir(parents=True, mode=0o700, exist_ok=True)
+        owner = root.stat()
+        os.chown(target, owner.st_uid, owner.st_gid)
     atomic_json(root / 'planned.json', {'plan_sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest(),
                                       'deadline_epoch': plan['deadline_epoch'], 'at_epoch': time.time()})
     installed = []
     try:
+        prepare_bridge(plan, docker)
         for name in ('containerd', 'dockerd'):
             command = unit_command(plan, name)
             subprocess.run(command, capture_output=True, text=True, timeout=40, check=True)
@@ -164,8 +205,13 @@ def restart_plan(path):
         atomic_json(root / 'installed.json', result)
         return result
     except Exception as exc:
+        cleanup = []
+        for name in ('dockerd', 'containerd'):
+            unit = plan['unit_prefix'] + '-' + name + '.service'
+            stopped = subprocess.run(['systemctl', 'stop', unit], capture_output=True, text=True, timeout=20)
+            cleanup.append({'unit': unit, 'returncode': stopped.returncode})
         atomic_json(root / 'failure.json', {'at_epoch': time.time(), 'installed_units': installed,
-                                          'error': str(exc)})
+                                          'error': str(exc), 'cleanup': cleanup})
         raise
 
 
