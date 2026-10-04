@@ -20,7 +20,8 @@ from ..core.docker_network import bridge_preflight, egress_rules, validate_netwo
 
 class ManagedDockerEnvironment(DockerEnvironment):
     def __init__(self, *args, network_config=None, model_host_addresses=None,
-                 use_default_bridge=True, ownership_root=None, **kwargs):
+                 use_default_bridge=True, ownership_root=None, completion_contract=None,
+                 public_image_digest=None, **kwargs):
         if type(use_default_bridge) is not bool:
             raise ValueError("use_default_bridge must be boolean")
         if not use_default_bridge:
@@ -33,6 +34,15 @@ class ManagedDockerEnvironment(DockerEnvironment):
         self.model_host_addresses = self.network_config["model_host_addresses"]
         self.ownership_root = Path(ownership_root).resolve(strict=True) if ownership_root else None
         self._managed_build_path = None
+        self.completion_contract = completion_contract
+        self.public_image_digest = public_image_digest
+        if completion_contract and not self._trusted_verifier:
+            from ..core.completion import trust_boundary
+            from ..core.longrun import read_json
+            self.completion_contract = read_json(Path(completion_contract))
+            trust_boundary(self.completion_contract)
+            if not public_image_digest:
+                raise ValueError("scientific completion requires an audited public image digest")
         super().__init__(*args, **kwargs)
         if self.ownership_root:
             if self.ownership_root.stat().st_uid != os.getuid():
@@ -136,14 +146,24 @@ class ManagedDockerEnvironment(DockerEnvironment):
             "enforcement": "Harbor sidecar nft output chain in task network namespace"})
 
     async def start(self, force_build):
-        if self._trusted_verifier:
-            self._mounts = [mount for mount in self._mounts if mount.get("target") != "/logs/verifier"]
-        else:
+        # Harbor's full verifier log mount contains private test evidence. It is
+        # never exposed to a solver, including when completion is disabled.
+        if not self._trusted_verifier:
+            verifier = Path('/logs/verifier')
+            self._mounts = [mount for mount in self._mounts
+                            if not (Path(mount['target']) == verifier or
+                                    verifier.is_relative_to(Path(mount['target'])) or
+                                    Path(mount['target']).is_relative_to(verifier))]
             if not self._enable_egress_control:
                 raise ValueError("Agent isolation requires Harbor egress control before startup")
-            self._mounts = [{**mount, "read_only": True} if mount.get("target") == "/logs/verifier" else mount
-                            for mount in self._mounts]
         result = await super().start(force_build)
+        if self.completion_contract and not self._trusted_verifier:
+            from ..core.completion import attest_docker_isolation
+            inspected = await self._run_docker_compose_command(['ps', '-q', 'main'])
+            containers = inspected.stdout.strip().splitlines()
+            attest_docker_isolation(self.completion_contract, containers,
+                                   docker_host=self.network_config['docker_host'],
+                                   public_image_digest=self.public_image_digest)
         if not self._trusted_verifier and self.model_host_addresses:
             hosts = "\n".join(f"{ip} {host}" for host, ip in sorted(self.model_host_addresses.items())) + "\n"
             saved = await self.exec("printf '%s' " + shlex.quote(hosts) + " >> /etc/hosts", user="root")

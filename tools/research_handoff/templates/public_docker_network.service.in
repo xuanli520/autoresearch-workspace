@@ -1,0 +1,17 @@
+[Unit]
+Description=AutoResearch public Docker default bridge recovery
+Requires=docker.service
+After=docker.service containerd.service network-online.target
+RequiresMountsFor=@DATA_MOUNT@
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+Environment=TMPDIR=@RUNTIME_DIR@/tmp
+Environment=XDG_CACHE_HOME=@RUNTIME_DIR@/cache
+ExecStart=/usr/bin/python3 -B @CONTROLLER_DIR@/controller.py docker-network --config @NETWORK_CONFIG@ --repair --restore-default-forwarding
+TimeoutStartSec=60
+StandardOutput=append:@RUNTIME_DIR@/network.log
+StandardError=append:@RUNTIME_DIR@/network.log

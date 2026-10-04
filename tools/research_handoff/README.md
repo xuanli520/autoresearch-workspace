@@ -4,6 +4,8 @@
 
 本工具负责一个研究任务的启动、续轮、停止、上下文交接和故障接管。任务通过 argv 命令和 JSONL 事件接入；模型、研究框架、容器和评分器由任务适配器提供。不保留旧任务、旧 profile 或旧运行目录兼容层。
 
+科学评分收口、可信凭证、正式阶段合同和只读历史审计见 [COMPLETION.md](COMPLETION.md)。正式 `screen`、`formal`、`final` 阶段必须声明 `score_expectation: required`；只有显式 `diagnostic`/`not_expected` 可以合法无科学分数。
+
 工作区共享 GPU 要求：不因其他计算进程出现自动停止自己的训练，在不影响他人的前提下继续共享；显存余量、实测峰值、并发/CPU负载与共享观察由题目适配器落实。本控制器不因未知 GPU PID 停训，硬截止、明确安全风险和用户停止仍按合同执行。历史发布 bundle 保留当时内容，不热改。
 
 题目适配器必须通过 [gpu_scheduler](../gpu_scheduler/README.md) 提交 GPU 训练、评分和复验；本地控制 Agent 优先使用阻塞式 `submit`，等 GPU 作业完成或关键中断再继续；只有需要持续跟踪进度或同时编排多个任务时才调用 `submit_async`/`enqueue`。资源暂不足的合法请求进入队列，排队仍受原预算约束；等待中断不等于作业已取消，先查询同一 request/job。阻塞期间需由适配器独立维护真实心跳与定向清理，SDK 不会自动替代本控制器心跳；该调用规范不表示本控制器自动接管了 GPU 调度器生命周期。
@@ -114,6 +116,10 @@ Harbor `environment.import_path` 指向 `tools.research_handoff.providers.harbor
 
 复用公共 Docker 时，若其他运行时启动清除了 `docker0` 转发，显式执行 `docker-network --config network.json --repair --restore-default-forwarding` 可恢复默认桥构建的正常外网访问。配置必须启用网络且明确 `bridge_interface: docker0`；只增加匹配该接口和其实际子网的 NAT、出站及已建立连接返回规则，不修改其他桥、链策略或共享服务。Agent 仍由 sidecar namespace 的 nft 规则限制到冻结模型端点；这项恢复不会自动运行。`--repair` 单独使用只修公共缺失接口，转发保持只读检查。
 恢复规则追加到宿主现有转发规则之后，保留 `DOCKER-USER` 的策略和 MSS 修正；显式恢复同时会将本工具旧版本置于该链之前的同名规则移到其后。出口 MTU 小于网桥时，TCP 建连成功不能替代真实 TLS 验收。
+
+公共默认桥需要开机自恢复时，在明确维护授权下复用发布中的 `templates/public_docker_network.service.in` 与 `public_docker_network.timer.in`。将 `@DATA_MOUNT@`、`@RUNTIME_DIR@`、`@CONTROLLER_DIR@`、`@NETWORK_CONFIG@` 替换为已校验绝对路径；配置必须限定公共 socket 和 `docker0`。安装为 `autoresearch-public-docker-network.service` / `.timer`，先 `systemd-analyze verify`，再 `systemctl enable --now autoresearch-public-docker-network.timer`。timer 每15秒执行现有官方修复命令，包括失败后的再次检查；没有独立循环、研究重启或daemon重启。日志、TMPDIR、缓存和不可变发布均在数据盘。
+
+Docker/containerd 应使用现有开机启用、`Restart=always` 的系统服务，并通过 `RequiresMountsFor` 等待数据盘。增加依赖与timer只需 `daemon-reload`，不为部署重启活动daemon。桥缺失且仍有附着容器时，官方修复会拒绝，必须核查归属；不删除容器、不清空规则或操作另一运行时。健康验收须包括默认桥HTTPS构建、实际solver网络隔离、至少两次timer成功执行及daemon PID未变化。systemd进程健康不代表内核桥持续存在，现有主机日志不足时不得推定删除方。
 
 兼容 Responses 的外部模型可通过 `providers.codex_transport.transport_flags` 生成专用 `research_https` provider：HTTPS URL、`wire_api=responses`、`supports_websockets=false`，以及有界请求/流重试与读空闲窗口。API key 只引用环境变量，不进入参数；不使用已经 removed 的 `responses_websockets` feature 开关。任务薄适配器接受 `model_transport` 配置，并保留未显式配置模型的原有传输。
 

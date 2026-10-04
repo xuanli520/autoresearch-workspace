@@ -29,7 +29,12 @@ except ImportError:
 SCHEMA_VERSION = 2
 CONTROLLER_NAME = "autoresearch-longrun"
 RUN_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
-TERMINAL_STATES = frozenset({"COMPLETED", "STOPPED", "FAILED", "EXPIRED"})
+COMPLETION_TERMINAL_STATES = frozenset({
+    "INCOMPLETE_FINAL_SCORE", "EVALUATION_PENDING", "EVALUATION_FAILED", "EVALUATION_UNKNOWN",
+    "FINAL_SCORE_INVALID", "CANDIDATE_BINDING_MISMATCH", "PROTOCOL_BINDING_MISMATCH",
+    "COMPLETION_RECEIPT_MISSING", "EXPIRED", "COMPLETED",
+})
+TERMINAL_STATES = COMPLETION_TERMINAL_STATES | {"STOPPED", "FAILED"}
 
 # These defaults leave enough headroom for the provider response, tool output,
 # and a durable handoff summary. A task may override them when its provider has
@@ -101,10 +106,17 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(config, dict) or type(config.get("version")) is not int or config["version"] != 1:
         raise ControllerError("config requires version=1")
     allowed = {"version", "task_id", "root", "workdir", "command", "env", "budget", "turn",
-               "context", "heartbeat", "policy", "output", "storage", "cleanup", "docker_network"}
+               "context", "heartbeat", "policy", "output", "storage", "cleanup", "docker_network",
+               "stage", "score_expectation", "metric", "direction", "required_seeds", "deadline",
+               "candidate_manifest", "protocol_hash", "completion"}
     unknown = set(config) - allowed
     if unknown:
         raise ControllerError(f"unknown config fields: {sorted(unknown)}; use --remote for SSH control")
+    try:
+        from .completion import validate_contract
+    except ImportError:
+        from completion import validate_contract
+    contract = validate_contract(config)
     def section(name, defaults):
         value = config.get(name, {})
         if not isinstance(value, dict) or set(value) - set(defaults):
@@ -199,7 +211,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ControllerError(str(exc)) from exc
     return dict(version=1, task_id=task, root=root, workdir=workdir, command=list(command), env=dict(env),
                 budget=budget, turn=turn, context=context, heartbeat=heartbeat, policy=policy, output=output,
-                storage=storage, cleanup=cleanup, docker_network=network)
+                storage=storage, cleanup=cleanup, docker_network=network, **contract)
 
 
 def check_storage(mount: str | None, *paths: Path) -> dict[str, Any]:
@@ -231,14 +243,11 @@ def atomic_write(path: Path, payload: str | bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_DIRECTORY)
         try:
-            directory_fd = os.open(path.parent, os.O_DIRECTORY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-        except OSError:
-            pass
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -294,6 +303,7 @@ def new_state(config: dict[str, Any], run: str, run_dir: Path) -> dict[str, Any]
         "run_id": run,
         "status": "READY",
         "created_at": created,
+        "declared_deadline": config["deadline"],
         "updated_at": created,
         "controller_pid": None,
         "controller_start_ticks": None,
@@ -302,6 +312,7 @@ def new_state(config: dict[str, Any], run: str, run_dir: Path) -> dict[str, Any]
         "stop_reason": None,
         "attempt": 0,
         "resume_required": False,
+        "completion": {"phase": "NOT_STARTED", "contract": "completion.contract.json", "receipt": None},
         "error": None,
         "budget": {
             "mode": config["budget"]["mode"],
@@ -420,6 +431,8 @@ def budget_view(state: dict[str, Any], now_epoch: float | None = None) -> dict[s
     active = float(b["active_seconds"]) if b["credit_policy"] == "reported" else active_elapsed(state, now_epoch)
     progress = active if b["mode"] == "active" else wall
     remaining = max(0, b["hard_limit_seconds"] - wall)
+    if b.get("hard_deadline_at"):
+        remaining = min(remaining, max(0, epoch(b["hard_deadline_at"]) - now))
     if b.get('started_at') and b.get('boot_id') != boot_id():
         remaining = 0  # A reboot invalidates monotonic continuity; fail closed.
     return {"mode": b["mode"], "active_seconds": active, "credited_seconds": b["active_seconds"],
@@ -456,9 +469,10 @@ def begin_run(state: dict[str, Any], now: str | None = None) -> None:
     b = state["budget"]
     if b.get("started_at") is None:
         b.update(started_at=now, started_monotonic=time.monotonic(), boot_id=boot_id())
-        deadline = epoch(now) + b["hard_limit_seconds"]
+        deadline = min(epoch(now) + b["hard_limit_seconds"], epoch(state["declared_deadline"]))
         b["hard_deadline_at"] = _datetime.datetime.fromtimestamp(deadline, _datetime.timezone.utc).isoformat()
-    state.update(status="RUNNING", stop_reason=None, error=None, attempt=state["attempt"] + 1)
+    state.update(status="FINALIZING" if state.get("completion", {}).get("phase") == "FINALIZING" else "RUNNING",
+                 stop_reason=None, error=None, attempt=state["attempt"] + 1)
 
 
 def finish_active_interval(state: dict[str, Any], ended_at: str | None = None, *, credit: bool = True,
@@ -499,7 +513,7 @@ def _rotate_context(run_dir: Path, summary: str, *, reason: str, conversation_id
             raise ControllerError("stale generation: reload context status before rotating")
         if not controller_owned and (state.get("controller_pid") or state["turn"].get("status") == "RUNNING"):
             raise ControllerError("stop/recover the controller before rotating context")
-        if state["status"] in ("COMPLETED", "EXPIRED"):
+        if state["status"] in COMPLETION_TERMINAL_STATES:
             raise ControllerError("a completed or expired run cannot rotate context")
         if budget_view(state)['hard_reached']:
             raise ControllerError('wall deadline passed; a context boundary cannot extend it')

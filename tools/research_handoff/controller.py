@@ -24,7 +24,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE / 'core'))
-from longrun import (ControllerError, TERMINAL_STATES, append_event, apply_context_usage, atomic_json,
+from longrun import (ControllerError, TERMINAL_STATES, COMPLETION_TERMINAL_STATES, append_event, apply_context_usage, atomic_json,
     begin_run, budget_view, check_storage, compact_context, epoch, file_lock, finish_active_interval,
     load_config, load_state, new_state, read_json, record_context_usage, reopen_context, safe_summary,
     run_config, save_state, start_active_interval, state_path, utc_now, validate_config)
@@ -32,11 +32,14 @@ from processes import boot_id, pid_matches, process_start_ticks, scope_members, 
 from cleanup import cleanup_task
 from credit import partial_report, validate_evidence, validate_intervals
 from docker_network import bridge_preflight
+from completion import (COMPLETION_FAILURES, contract_for_run, diagnostic_receipt, digest,
+    evidence_heartbeat, inspect_evaluation, issue_receipt, timestamp, trust_boundary, validate_receipt, within)
 
 STOP_FILE = 'STOP'
 DEFAULT_STATE_DIR = '.autoresearch-controller'
 MAX_LINE = 131072
-EXIT_CODES = {'FAILED': 1, 'EXPIRED': 3}
+EXIT_CODES = {'FAILED': 1, 'EXPIRED': 3, 'FINALIZING': 4,
+              **{status: 4 for status in COMPLETION_FAILURES}}
 RETRYABLE_TURN_REASONS = frozenset({
     'agent_exit_nonzero', 'completion_missing', 'context_usage_missing', 'invalid_agent_event',
     'agent_reported_failure', 'heartbeat_stale', 'controller_lost', 'worker_error',
@@ -72,10 +75,92 @@ def stop_reason(run_dir: Path) -> str | None:
 def persist_exit(run_dir: Path, state: dict[str, Any]) -> int:
     code = EXIT_CODES.get(state['status'], 0)
     result = {'at': utc_now(), 'attempt': state['attempt'], 'status': state['status'],
-              'exit_code': code, 'stop_reason': state['stop_reason'], 'budget': budget_view(state)}
+              'exit_code': code, 'stop_reason': state['stop_reason'], 'budget': budget_view(state),
+              'completion': state.get('completion')}
     atomic_json(run_dir / 'attempts' / f"{state['attempt']:06d}" / 'exit.json', result)
     atomic_json(run_dir / 'exit.json', result)
     return code
+
+
+def frozen_completion_contract(run_dir, state):
+    path = within(run_dir, state['completion']['contract'])
+    value = read_json(path)
+    if digest(value) != state['completion']['contract_hash']:
+        raise ControllerError('frozen completion contract changed')
+    return value
+
+
+def completion_step(run_dir, state, config, *, live=False):
+    """One durable close-out step. This function has no job submission path."""
+    if state['status'] in COMPLETION_TERMINAL_STATES:
+        return state['status']
+    state.update(status='FINALIZING', stop_reason='completion_gate')
+    state['completion'].update(phase='FINALIZING', last_checked_at=utc_now())
+    state['controller_heartbeat_monotonic'] = time.monotonic()
+    save_state(run_dir, state)
+    try:
+        contract = frozen_completion_contract(run_dir, state)
+    except (OSError, ValueError, KeyError, TypeError):
+        status = 'PROTOCOL_BINDING_MISMATCH'
+        state.update(status=status, stop_reason='completion_contract_changed', resume_required=False)
+        state['completion'].update(phase=status, decided_at=utc_now(),
+            issues=[{'code': 'CONTRACT_BINDING_MISMATCH', 'message': 'frozen completion contract is missing or changed'}])
+        atomic_json(run_dir / 'completion.decision.json', {'version': 1, 'run_id': state['run_id'],
+            'status': status, 'at': utc_now(), 'original_deadline': state['budget']['hard_deadline_at'],
+            'issues': state['completion']['issues']})
+        save_state(run_dir, state)
+        return status
+    scored = contract['score_expectation'] == 'required'
+    path = None
+    verdict = None
+    try:
+        path = (within(contract['completion']['evidence_root'], contract['completion']['receipt']) if scored
+                else within(run_dir, 'completion.receipt.json'))
+        if path.is_file():
+            receipt = read_json(path)
+            verdict = validate_receipt(contract, receipt, live=live)
+    except (OSError, ValueError, KeyError, TypeError):
+        verdict = {'ok': False, 'status': 'COMPLETION_RECEIPT_MISSING', 'jobs': [],
+                   'issues': [{'code': 'RECEIPT_INVALID', 'message': 'completion receipt is malformed or unsafe'}]}
+    # An on-time, durable receipt survives a crash. An already expired run never gets here.
+    if verdict is None or not verdict['ok']:
+        if budget_view(state)['hard_reached'] or time.time() >= timestamp(contract['deadline']):
+            observation = inspect_evaluation(contract, live=False) if scored else {'jobs': []}
+            verdict = {'ok': False, 'status': 'INCOMPLETE_FINAL_SCORE' if scored else 'EXPIRED',
+                       'jobs': observation['jobs'], 'issues': [{'code': 'ORIGINAL_DEADLINE_REACHED',
+                       'message': 'original hard deadline reached before valid completion'}]}
+        elif verdict is None and scored:
+            try:
+                receipt = issue_receipt(contract, live=live)
+                verdict = validate_receipt(contract, receipt, live=live)
+            except (OSError, ValueError, KeyError, TypeError):
+                verdict = {'ok': False, 'status': 'COMPLETION_RECEIPT_MISSING', 'jobs': [],
+                           'issues': [{'code': 'RECEIPT_WRITE_FAILED',
+                                       'message': 'trusted completion receipt could not be sealed'}]}
+        elif verdict is None:
+            receipt = diagnostic_receipt(contract)
+            atomic_json(path, receipt)
+            verdict = validate_receipt(contract, receipt)
+    state['completion'].update(last_checked_at=utc_now(), jobs=verdict['jobs'], issues=verdict['issues'])
+    status = verdict['status']
+    if status == 'EVALUATION_PENDING':
+        state['completion']['evaluation_status'] = status
+    else:
+        state.update(status=status, stop_reason='completion_gate_passed' if verdict['ok'] else status.lower(),
+                     resume_required=False)
+        state['completion'].update(phase=status, decided_at=utc_now())
+        if verdict['ok']:
+            state['completion'].update(receipt=str(path), receipt_sha256=sha256(path))
+            if scored:
+                state['completion']['scientific_score'] = receipt['scientific_score']
+        atomic_json(run_dir / 'completion.decision.json', {
+            'version': 1, 'run_id': state['run_id'], 'task_id': state['task_id'], 'status': status,
+            'at': utc_now(), 'original_deadline': contract['deadline'], 'contract_hash': digest(contract),
+            'jobs': verdict['jobs'], 'issues': verdict['issues'],
+            'receipt_sha256': state['completion'].get('receipt_sha256')})
+    state['controller_heartbeat_monotonic'] = time.monotonic()
+    save_state(run_dir, state)
+    return status
 
 
 def init_run(config_path: Path | None, state_dir: Path, run: str, *, config: dict | None = None) -> dict:
@@ -87,12 +172,18 @@ def init_run(config_path: Path | None, state_dir: Path, run: str, *, config: dic
     if not cwd.is_relative_to(root) or not cwd.is_dir():
         raise ControllerError('workdir must exist within root on the execution host')
     run_dir = state_path(state_dir, run)
+    contract = contract_for_run(config, run)
+    trust_boundary(contract)
+    if config['score_expectation'] == 'required' and run_dir.is_relative_to(root):
+        raise ControllerError('scored run state and controller audit must be outside the candidate root')
     storage = check_storage(config['storage']['data_mount'], root, run_dir)
     run_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
     for name in ('context', 'turns', 'attempts'):
         (run_dir / name).mkdir()
     atomic_json(run_dir / 'config.json', config)
     state = new_state(config, run, run_dir)
+    atomic_json(run_dir / 'completion.contract.json', contract)
+    state['completion']['contract_hash'] = digest(contract)
     state.update(config_sha256=sha256(run_dir / 'config.json'), process_boot_id=boot_id(), storage=storage)
     # Pin executable sources used by this run. Running code is never hot-updated.
     from bundle import render
@@ -111,6 +202,20 @@ def recover_locked(run_dir: Path, *, reason: str = 'controller_lost') -> dict:
         raise ControllerError('worker cleanup incomplete; recovery is blocked')
     if token and not cleanup_task(Path(state['turn']['dir'])):
         raise ControllerError('task cleanup hook failed; inspect cleanup.log before resuming')
+    if state['status'] in COMPLETION_TERMINAL_STATES:
+        state.update(controller_pid=None, controller_start_ticks=None)
+        if not (run_dir / 'exit.json').exists():
+            persist_exit(run_dir, state)
+        save_state(run_dir, state)
+        return safe_summary(state)
+    if state.get('completion', {}).get('phase') == 'FINALIZING':
+        completion_step(run_dir, state, task_config(run_dir), live=False)
+        state.update(controller_pid=None, controller_start_ticks=None,
+                     resume_required=state['status'] == 'FINALIZING')
+        persist_exit(run_dir, state)
+        save_state(run_dir, state)
+        append_event(run_dir, 'run.completion_recovered', status=state['status'])
+        return safe_summary(state)
     if not state.get('controller_pid') and not state['budget'].get('active_started_at'):
         return safe_summary(state)
     if state['budget'].get('active_started_at'):
@@ -149,21 +254,29 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
             raise ControllerError('stop and confirm controller/guard/worker cleanup before amending')
         view = budget_view(state)
         expired = state['status'] == 'EXPIRED' or view['hard_reached']
-        if state['status'] == 'COMPLETED' or view['target_reached']:
+        if state['status'] in COMPLETION_TERMINAL_STATES - {'EXPIRED'} or view['target_reached']:
             raise ControllerError('cannot amend a completed budget')
+        if old['score_expectation'] == 'required' and (expired or config.get('deadline') != old['deadline']):
+            raise ControllerError('scored runs preserve the original completion deadline; create a new run')
         if expired and not extend_expired_budget:
             raise ControllerError('expired budget requires explicit --extend-expired-budget authorization')
         config = validate_config(config)
         for key in ('task_id', 'root', 'workdir', 'storage', 'context'):
             if config[key] != old[key]:
                 raise ControllerError('amend cannot change task identity, storage or context contract')
+        for key in ('stage', 'score_expectation', 'metric', 'direction', 'required_seeds',
+                    'candidate_manifest', 'protocol_hash', 'completion', 'deadline'):
+            if config[key] != old[key]:
+                raise ControllerError('amend preserves the frozen scientific completion contract')
         for key in ('mode', 'window_seconds', 'credit_policy'):
             if config['budget'][key] != old['budget'][key]:
                 raise ControllerError('amend preserves budget mode, target and credit policy')
         started = epoch(state['budget']['started_at'])
         if started is None:
             raise ControllerError('amend requires an already started run')
-        deadline = started + config['budget']['hard_limit_seconds']
+        deadline = min(started + config['budget']['hard_limit_seconds'], timestamp(old['deadline']))
+        if old['score_expectation'] == 'required' and deadline != epoch(state['budget']['hard_deadline_at']):
+            raise ControllerError('scored run amendments cannot move the original hard deadline')
         if deadline <= time.time():
             raise ControllerError('amended deadline must be in the future')
         if extend_expired_budget:
@@ -222,6 +335,7 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         folder.mkdir(parents=True)
         atomic_json(folder / 'previous-state.json', state)
         atomic_json(folder / 'previous-config.json', old)
+        atomic_json(folder / 'previous-completion-contract.json', frozen_completion_contract(run_dir, state))
         atomic_json(folder / 'credit-audit.json', credit)
         atomic_json(folder / 'config.json', config)
         relative = str((folder / 'config.json').relative_to(run_dir))
@@ -236,6 +350,10 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         state['budget'].update(hard_limit_seconds=config['budget']['hard_limit_seconds'], hard_deadline_at=new_deadline,
                                active_seconds=state['budget']['active_seconds'] + delta)
         state['paths']['config'] = relative
+        if config['score_expectation'] == 'not_expected':
+            contract = contract_for_run(config, state['run_id'], new_deadline)
+            atomic_json(run_dir / 'completion.contract.json', contract)
+            state['completion']['contract_hash'] = digest(contract)
         state.update(config_sha256=receipt['config_sha256'], source_sha256=sources,
                      controller_release=str(HERE), resume_required=True)
         if state['status'] == 'EXPIRED':
@@ -285,7 +403,7 @@ class LongRunController:
                 raise ControllerError('controller ownership exists; inspect status, then recover/--resume')
             recover_locked(self.run_dir)
             self.state = state = load_state(self.run_dir)
-        if state['status'] in ('COMPLETED', 'EXPIRED'):
+        if state['status'] in COMPLETION_TERMINAL_STATES:
             raise ControllerError(f"run is {state['status']}; its budget cannot be reset")
         if state['context']['state'] == 'COMPACTION_REQUIRED':
             raise ControllerError('context compact is required before starting')
@@ -375,6 +493,8 @@ class LongRunController:
                'AUTORESEARCH_RUN_ID': self.state['run_id'], 'AUTORESEARCH_TASK_ID': self.state['task_id'],
                'AUTORESEARCH_TURN': str(number), 'AUTORESEARCH_TURN_DIR': str(turn_dir),
                'AUTORESEARCH_CONTEXT_FILE': str(context_file),
+               'AUTORESEARCH_COMPLETION_CONTRACT': str(self.run_dir / 'completion.contract.json'),
+               'AUTORESEARCH_CONTROLLER_RELEASE': str(HERE),
                'AUTORESEARCH_CONTEXT_GENERATION': str(self.state['context']['generation']),
                'AUTORESEARCH_CONTEXT_MAX_TOKENS': str(self.state['context']['max_tokens']),
                'AUTORESEARCH_CONTEXT_COMPACT_AT_TOKENS': str(self.state['context']['compact_at_tokens']),
@@ -751,11 +871,14 @@ class LongRunController:
             if reason:
                 self.state.update(status='STOPPED', stop_reason=reason, resume_required=True)
                 return
+            if self.state.get('completion', {}).get('phase') == 'FINALIZING':
+                self.finalize()
+                return
             if view['hard_reached']:
                 self.state.update(status='EXPIRED', stop_reason='hard_limit')
                 return
             if view['target_reached']:
-                self.state.update(status='COMPLETED', stop_reason='target_reached')
+                self.finalize()
                 return
             self.pending_reason, self.summary, self.result, self.context_reported = None, None, {}, False
             self.retry_pending = False
@@ -770,7 +893,7 @@ class LongRunController:
                 return
             if reason == 'target_reached':
                 if budget_view(self.state)['target_reached']:
-                    self.state.update(status='COMPLETED', stop_reason=reason)
+                    self.finalize()
                     return
                 continue
             if (reason in CONTEXT_BOUNDARY_REASONS
@@ -797,6 +920,40 @@ class LongRunController:
                 self.state.update(status='FAILED', stop_reason=reason, resume_required=True)
                 return
 
+    def finalize(self):
+        self.event('run.finalizing', original_deadline=self.state['budget']['hard_deadline_at'])
+        previous = None
+        last_pulse = time.monotonic()
+        def pulse():
+            nonlocal last_pulse
+            now = time.monotonic()
+            if now - last_pulse >= min(1, self.config['heartbeat']['interval_seconds']):
+                self.save()
+                last_pulse = now
+        while True:
+            reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None)
+            if reason and reason != 'hard_limit' and not budget_view(self.state)['hard_reached']:
+                status = 'EVALUATION_PENDING' if self.config['score_expectation'] == 'required' else 'STOPPED'
+                self.state.update(status=status, stop_reason=reason)
+                self.state['completion'].update(phase=status, decided_at=utc_now())
+                atomic_json(self.run_dir / 'completion.decision.json', {
+                    'status': status, 'run_id': self.state['run_id'], 'at': utc_now(),
+                    'original_deadline': self.state['budget']['hard_deadline_at'], 'reason': reason})
+                self.save()
+                return
+            with evidence_heartbeat(pulse):
+                status = completion_step(self.run_dir, self.state, self.config, live=True)
+            current = (status, digest(self.state['completion'].get('jobs', [])))
+            if current != previous:
+                self.event('run.completion_progress', status=status, jobs=self.state['completion'].get('jobs'),
+                           issues=self.state['completion'].get('issues'))
+                previous = current
+            if self.state['status'] != 'FINALIZING':
+                return
+            self.save()
+            time.sleep(min(self.config['heartbeat']['interval_seconds'],
+                           max(.01, budget_view(self.state)['remaining_seconds'])))
+
     def run(self):
         with file_lock(self.run_dir / '.controller.lock', blocking=False):
             self.state = load_state(self.run_dir)
@@ -806,7 +963,12 @@ class LongRunController:
                 self.signalled = True
             for sig in old_handlers:
                 signal.signal(sig, stopped)
+            first_start = self.state['budget']['started_at'] is None
             begin_run(self.state)
+            if first_start:
+                contract = contract_for_run(self.config, self.state['run_id'], self.state['budget']['hard_deadline_at'])
+                atomic_json(self.run_dir / 'completion.contract.json', contract)
+                self.state['completion']['contract_hash'] = digest(contract)
             self.state.update(controller_pid=os.getpid(), controller_start_ticks=process_start_ticks(os.getpid()),
                               process_boot_id=boot_id())
             self.save()
@@ -896,7 +1058,7 @@ def operator_stop(run_dir: Path, reason: str, *, signal_controller=True):
             if state.get('controller_pid'):
                 recover_locked(run_dir)
             state = load_state(run_dir)
-            if state['status'] not in ('COMPLETED', 'EXPIRED'):
+            if state['status'] not in COMPLETION_TERMINAL_STATES:
                 state.update(status='STOPPED', stop_reason='operator_stop', resume_required=True)
                 save_state(run_dir, state)
                 persist_exit(run_dir, state)

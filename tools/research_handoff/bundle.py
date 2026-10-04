@@ -19,15 +19,19 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST = "CONTROLLER_MANIFEST.json"
-EXECUTABLES = {"controller.py", "bundle.py", "templates/launch_controller.sh"}
+EXECUTABLES = {"controller.py", "bundle.py", "research_completion.py", "templates/launch_controller.sh"}
 FILES = (
     "controller.py",
     "bundle.py",
+    "research_completion.py",
+    "COMPLETION.md",
+    "experiment_batch.py",
     "README.md",
     "core/__init__.py",
     "core/processes.py",
     "core/cleanup.py",
     "core/credit.py",
+    "core/completion.py",
     "core/docker_network.py",
     "core/worker.py",
     "core/rpc.py",
@@ -39,6 +43,8 @@ FILES = (
     "providers/codex_transport.py",
     "templates/agent_protocol.py",
     "templates/launch_controller.sh",
+    "templates/public_docker_network.service.in",
+    "templates/public_docker_network.timer.in",
     "controller.example.json",
     "connection.example.json",
     "templates/demo_agent.py",

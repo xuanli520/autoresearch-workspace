@@ -1,0 +1,14 @@
+[Unit]
+Description=Maintain the public Docker default bridge while the host is running
+Wants=docker.service
+After=docker.service
+RequiresMountsFor=@DATA_MOUNT@
+
+[Timer]
+OnBootSec=5
+OnUnitActiveSec=15
+AccuracySec=1
+Unit=autoresearch-public-docker-network.service
+
+[Install]
+WantedBy=timers.target

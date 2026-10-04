@@ -67,6 +67,8 @@
 # Generic GPU monitor source, README, and example configuration.
 /tools/*
 !/tools/README.md
+!/tools/research_completion/
+!/tools/research_completion/*.py
 !/tools/gpu_monitor/
 /tools/gpu_monitor/*
 !/tools/gpu_monitor/.gitignore
@@ -100,6 +102,8 @@
 !/tools/research_handoff/templates/*.py
 !/tools/research_handoff/templates/*.json
 !/tools/research_handoff/templates/*.sh
+!/tools/research_handoff/templates/public_docker_network.service.in
+!/tools/research_handoff/templates/public_docker_network.timer.in
 
 # Never allow generated files, tests, or credentials through the allowlist.
 **/__pycache__/
