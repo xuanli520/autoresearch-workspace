@@ -14,7 +14,7 @@ def main():
     try:
         payload = json.loads(sys.stdin.buffer.read(2*1024*1024))
         args = argparse.Namespace(**payload['args'])
-        if args.action not in ('init', 'start', 'status', 'doctor', 'stop', 'recover', 'context', 'logs', 'amend', 'docker-network'):
+        if args.action not in ('init', 'start', 'status', 'doctor', 'stop', 'recover', 'rebase', 'context', 'logs', 'amend', 'docker-network'):
             raise ValueError('unsupported remote action')
         check_storage(payload['data_mount'], Path(args.state_dir))
         if args.action == 'start' and (not args.background or args.no_guard):

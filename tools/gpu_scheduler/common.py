@@ -80,15 +80,22 @@ def check_storage(config, *paths):
     """Reject the system device and changed/nested mounts before new writes."""
     if config["local_test"]:
         return
-    mount = Path(config["data_mount"]).resolve(strict=True)
-    if not mount.is_mount() or mount.stat().st_dev == Path("/").stat().st_dev:
-        raise ValueError("data_mount must be a mounted data device distinct from /")
-    if config.get("data_device") not in (None, mount.stat().st_dev):
-        raise ValueError("data mount device changed")
+    mounts = [Path(name).resolve(strict=True) for name in
+              [config["data_mount"], *config.get("data_mounts", [])]]
+    for mount in mounts:
+        if not mount.is_mount() or mount.stat().st_dev == Path("/").stat().st_dev:
+            raise ValueError("data_mount must be a mounted data device distinct from /")
+        expected = config.get("data_devices", {}).get(str(mount))
+        if mount == mounts[0]:
+            expected = config.get("data_device", expected)
+        if expected not in (None, mount.stat().st_dev):
+            raise ValueError("data mount device changed")
     for item in paths:
         path = Path(item).resolve()
-        if not path.is_relative_to(mount):
+        matching = [mount for mount in mounts if path.is_relative_to(mount)]
+        if not matching:
             raise ValueError(f"path is outside data_mount: {path}")
+        mount = max(matching, key=lambda p: len(p.parts))
         ancestor = path
         while not ancestor.exists():
             ancestor = ancestor.parent
@@ -121,11 +128,18 @@ def validate_config(raw, *, local_test=False):
     fields(raw, {"version", "root", "data_mount", "gpus", "cpu_cores", "ram_mib"},
            {"poll_seconds", "service_seconds", "persistent", "max_running", "scheduling_policy",
             "starvation_seconds", "max_bypass", "max_jobs", "min_free_disk_mib",
-            "external_process_policy", "shared_headroom_mib", "infrastructure_lease"})
+            "external_process_policy", "shared_headroom_mib", "infrastructure_lease", "data_mounts"})
     if type(raw["version"]) is not int or raw["version"] != 1:
         raise ValueError("version must be 1")
     cfg = dict(raw, root=absolute(raw["root"], "root"), local_test=local_test)
     cfg["data_mount"] = None if local_test else absolute(raw["data_mount"], "data_mount")
+    extra_mounts = raw.get("data_mounts", [])
+    if not isinstance(extra_mounts, list) or len(extra_mounts) > 32:
+        raise ValueError("data_mounts must be an array of at most 32 explicit data mounts")
+    if extra_mounts:
+        cfg["data_mounts"] = [absolute(name, "data_mounts") for name in extra_mounts]
+        if len(set(cfg["data_mounts"])) != len(extra_mounts):
+            raise ValueError("duplicate data_mounts")
     cfg["poll_seconds"] = number(raw.get("poll_seconds", 1), "poll_seconds", .05, 10)
     persistent = raw.get("persistent", False)
     if type(persistent) is not bool:
@@ -175,6 +189,8 @@ def validate_config(raw, *, local_test=False):
         integer(gpu["compute_units"], "compute_units", 1, 100)
     check_storage(cfg, cfg["root"])
     cfg["data_device"] = None if local_test else Path(cfg["data_mount"]).stat().st_dev
+    if not local_test and extra_mounts:
+        cfg["data_devices"] = {name: Path(name).stat().st_dev for name in cfg["data_mounts"]}
     return cfg
 
 

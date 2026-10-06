@@ -267,7 +267,7 @@ class Scheduler:
                 self.transition(job, "EXPIRED", "insufficient_remaining_budget")
         queue = [j for j in queue if j["state"] == "QUEUED"]
         # Inspect /proc once per tick, not once for every candidate/forecast.
-        pid_sets = process_map(self.active())
+        pid_sets = process_map(self.active(), snapshot)
         while queue:
             now = time.monotonic()
             active = self.active()

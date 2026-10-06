@@ -5,6 +5,7 @@ import argparse
 import fcntl
 import json
 import re
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -49,12 +50,32 @@ def cleanup(root, docker, output):
         return receipt
 
 
+def validate_storage(mount, socket, root, output_parent, docker, *, allow_existing_system_socket=False):
+    """A pre-existing IPC socket may be off disk; task storage may not be."""
+    for path in (root, output_parent):
+        if not path.is_relative_to(mount) or path.stat().st_dev != mount.stat().st_dev:
+            raise ValueError("cleanup storage must stay on the data device")
+    if not stat.S_ISSOCK(socket.stat().st_mode):
+        raise ValueError("cleanup endpoint must be an actual Unix socket")
+    if socket.is_relative_to(mount) and socket.stat().st_dev == mount.stat().st_dev:
+        return
+    if not allow_existing_system_socket:
+        raise ValueError("off-disk IPC socket requires explicit verified existing-runtime opt-in")
+    # Reading an existing socket creates no task files on its device. Confirm
+    # the actual daemon stores every container layer under the data mount.
+    actual = Path(json.loads(docker("info", "--format", "{{json .DockerRootDir}}"))).resolve(strict=True)
+    if not actual.is_relative_to(mount) or actual.stat().st_dev != mount.stat().st_dev:
+        raise ValueError("existing Docker daemon storage is not on the data device")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--ownership-root", required=True, type=Path)
     p.add_argument("--docker-host", required=True)
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--data-mount", required=True, type=Path)
+    p.add_argument("--allow-existing-system-socket", action="store_true",
+                   help="Use a pre-existing IPC socket after checking its daemon's data-root; no daemon mutation")
     a = p.parse_args()
     mount = a.data_mount.resolve(strict=True)
     if not mount.is_mount() or mount.stat().st_dev == Path("/").stat().st_dev:
@@ -63,15 +84,13 @@ def main():
         raise ValueError("cleanup requires an explicit local Docker socket")
     socket = Path(a.docker_host[7:]).resolve(strict=True)
     root = a.ownership_root.resolve(strict=True)
-    for path in (socket, root, a.output.parent.resolve(strict=True)):
-        if not path.is_relative_to(mount) or path.stat().st_dev != mount.stat().st_dev:
-            raise ValueError("cleanup paths must stay on the data device")
-
     def docker(*argv):
         result = subprocess.run(["docker", "--host", a.docker_host, *argv], capture_output=True,
                                 text=True, timeout=20, check=True)
         return result.stdout
 
+    validate_storage(mount, socket, root, a.output.parent.resolve(strict=True), docker,
+                     allow_existing_system_socket=a.allow_existing_system_socket)
     print(json.dumps(cleanup(root, docker, a.output)), flush=True)
 
 

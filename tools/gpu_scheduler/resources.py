@@ -7,6 +7,7 @@ import subprocess
 import time
 
 from .common import processes
+from .container_ownership import container_process_map
 
 
 def _query(fields):
@@ -35,8 +36,13 @@ def simulated_probe(config):
     } for g in config["gpus"]}}
 
 
-def process_map(active):
-    return {j["id"]: {pid for pid, _ in processes.scope_members(j["token"])} for j in active}
+def process_map(active, snapshot=None):
+    pid_sets = {j["id"]: {pid for pid, _ in processes.scope_members(j["token"])} for j in active}
+    gpu_pids = {p["pid"] for gpu in (snapshot or {}).get("gpus", {}).values()
+                for p in gpu["processes"]}
+    for job_id, pids in container_process_map(active, gpu_pids).items():
+        pid_sets[job_id].update(pids)
+    return pid_sets
 
 
 def choose_gpu(spec, active, config, snapshot, quarantined, *, pid_sets=None):
@@ -47,8 +53,8 @@ def choose_gpu(spec, active, config, snapshot, quarantined, *, pid_sets=None):
             return None, f"insufficient_{key}"
     if not snapshot or time.time() - snapshot["at"] > max(10, config["poll_seconds"] * 3):
         return None, "telemetry_unavailable_or_stale"
-    # Associate only observable same-UID descendants retaining our random token.
-    pid_sets = process_map(active) if pid_sets is None else pid_sets
+    # Host token scopes plus attested Docker cgroups; unknown processes stay external.
+    pid_sets = process_map(active, snapshot) if pid_sets is None else pid_sets
     known_pids = set().union(*pid_sets.values()) if pid_sets else set()
     reasons, choices = [], []
     for gpu in config["gpus"]:

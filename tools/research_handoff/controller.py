@@ -239,13 +239,113 @@ def recover_run(run_dir: Path) -> dict:
         return recover_locked(run_dir)
 
 
+def rebase_boot_run(run_dir: Path, *, reason: str) -> dict:
+    """Reconcile a controller-lost run after a host reboot.
+
+    A reboot invalidates the old monotonic clock, but it does not consume the
+    wall-clock deadline. This operation records the old state and exit receipt,
+    then establishes a new monotonic baseline without changing the deadline,
+    target, credit, or scientific configuration.
+    """
+    if not isinstance(reason, str) or not reason.strip():
+        raise ControllerError('boot rebase requires an explicit reason')
+    with file_lock(run_dir / '.controller.lock', blocking=False), file_lock(run_dir / '.state.lock'):
+        state = load_state(run_dir)
+        current_boot = boot_id()
+        previous_boot = state.get('budget', {}).get('boot_id')
+        if not previous_boot or previous_boot == current_boot:
+            raise ControllerError('boot rebase requires a changed host boot identity')
+        if state.get('status') not in {'EXPIRED', 'PAUSED', 'STOPPED', 'FAILED'}:
+            raise ControllerError('boot rebase requires a stopped or controller-lost run')
+        # A host reboot invalidates the saved monotonic clock.  A run may have
+        # been marked hard_limit during a failed resume (or authorized budget
+        # extension) before that mismatch was reconciled; the wall-clock
+        # checks below still decide whether rebasing is safe.
+        if state.get('stop_reason') not in {'controller_lost', 'authorized_deadline_extension', 'hard_limit'}:
+            raise ControllerError('boot rebase requires a controller-loss or reboot-affected stop reason')
+        if state.get('completion', {}).get('phase') not in (None, 'NOT_STARTED'):
+            raise ControllerError('boot rebase cannot alter a completion workflow')
+        if (pid_matches(state.get('controller_pid'), state.get('controller_start_ticks'), previous_boot)
+                or pid_matches(state.get('guard_pid'), state.get('guard_start_ticks'), previous_boot)):
+            raise ControllerError('controller or guard is still alive; recover it first')
+        if state['budget'].get('active_started_at') is not None:
+            raise ControllerError('active interval is still open; recover it first')
+        if scope_members(state['turn'].get('token', '')):
+            raise ControllerError('owned worker is still alive; cleanup is required before rebasing')
+        if state['turn'].get('token') and not cleanup_task(Path(state['turn']['dir'])):
+            raise ControllerError('task cleanup hook failed; inspect cleanup.log before rebasing')
+
+        config = task_config(run_dir)
+        started = epoch(state['budget'].get('started_at'))
+        deadline = epoch(state['budget'].get('hard_deadline_at'))
+        declared = epoch(state.get('declared_deadline'))
+        configured = timestamp(config['deadline'])
+        expected_deadline = None if started is None else min(
+            started + float(state['budget']['hard_limit_seconds']), configured)
+        if (started is None or deadline is None or declared is None or expected_deadline is None
+                or abs(deadline - expected_deadline) > 1e-3):
+            raise ControllerError('boot rebase requires an intact original deadline')
+        if abs(declared - configured) > 1e-6:
+            raise ControllerError('boot rebase requires the declared deadline to remain unchanged')
+        wall = max(0.0, time.time() - started)
+        remaining = min(state['budget']['hard_limit_seconds'] - wall, deadline - time.time())
+        if remaining <= 0:
+            raise ControllerError('original hard deadline has passed; use the expiry extension contract')
+        if state['budget']['active_seconds'] >= state['budget']['window_seconds']:
+            raise ControllerError('research target is already reached')
+
+        from bundle import render
+        sources = {name: hashlib.sha256(data).hexdigest() for name, data in render().items()}
+        recovery_root = run_dir / 'recovery'
+        recovery_root.mkdir(exist_ok=True)
+        number = 1
+        while (recovery_root / f'{number:06d}').exists():
+            number += 1
+        folder = recovery_root / f'{number:06d}'
+        folder.mkdir()
+        atomic_json(folder / 'previous-state.json', state)
+        atomic_json(folder / 'previous-exit.json', read_json(run_dir / 'exit.json', {}))
+        receipt = {
+            'version': 1,
+            'at': utc_now(),
+            'reason': reason,
+            'kind': 'boot_rebase',
+            'previous_boot_id': previous_boot,
+            'current_boot_id': current_boot,
+            'previous_status': state['status'],
+            'previous_stop_reason': state['stop_reason'],
+            'hard_deadline_at': state['budget']['hard_deadline_at'],
+            'active_seconds_preserved': state['budget']['active_seconds'],
+            'remaining_wall_seconds': remaining,
+            'previous_config_sha256': state['config_sha256'],
+            'previous_source_sha256': state['source_sha256'],
+            'source_sha256': sources,
+        }
+        atomic_json(folder / 'receipt.json', receipt)
+        state['budget'].update(boot_id=current_boot, started_monotonic=time.monotonic(),
+                               active_monotonic=None)
+        state.update(controller_pid=None, controller_start_ticks=None, guard_pid=None,
+                     guard_start_ticks=None, process_boot_id=current_boot, status='PAUSED',
+                     stop_reason='boot_rebased', resume_required=True, source_sha256=sources,
+                     controller_release=str(HERE))
+        state['turn'].update(pid=None, pid_start_ticks=None)
+        save_state(run_dir, state)
+        append_event(run_dir, 'run.boot_rebased', recovery=str(folder.relative_to(run_dir)),
+                     previous_boot_id=previous_boot, current_boot_id=current_boot,
+                     hard_deadline_at=state['budget']['hard_deadline_at'],
+                     active_seconds_preserved=state['budget']['active_seconds'])
+        return {'recovery': receipt, 'status': safe_summary(state)}
+
+
 def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_turn: int,
-              reason: str, credit: dict | None = None, extend_expired_budget: bool = False) -> dict:
+              reason: str, credit: dict | None = None, extend_expired_budget: bool = False,
+              storage_migration_source: Path | None = None) -> dict:
     if not isinstance(reason, str) or not reason.strip():
         raise ControllerError('amend requires an explicit authorization reason')
     with file_lock(run_dir / '.controller.lock', blocking=False), file_lock(run_dir / '.state.lock'):
         state = load_state(run_dir)
         old = task_config(run_dir)
+        config = validate_config(config)
         if state['config_sha256'] != expected_sha256 or state['turn']['number'] != expected_turn:
             raise ControllerError('stale amendment; reload state before applying')
         if (state.get('controller_pid') or state['budget'].get('active_started_at')
@@ -256,16 +356,21 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         expired = state['status'] == 'EXPIRED' or view['hard_reached']
         if state['status'] in COMPLETION_TERMINAL_STATES - {'EXPIRED'} or view['target_reached']:
             raise ControllerError('cannot amend a completed budget')
-        if old['score_expectation'] == 'required' and (expired or config.get('deadline') != old['deadline']):
-            raise ControllerError('scored runs preserve the original completion deadline; create a new run')
         if expired and not extend_expired_budget:
             raise ControllerError('expired budget requires explicit --extend-expired-budget authorization')
-        config = validate_config(config)
-        for key in ('task_id', 'root', 'workdir', 'storage', 'context'):
+        deadline_changed = config['deadline'] != old['deadline']
+        if deadline_changed and not (expired and extend_expired_budget):
+            raise ControllerError('amend preserves the frozen scientific completion contract')
+        for key in ('task_id', 'root', 'workdir', 'context'):
             if config[key] != old[key]:
                 raise ControllerError('amend cannot change task identity, storage or context contract')
+        if config['storage'] != old['storage'] and storage_migration_source is None:
+            raise ControllerError('storage change requires explicit --storage-migration-source')
+        if storage_migration_source is not None and (deadline_changed or extend_expired_budget
+                                                    or credit and credit.get('turns')):
+            raise ControllerError('storage migration cannot change deadline or add historical credit')
         for key in ('stage', 'score_expectation', 'metric', 'direction', 'required_seeds',
-                    'candidate_manifest', 'protocol_hash', 'completion', 'deadline'):
+                    'candidate_manifest', 'protocol_hash', 'completion'):
             if config[key] != old[key]:
                 raise ControllerError('amend preserves the frozen scientific completion contract')
         for key in ('mode', 'window_seconds', 'credit_policy'):
@@ -274,9 +379,7 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         started = epoch(state['budget']['started_at'])
         if started is None:
             raise ControllerError('amend requires an already started run')
-        deadline = min(started + config['budget']['hard_limit_seconds'], timestamp(old['deadline']))
-        if old['score_expectation'] == 'required' and deadline != epoch(state['budget']['hard_deadline_at']):
-            raise ControllerError('scored run amendments cannot move the original hard deadline')
+        deadline = min(started + config['budget']['hard_limit_seconds'], timestamp(config['deadline']))
         if deadline <= time.time():
             raise ControllerError('amended deadline must be in the future')
         if extend_expired_budget:
@@ -286,7 +389,12 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
             if credit and credit.get('turns'):
                 raise ControllerError('expiry extension cannot add historical credit')
         storage = check_storage(config['storage']['data_mount'], run_dir, Path(config['root']))
-        if storage != state['storage']:
+        migration = None
+        if storage_migration_source is not None:
+            from storage_migration import verify_migration
+            migration = verify_migration(run_dir, Path(config['root']), state, storage,
+                                         Path(storage_migration_source))
+        elif storage != state['storage']:
             raise ControllerError('data device changed')
         credit = credit or {'run_id': state['run_id'], 'turns': [], 'evidence': []}
         if credit.get('run_id') != state['run_id'] or not isinstance(credit.get('turns'), list):
@@ -333,29 +441,36 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
             number += 1
         folder = run_dir / 'amendments' / f'{number:06d}'
         folder.mkdir(parents=True)
+        previous_contract = frozen_completion_contract(run_dir, state)
         atomic_json(folder / 'previous-state.json', state)
         atomic_json(folder / 'previous-config.json', old)
-        atomic_json(folder / 'previous-completion-contract.json', frozen_completion_contract(run_dir, state))
+        atomic_json(folder / 'previous-completion-contract.json', previous_contract)
         atomic_json(folder / 'credit-audit.json', credit)
+        if migration is not None:
+            atomic_json(folder / 'storage-migration.json', migration)
         atomic_json(folder / 'config.json', config)
         relative = str((folder / 'config.json').relative_to(run_dir))
         import datetime
         new_deadline = datetime.datetime.fromtimestamp(deadline, datetime.timezone.utc).isoformat()
+        contract = contract_for_run(config, state['run_id'], new_deadline)
         receipt = {'at': utc_now(), 'reason': reason, 'previous_deadline_at': state['budget']['hard_deadline_at'],
                    'hard_deadline_at': new_deadline, 'credited_seconds_added': delta, 'turns': numbers,
                    'expired_budget_extended': bool(expired and extend_expired_budget),
                    'previous_config_sha256': state['config_sha256'], 'config_sha256': sha256(folder / 'config.json'),
+                   'previous_contract_hash': digest(previous_contract), 'contract_hash': digest(contract),
                    'controller_release': str(HERE), 'source_sha256': sources}
+        if migration is not None:
+            receipt['storage_migration'] = {'path': str(folder / 'storage-migration.json'),
+                                            'sha256': sha256(folder / 'storage-migration.json')}
         atomic_json(folder / 'receipt.json', receipt)
         state['budget'].update(hard_limit_seconds=config['budget']['hard_limit_seconds'], hard_deadline_at=new_deadline,
                                active_seconds=state['budget']['active_seconds'] + delta)
         state['paths']['config'] = relative
-        if config['score_expectation'] == 'not_expected':
-            contract = contract_for_run(config, state['run_id'], new_deadline)
-            atomic_json(run_dir / 'completion.contract.json', contract)
-            state['completion']['contract_hash'] = digest(contract)
+        atomic_json(run_dir / 'completion.contract.json', contract)
+        state['completion']['contract_hash'] = digest(contract)
+        state['declared_deadline'] = config['deadline']
         state.update(config_sha256=receipt['config_sha256'], source_sha256=sources,
-                     controller_release=str(HERE), resume_required=True)
+                     controller_release=str(HERE), resume_required=True, storage=storage)
         if state['status'] == 'EXPIRED':
             state.update(status='PAUSED', stop_reason='authorized_deadline_extension')
         state.setdefault('credit_adjustments', []).append({'path': str(folder / 'credit-audit.json'),
@@ -1216,6 +1331,7 @@ def build_parser():
             cmd.add_argument('--request-id', help=argparse.SUPPRESS)
     for name in ('status', 'doctor', 'recover'):
         sub.add_parser(name).add_argument('--run-id', required=True)
+    cmd = sub.add_parser('rebase'); cmd.add_argument('--run-id', required=True); cmd.add_argument('--reason', required=True)
     cmd = sub.add_parser('watch'); cmd.add_argument('--run-id', required=True)
     cmd.add_argument('--interval', type=float, default=5); cmd.add_argument('--seconds', type=float); cmd.add_argument('--json', action='store_true')
     cmd = sub.add_parser('stop'); cmd.add_argument('--run-id', required=True); cmd.add_argument('--reason', required=True)
@@ -1226,6 +1342,8 @@ def build_parser():
     cmd.add_argument('--reason', required=True)
     cmd.add_argument('--extend-expired-budget', action='store_true',
                      help='explicitly authorize a later deadline for an expired, fully stopped run; preserves target and credit')
+    cmd.add_argument('--storage-migration-source', type=Path,
+                     help='explicitly migrate a fully stopped run, verifying its preserved source on the old data device')
     cmd = sub.add_parser('logs'); cmd.add_argument('--run-id', required=True)
     cmd.add_argument('--stream', choices=('stdout', 'stderr', 'controller', 'guard', 'events'), default='stderr')
     cmd.add_argument('--bytes', type=int, default=16384)
@@ -1265,12 +1383,14 @@ def dispatch(args, *, remote_payload=None):
         result = doctor_run(run_dir); return result, 0 if result['ok'] else 1
     if args.action == 'stop': return operator_stop(run_dir, args.reason, signal_controller=not args.no_signal), 0
     if args.action == 'recover': return recover_run(run_dir), 0
+    if args.action == 'rebase': return rebase_boot_run(run_dir, reason=args.reason), 0
     if args.action == 'amend':
         config = remote_payload['config'] if remote_payload else load_config(args.config)
         credit = remote_payload.get('credit') if remote_payload else read_json(args.credit_file) if args.credit_file else None
         return amend_run(run_dir, config, expected_sha256=args.expected_config_sha256,
                          expected_turn=args.expected_turn, reason=args.reason, credit=credit,
-                         extend_expired_budget=args.extend_expired_budget), 0
+                         extend_expired_budget=args.extend_expired_budget,
+                         storage_migration_source=getattr(args, 'storage_migration_source', None)), 0
     if args.action == 'guard': return None, guard_loop(run_dir, args.attempt)
     if args.action == 'watch':
         if not .05 <= args.interval <= 3600 or args.seconds is not None and not 0 < args.seconds <= 43200:

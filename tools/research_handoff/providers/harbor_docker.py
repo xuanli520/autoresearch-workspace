@@ -21,11 +21,17 @@ from ..core.docker_network import bridge_preflight, egress_rules, validate_netwo
 class ManagedDockerEnvironment(DockerEnvironment):
     def __init__(self, *args, network_config=None, model_host_addresses=None,
                  use_default_bridge=True, ownership_root=None, completion_contract=None,
-                 public_image_digest=None, **kwargs):
+                 public_image_digest=None, gpu_attachment="device-request", gpu_memory_policy=None, **kwargs):
         if type(use_default_bridge) is not bool:
             raise ValueError("use_default_bridge must be boolean")
         if not use_default_bridge:
             raise ValueError("managed Harbor provider requires the Docker default bridge")
+        if gpu_attachment not in {"device-request", "cdi"}:
+            raise ValueError("gpu_attachment must be device-request or cdi")
+        self.gpu_attachment = gpu_attachment
+        self.gpu_memory_policy = gpu_memory_policy
+        self._gpu_memory_guard = None
+        self._gpu_guard_dir = None
         environment_dir = kwargs.get("environment_dir", args[0] if args else None)
         self._trusted_verifier = environment_dir is not None and Path(environment_dir).name == "tests"
         self.network_config = validate_network_config(network_config or {
@@ -80,6 +86,15 @@ class ManagedDockerEnvironment(DockerEnvironment):
         main = {} if getattr(self, '_use_prebuilt', False) else {"build": {"network": "default"}}
         if self._trusted_verifier:
             main['network_mode'] = 'none'
+        if self.gpu_memory_policy:
+            if self.ownership_root is None:
+                raise ValueError('host GPU enforcement requires ownership_root')
+            if self._gpu_guard_dir is None:
+                self._gpu_guard_dir = self.ownership_root / ('gpu-guard-' + _sanitize_docker_compose_project_name(self.session_id))
+                self._gpu_guard_dir.mkdir(mode=0o700, exist_ok=False)
+            main.setdefault('volumes', []).append({
+                'type': 'bind', 'source': str(self._gpu_guard_dir),
+                'target': '/run/autoresearch-gpu-guard', 'read_only': True})
         self._managed_build_path.write_text(json.dumps({"services": {"main": main}}))
         return [*paths, self._managed_build_path]
 
@@ -91,8 +106,15 @@ class ManagedDockerEnvironment(DockerEnvironment):
                 raise ValueError("one scheduler-assigned GPU UUID is required")
             document = json.loads(path.read_text())
             resources = document["services"]["main"].setdefault("deploy", {}).setdefault("resources", {})
-            resources.setdefault("reservations", {})["devices"] = [
-                {"driver": "nvidia", "device_ids": [gpu], "capabilities": ["gpu"]}]
+            reservations = resources.setdefault("reservations", {})
+            if self.gpu_attachment == "cdi":
+                reservations.pop("devices", None)
+                main = document["services"]["main"]
+                main["devices"] = ["nvidia.com/gpu=" + gpu]
+                main.setdefault("environment", {})["NVIDIA_VISIBLE_DEVICES"] = "void"
+            else:
+                reservations["devices"] = [
+                    {"driver": "nvidia", "device_ids": [gpu], "capabilities": ["gpu"]}]
             path.write_text(json.dumps(document, indent=2))
         return path
 
@@ -136,6 +158,10 @@ class ManagedDockerEnvironment(DockerEnvironment):
             if checked.return_code:
                 raise RuntimeError("model HTTPS preflight failed before Agent requests: " + (checked.stderr or checked.stdout or "")[-1000:])
             self._receipt("https-" + _sanitize_docker_compose_project_name(self.session_id), json.loads(checked.stdout))
+        elif network_policy.network_mode == NetworkMode.NO_NETWORK and not self._trusted_verifier:
+            script = "printf '%s\\n' " + shlex.quote(egress_rules([])) + " | nft --file -"
+            await self._run_docker_compose_command([
+                "exec", "--no-TTY", self._EGRESS_CONTROL_SERVICE_NAME, "sh", "-c", script])
         else:
             await super()._apply_network_policy(network_policy)
         self.logger.info('Managed Agent network policy applied: %s', network_policy.network_mode.value)
@@ -157,6 +183,36 @@ class ManagedDockerEnvironment(DockerEnvironment):
             if not self._enable_egress_control:
                 raise ValueError("Agent isolation requires Harbor egress control before startup")
         result = await super().start(force_build)
+        if self.gpu_memory_policy:
+            import subprocess
+            from .host_gpu_memory import HostGpuMemoryGuard
+            inspected = await self._run_docker_compose_command(['ps', '-q', 'main'])
+            container = inspected.stdout.strip()
+            receipt = subprocess.run(['docker', '--host', self.network_config['docker_host'],
+                                      'inspect', container], capture_output=True, text=True, check=True, timeout=15)
+            info = json.loads(receipt.stdout)[0]
+            self._gpu_memory_guard = HostGpuMemoryGuard(
+                info['State']['Pid'], os.environ['CUDA_VISIBLE_DEVICES'],
+                self._gpu_guard_dir, self.gpu_memory_policy)
+            self._gpu_memory_guard.start()
+            self._receipt('gpu-memory-' + _sanitize_docker_compose_project_name(self.session_id),
+                          {'container_id': container, 'guard_dir': str(self._gpu_guard_dir),
+                           **self._gpu_memory_guard.state})
+        if self._trusted_verifier:
+            secured = await self.exec("chown root:root /logs/verifier && chmod 700 /logs/verifier", user="root")
+            if secured.return_code:
+                raise RuntimeError("could not secure trusted verifier output at startup")
+        else:
+            # An unchanged Harbor phase policy skips set_network_policy().
+            await self._apply_network_policy(self.network_policy)
+        if os.environ.get("GPU_SCHEDULER_JOB_DIR"):
+            from tools.gpu_scheduler.container_ownership import register_container
+            inspected = await self._run_docker_compose_command(['ps', '-q', 'main'])
+            containers = inspected.stdout.strip().splitlines()
+            if len(containers) != 1:
+                raise ValueError("managed provider requires one exact main container")
+            register_container(containers[0], self.network_config['docker_host'],
+                               _sanitize_docker_compose_project_name(self.session_id))
         if self.completion_contract and not self._trusted_verifier:
             from ..core.completion import attest_docker_isolation
             inspected = await self._run_docker_compose_command(['ps', '-q', 'main'])
@@ -170,6 +226,15 @@ class ManagedDockerEnvironment(DockerEnvironment):
             if saved.return_code:
                 raise RuntimeError("could not freeze permitted model DNS")
         return result
+
+    async def stop(self, delete):
+        try:
+            if self._gpu_memory_guard is not None:
+                self._gpu_memory_guard.close()
+                self._receipt('gpu-memory-final-' + _sanitize_docker_compose_project_name(self.session_id),
+                              self._gpu_memory_guard.state)
+        finally:
+            await super().stop(delete=delete)
 
     async def empty_dirs(self, dirs, *, chmod=True):
         result = await super().empty_dirs(dirs, chmod=chmod)
