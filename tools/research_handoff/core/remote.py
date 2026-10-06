@@ -9,11 +9,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
+from typing import Any, Sequence
+import argparse
 
 from longrun import ControllerError, positive_number, read_json, validate_config
 
 
-def _monitor_module():
+def _monitor_module() -> ModuleType:
     try:
         from tools.gpu_monitor import monitor
     except ModuleNotFoundError:
@@ -24,7 +27,7 @@ def _monitor_module():
     return monitor
 
 
-def connection_config(path: Path) -> dict:
+def connection_config(path: Path) -> dict[str, Any]:
     value = read_json(path)
     defaults = {'port': 22, 'python': 'python3', 'connect_timeout_seconds': 10,
                 'command_timeout_seconds': 30, 'identity_file': None, 'known_hosts_file': None,
@@ -59,7 +62,7 @@ def connection_config(path: Path) -> dict:
     return cfg
 
 
-def _password_host(cfg):
+def _password_host(cfg: dict[str, Any]) -> dict[str, Any]:
     monitor = _monitor_module()
     auth = monitor.load_auth(Path(cfg['auth_file']))
     return monitor.apply_auth({'transport': 'ssh', 'hostname': cfg['host'],
@@ -67,7 +70,7 @@ def _password_host(cfg):
                                'connect_timeout_seconds': int(cfg['connect_timeout_seconds'])}, auth)
 
 
-def ssh_command(cfg, argv):
+def ssh_command(cfg: dict[str, Any], argv: Sequence[str]) -> list[str]:
     if cfg.get('auth_file'):
         monitor = _monitor_module()
         return monitor.ssh_command(_password_host(cfg), shlex.join(argv), password_auth=True)
@@ -81,7 +84,7 @@ def ssh_command(cfg, argv):
     return [*args, cfg['user']+'@'+cfg['host'], shlex.join(argv)]
 
 
-def call(cfg, argv, payload):
+def call(cfg: dict[str, Any], argv: Sequence[str], payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
     try:
         data = json.dumps(payload)
         if cfg.get('auth_file'):
@@ -134,7 +137,7 @@ print(json.dumps({'installed': str(root), 'files': len(p['files']), 'launch_perf
 '''
 
 
-def remote_dispatch(args):
+def remote_dispatch(args: argparse.Namespace) -> int:
     cfg = connection_config(args.remote)
     if args.state_dir:
         if not Path(args.state_dir).is_absolute():

@@ -10,6 +10,7 @@ import stat
 import struct
 import time
 from pathlib import Path
+from typing import Any
 
 from .common import (MAX_MESSAGE, JobWaitInterrupted, JobWaitTimeout, atomic_json,
                      check_storage, fields, validate_config, validate_wait_timeout)
@@ -21,7 +22,7 @@ MAX_HANDLERS = 64
 MAX_WAITERS = 32
 
 
-async def serve(raw, *, local_test=False):
+async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
     config = validate_config(raw, local_test=local_test)
     os.umask(0o077)
     root = Path(config["root"])
@@ -57,7 +58,7 @@ async def serve(raw, *, local_test=False):
             loop.add_signal_handler(sig, interrupted.set)
         loop.add_signal_handler(signal.SIGHUP, lambda: None)
 
-        async def dispatch(request):
+        async def dispatch(request: dict[str, Any]) -> Any:
             fields(request, {"op"}, {"session_id", "spec", "id", "request_id", "reason",
                                       "wait", "timeout"})
             op = request["op"]
@@ -90,7 +91,7 @@ async def serve(raw, *, local_test=False):
                 return scheduler.status()
             raise ValueError("unknown operation")
 
-        async def handle(reader, writer):
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             task = asyncio.current_task()
             handlers.add(task)
             pending = []
@@ -162,8 +163,8 @@ async def serve(raw, *, local_test=False):
             except Exception as exc:
                 # Probe failure denies allocation; existing executors keep their
                 # fixed budget. No stale snapshot is substituted as fresh data.
-                error = f"{type(exc).__name__}: telemetry unavailable"
-            scheduler.tick(snapshot, error)
+                error = f"{type(exc).__name__}: {exc}"
+            await scheduler.tick_async(snapshot, error)
             try:
                 await asyncio.wait_for(interrupted.wait(), config["poll_seconds"])
             except asyncio.TimeoutError:
@@ -180,17 +181,19 @@ async def serve(raw, *, local_test=False):
                 for job in scheduler.active():
                     if job["process"] is not None and job["process"].poll() is None:
                         job["process"].terminate()
+            await scheduler.settle_background()
             cleanup_deadline = time.monotonic() + 8
             while any(j["process"] is not None and j["process"].poll() is None for j in scheduler.active()):
                 if time.monotonic() >= cleanup_deadline:
                     break
                 try:
-                    scheduler.reconcile()
+                    await scheduler.reconcile_async()
                 except (OSError, ValueError):
                     pass
                 await asyncio.sleep(.05)
             try:
-                scheduler.reconcile()
+                await scheduler.reconcile_async()
+                await scheduler.settle_background()
                 check_storage(config, root)
                 atomic_json(scheduler.directory / "service-exit.json", {
                     "at": time.time(), "active_count": len(scheduler.active()),

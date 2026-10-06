@@ -78,7 +78,7 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 
 重试退避期间控制器持续刷新自身心跳，独立 guard 仍可停止冻结或失联的控制器。退避不刷新 Agent 心跳，不获得运行或研究信用；人工停止和原硬截止仍生效。
 
-单调时钟控制执行间隔，绝对截止与单调时间取更严格者。停止、压缩等待、恢复均不延后截止；系统重启后旧 run 到期，不凭跨 boot 的计时推断信用。`successful_turn` 在完整轮结束判断目标，可超过目标到当前轮结束，但绝不突破硬截止。worker 到期立即取消计算；内核调度和进程回收存在少量延迟，外部资源取消另有有界超时。
+单调时钟控制执行间隔，绝对截止与单调时间取更严格者。停止、压缩等待、恢复均不延后截止；预算保存已观测墙钟年龄，回拨或 boot identity 变化时 `budget.view.clock_issue` 明确报告原因并 fail closed，跨 boot 未结束区间不获得活动信用。已有 `rebase --reason` 只允许停止且已清理的 controller-loss run 在原绝对截止仍有效时重建 monotonic baseline，拒绝时钟回拨，也不改变目标、原截止和信用。所有 ISO 时间戳须包含时区，`+08:00` 等偏移按实际 instant 解析。`successful_turn` 在完整轮结束判断目标，可超过目标到当前轮结束，但绝不突破硬截止。worker 到期立即取消计算；内核调度和进程回收存在少量延迟，外部资源取消另有有界超时。
 
 `reported` 适合由任务原始事件独立审计有效时间的适配器。`turn_complete(credit=True, credited_seconds=..., credit_evidence=...)` 只报告该轮新增信用，不重复提交历史结转；将目标设为原目标减去已核验结转。排队、安装、基础设施故障和其他排除区间由适配器记在证据中；控制器校验数值边界，不自行判断证据是否构成科研闭环。
 
@@ -155,6 +155,8 @@ turn_complete(credit=True)
 2. 达到阈值后写本轮 `context-request.json`，要求总结并退出；最多等待 `summary_seconds`，仍受本轮/总截止限制，达到 `max_tokens` 立即停。
 3. 适配器可用 `compaction_requested()` 观察请求，生成摘要、调用 `compact(summary)` 和 `turn_complete(credit=True)`，然后正常退出。
 4. `auto_compact: true` 时，成功轮及有效摘要触发快照 → generation + 1 → 新轮。控制器在达到 `max_tokens` 时立即执行硬兜底；若 agent 未提交摘要，会写入明确标注为不完整的控制器交接摘要并自动开启新代际，失败轮不计信用。只有关闭自动压缩或发生不可恢复的状态/存储故障时才进入 `WAITING_COMPACTION`；没有摘要不会伪造研究结论。
+
+摘要截止与完成事件 grace 截止、对应 boot identity 同时写入 `state.context`，保存 monotonic 和带时区的绝对截止；同一轮重新加载状态不会重置等待期限，换 boot 立即拒绝旧 guard 的时钟。只有新轮或新 generation 清除已结束的 guard 字段。`core/turn_outcome.py` 统一计算轮次原因、信用与重试规则；进程清理、任务清理和信用证据仍由 controller 执行并作为最终决策输入。
 
 `start_turn` 会把 `AUTORESEARCH_CONTEXT_MAX_TOKENS`、`AUTORESEARCH_CONTEXT_COMPACT_AT_TOKENS` 和 `AUTORESEARCH_CONTEXT_RESERVE_TOKENS` 注入适配器环境。适配器应在每次 provider 请求前用真实 tokenizer 计数调用 `fits_request`；即使适配器失守，控制器仍会在硬上限触发后终止本轮并保全日志。
 

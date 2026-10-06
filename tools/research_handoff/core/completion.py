@@ -21,6 +21,7 @@ import stat
 import subprocess
 import time
 from pathlib import Path
+from typing import Any, Callable, Iterator, Mapping, NoReturn, Sequence
 from urllib.parse import unquote, urlparse
 
 try:
@@ -43,7 +44,7 @@ _HEARTBEAT = contextvars.ContextVar("completion_heartbeat", default=lambda: None
 
 
 @contextlib.contextmanager
-def evidence_heartbeat(callback):
+def evidence_heartbeat(callback: Callable[[], None]) -> Iterator[None]:
     token = _HEARTBEAT.set(callback)
     try:
         yield
@@ -52,24 +53,24 @@ def evidence_heartbeat(callback):
 
 
 class EvidenceError(ControllerError):
-    def __init__(self, status, code, message):
+    def __init__(self, status: str, code: str, message: str) -> None:
         super().__init__(message)
         self.status, self.code = status, code
 
 
-def fail(status, code, message):
+def fail(status: str, code: str, message: str) -> NoReturn:
     raise EvidenceError(status, code, message)
 
 
-def canonical(value):
+def canonical(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
-def digest(value):
+def digest(value: Any) -> str:
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
-def file_hash(path):
+def file_hash(path: str | os.PathLike[str]) -> str:
     hasher = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -78,7 +79,7 @@ def file_hash(path):
     return hasher.hexdigest()
 
 
-def timestamp(value):
+def timestamp(value: Any) -> float:
     if not isinstance(value, str):
         raise ControllerError("deadline/timestamp must be an explicit timezone-aware ISO timestamp")
     try:
@@ -93,13 +94,13 @@ def timestamp(value):
         raise ControllerError("invalid timezone-aware timestamp") from exc
 
 
-def score(value):
+def score(value: Any) -> int | float:
     if type(value) not in (int, float) or not math.isfinite(value):
         fail("FINAL_SCORE_INVALID", "SCORE_NOT_FINITE", "scientific score must be a finite number")
     return value
 
 
-def relative(value):
+def relative(value: Any) -> str:
     if (not isinstance(value, str) or not value or "\0" in value or
             Path(value).is_absolute() or ".." in Path(value).parts or value == "." or
             Path(value).as_posix() != value):
@@ -107,7 +108,7 @@ def relative(value):
     return value
 
 
-def within(root, value):
+def within(root: str | os.PathLike[str], value: str) -> Path:
     root = Path(root).resolve(strict=True)
     path = root / relative(value)
     if not path.resolve().is_relative_to(root):
@@ -120,20 +121,20 @@ def within(root, value):
     return path
 
 
-def hashed(value, name):
+def hashed(value: Any, name: str) -> str:
     if not isinstance(value, str) or not HASH.fullmatch(value):
         raise ControllerError(f"{name} must be a lowercase SHA-256")
     return value
 
 
-def seeds(value, *, required=False):
+def seeds(value: Any, *, required: bool = False) -> list[str]:
     if (not isinstance(value, list) or any(not isinstance(v, str) or not LABEL.fullmatch(v) for v in value)
             or len(value) != len(set(value)) or (required and not value)):
         raise ControllerError("required_seeds must contain unique explicit string seed IDs")
     return list(value)
 
 
-def validate_contract(value):
+def validate_contract(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ControllerError("completion contract must be an object")
     missing = set(CONTRACT_FIELDS) - value.keys()
@@ -186,7 +187,7 @@ def validate_contract(value):
     return {name: value[name] for name in CONTRACT_FIELDS} | {"completion": completion}
 
 
-def contract_for_run(config, run_id, deadline=None):
+def contract_for_run(config: dict[str, Any], run_id: str, deadline: str | None = None) -> dict[str, Any]:
     value = validate_contract(config)
     value.update(version=1, run_id=run_id, task_id=config["task_id"], candidate_root=config["root"],
                  declared_deadline=config["deadline"])
@@ -197,7 +198,7 @@ def contract_for_run(config, run_id, deadline=None):
     return value
 
 
-def private_directory(path):
+def private_directory(path: str | os.PathLike[str]) -> None:
     path = Path(path)
     if path.is_symlink() or not path.is_dir():
         raise ControllerError("trusted evidence directory must exist and cannot be a symlink")
@@ -212,7 +213,7 @@ def private_directory(path):
         current = current.parent
 
 
-def trust_boundary(contract):
+def trust_boundary(contract: dict[str, Any]) -> None:
     validate_contract(contract)
     if contract["score_expectation"] == "not_expected":
         return
@@ -232,7 +233,7 @@ def trust_boundary(contract):
         raise ControllerError("completion signing key must be owner-only and at least 32 bytes")
 
 
-def signed(contract, payload):
+def signed(contract: dict[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
     trust_boundary(contract)
     value = dict(payload)
     value.pop("signature", None)
@@ -241,7 +242,7 @@ def signed(contract, payload):
     return value
 
 
-def verify_signed(contract, value):
+def verify_signed(contract: dict[str, Any], value: Any) -> None:
     trust_boundary(contract)
     if not isinstance(value, dict):
         fail("COMPLETION_RECEIPT_MISSING", "UNTRUSTED_EVIDENCE", "trusted evidence must be a signed object")
@@ -252,14 +253,14 @@ def verify_signed(contract, value):
         fail("COMPLETION_RECEIPT_MISSING", "UNTRUSTED_EVIDENCE", "trusted evidence signature is missing or invalid")
 
 
-def artifact(root, path):
+def artifact(root: str | os.PathLike[str], path: str) -> dict[str, Any]:
     target = within(root, path)
     if not target.is_file() or target.stat().st_size == 0:
         raise ControllerError("evidence file is missing or empty")
     return {"path": relative(path), "size": target.stat().st_size, "sha256": file_hash(target)}
 
 
-def verify_artifact(root, item, status, code):
+def verify_artifact(root: str | os.PathLike[str], item: Any, status: str, code: str) -> dict[str, Any]:
     if not isinstance(item, dict) or set(item) != {"path", "size", "sha256"}:
         fail(status, code, "invalid evidence file descriptor")
     try:
@@ -271,11 +272,11 @@ def verify_artifact(root, item, status, code):
     return actual
 
 
-def identity(contract):
+def identity(contract: Mapping[str, Any]) -> dict[str, Any]:
     return {name: contract[name] for name in ("run_id", "task_id", "stage", "metric", "direction")}
 
 
-def check_identity(contract, value):
+def check_identity(contract: dict[str, Any], value: Any) -> None:
     if not isinstance(value, dict):
         fail("FINAL_SCORE_INVALID", "RUN_BINDING_MISMATCH", "evaluation must be an object")
     if any(value.get(k) != v for k, v in identity(contract).items()):
@@ -284,7 +285,7 @@ def check_identity(contract, value):
         fail("PROTOCOL_BINDING_MISMATCH", "CONTRACT_BINDING_MISMATCH", "evaluation contract binding differs")
 
 
-def bindings(contract):
+def bindings(contract: dict[str, Any]) -> dict[str, Any]:
     root = contract["completion"]["evidence_root"]
     try:
         manifest_path = within(root, contract["candidate_manifest"])
@@ -338,7 +339,7 @@ def bindings(contract):
             "evaluator_hash": contract["completion"]["evaluator_hash"]}
 
 
-def protected_roots(contract, jobs=None):
+def protected_roots(contract: dict[str, Any], jobs: list[dict[str, Any]] | None = None) -> list[str]:
     """Roots from the signed ledger, or from proposed jobs before they are frozen."""
     cfg = contract["completion"]
     if jobs is None:
@@ -352,7 +353,8 @@ def protected_roots(contract, jobs=None):
         *(job["scheduler_root"] for job in jobs))})
 
 
-def attest_docker_isolation(contract, containers, *, docker_host, public_image_digest):
+def attest_docker_isolation(contract: dict[str, Any], containers: Sequence[str], *,
+                            docker_host: str, public_image_digest: str) -> dict[str, Any]:
     """Inspect actual solver containers; only store safe IDs/hashes, never raw inspect."""
     trust_boundary(contract)
     if not containers or not all(isinstance(v, str) and re.fullmatch(r"[a-f0-9]{64}", v) for v in containers):
@@ -399,7 +401,7 @@ def attest_docker_isolation(contract, containers, *, docker_host, public_image_d
     return payload
 
 
-def check_isolation(contract):
+def check_isolation(contract: dict[str, Any]) -> dict[str, Any]:
     try:
         value = read_json(within(contract["completion"]["evidence_root"], contract["completion"]["isolation"]))
         verify_signed(contract, value)
@@ -415,7 +417,7 @@ def check_isolation(contract):
         fail("COMPLETION_RECEIPT_MISSING", "ISOLATION_UNVERIFIED", "trusted candidate isolation evidence is missing or invalid")
 
 
-def register_jobs(contract, jobs):
+def register_jobs(contract: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[str, Any]:
     """Freeze original request/job IDs before waiting; never enqueue or replay."""
     trust_boundary(contract)
     validate_jobs(contract, jobs)
@@ -432,7 +434,7 @@ def register_jobs(contract, jobs):
     return payload
 
 
-def adopt_evaluation(contract, source_contract):
+def adopt_evaluation(contract: dict[str, Any], source_contract: dict[str, Any]) -> dict[str, Any]:
     """Bind an already certified experiment to the research run that selected it."""
     trust_boundary(contract)
     trust_boundary(source_contract)
@@ -475,7 +477,7 @@ def adopt_evaluation(contract, source_contract):
     return issue_receipt(contract, live=True)
 
 
-def validate_jobs(contract, jobs):
+def validate_jobs(contract: dict[str, Any], jobs: Any) -> None:
     if not isinstance(jobs, list) or not jobs or len(jobs) > 256:
         raise ControllerError("scored completion requires 1..256 original scoring jobs")
     seen, coverage = set(), {"score": set(), "reload": set()}
@@ -509,7 +511,7 @@ def validate_jobs(contract, jobs):
             fail("INCOMPLETE_FINAL_SCORE", "JOB_SEED_MISSING", "required scoring/reload job seed coverage is incomplete")
 
 
-def get_job(job, *, timeout=1):
+def get_job(job: Mapping[str, Any], *, timeout: float = 1) -> dict[str, Any]:
     """One bounded read-only query of the original scheduler session and IDs."""
     request = {"op": "get", "session_id": job["session_id"], "id": job["job_id"], "request_id": job["request_id"]}
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
@@ -526,7 +528,7 @@ def get_job(job, *, timeout=1):
     return reply["result"]
 
 
-def job_observations(contract, *, live=False):
+def job_observations(contract: dict[str, Any], *, live: bool = False) -> list[dict[str, Any]]:
     cfg = contract["completion"]
     try:
         ledger = read_json(within(cfg["evidence_root"], cfg["jobs_manifest"]))
@@ -585,7 +587,7 @@ def job_observations(contract, *, live=False):
     return results
 
 
-def job_problem(jobs):
+def job_problem(jobs: Sequence[Mapping[str, Any]]) -> str | None:
     if any(v["state"] == "UNKNOWN" for v in jobs):
         return "EVALUATION_UNKNOWN"
     if any(v["state"] in JOB_TERMINAL - {"SUCCEEDED"} for v in jobs):
@@ -595,7 +597,9 @@ def job_problem(jobs):
     return None
 
 
-def write_score_result(contract, scientific_score, seed_results, *, harbor=None):
+def write_score_result(contract: dict[str, Any], scientific_score: int | float,
+                       seed_results: list[dict[str, Any]], *,
+                       harbor: dict[str, Any] | None = None) -> dict[str, Any]:
     """Called by a trusted evaluator after isolated evaluation, never by the Agent."""
     check_isolation(contract)
     bound = bindings(contract)
@@ -615,7 +619,7 @@ def write_score_result(contract, scientific_score, seed_results, *, harbor=None)
     return payload
 
 
-def validate_result(contract, value, bound):
+def validate_result(contract: dict[str, Any], value: dict[str, Any], bound: dict[str, Any]) -> None:
     check_identity(contract, value)
     if value.get('harbor') is not None and not isinstance(value['harbor'], dict):
         fail('FINAL_SCORE_INVALID', 'HARBOR_TRIAL_MISMATCH', 'Harbor binding must be an object')
@@ -677,7 +681,7 @@ def validate_result(contract, value, bound):
         validate_harbor(contract, value["harbor"], value["scientific_score"])
 
 
-def validate_harbor(contract, harbor, final_score):
+def validate_harbor(contract: dict[str, Any], harbor: Any, final_score: int | float) -> None:
     root = contract["completion"]["evidence_root"]
     fields = {"trial_id", "config", "result", "reward", "log"}
     if not isinstance(harbor, dict) or set(harbor) not in (fields, fields | {'reward_priority'}):
@@ -739,7 +743,7 @@ def validate_harbor(contract, harbor, final_score):
                 result_name != trial_name):
             fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor Trial name differs")
 
-        def absolute_remote_path(value, field):
+        def absolute_remote_path(value: Any, field: str) -> str:
             if not isinstance(value, str) or not value or "\0" in value:
                 fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", f"Harbor {field} path is invalid")
             normalized = posixpath.normpath(value)
@@ -762,7 +766,7 @@ def validate_harbor(contract, harbor, final_score):
         if not isinstance(result_config, dict):
             fail("FINAL_SCORE_INVALID", "HARBOR_TRIAL_MISMATCH", "Harbor result config must be an object")
 
-        def preserves_config(compact, expanded):
+        def preserves_config(compact: Any, expanded: Any) -> bool:
             if isinstance(compact, dict):
                 return isinstance(expanded, dict) and all(
                     key in expanded and preserves_config(value, expanded[key])
@@ -787,12 +791,14 @@ def validate_harbor(contract, harbor, final_score):
         fail("FINAL_SCORE_INVALID", "HARBOR_REWARD_MISMATCH", "Harbor reward does not match the final scientific score")
 
 
-def report(status, code=None, message=None, *, jobs=None, receipt=None):
+def report(status: str, code: str | None = None, message: str | None = None, *,
+           jobs: list[dict[str, Any]] | None = None,
+           receipt: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"ok": status == "COMPLETED", "status": status, "issues": [] if code is None else
             [{"code": code, "message": message}], "jobs": jobs or [], "receipt": receipt}
 
 
-def inspect_evaluation(contract, *, live=False):
+def inspect_evaluation(contract: dict[str, Any], *, live: bool = False) -> dict[str, Any]:
     """Read scientific evidence. Pending/unknown jobs never imply a valid score."""
     jobs = []
     try:
@@ -822,7 +828,7 @@ def inspect_evaluation(contract, *, live=False):
         return report("FINAL_SCORE_INVALID", "EVIDENCE_MALFORMED", "scientific evidence is missing, malformed or unsafe", jobs=jobs)
 
 
-def issue_receipt(contract, *, live=False, now=None):
+def issue_receipt(contract: dict[str, Any], *, live: bool = False, now: str | None = None) -> dict[str, Any]:
     """Trusted finalization is idempotent, and never submits a scoring job."""
     trust_boundary(contract)
     root = contract["completion"]["evidence_root"]
@@ -863,7 +869,7 @@ def issue_receipt(contract, *, live=False, now=None):
     return payload
 
 
-def diagnostic_receipt(contract):
+def diagnostic_receipt(contract: dict[str, Any]) -> dict[str, Any]:
     validate_contract(contract)
     if contract["score_expectation"] != "not_expected":
         raise ControllerError("diagnostic receipt requires explicit not_expected")
@@ -872,7 +878,7 @@ def diagnostic_receipt(contract):
             "required_seeds": contract["required_seeds"], "jobs": [], "producer": "trusted-controller"}
 
 
-def validate_receipt(contract, receipt, *, live=False):
+def validate_receipt(contract: dict[str, Any], receipt: Any, *, live: bool = False) -> dict[str, Any]:
     try:
         validate_contract(contract)
         if not isinstance(receipt, dict):
@@ -905,7 +911,7 @@ def validate_receipt(contract, receipt, *, live=False):
         return report("COMPLETION_RECEIPT_MISSING", "RECEIPT_INVALID", "completion receipt or trust contract is missing or invalid")
 
 
-def publish_reward(contract, receipt, path):
+def publish_reward(contract: dict[str, Any], receipt: dict[str, Any], path: str | os.PathLike[str]) -> None:
     """Publish only a permitted scalar, atomically. The destination stays private."""
     verified = validate_receipt(contract, receipt)
     if not verified["ok"] or contract["score_expectation"] != "required":

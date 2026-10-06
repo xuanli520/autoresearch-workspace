@@ -14,7 +14,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .common import (atomic_json, check_storage, fields, processes,
+from .common import (PROCESS_SOURCE, atomic_json, check_storage, fields, processes,
                      read_json, validate_config)
 from .resources import probe
 
@@ -44,8 +44,7 @@ def load_plan(path):
     check_storage(config, path, plan["root"], plan["gpu_config"])
     hashes = plan["source_sha256"]
     required = {str(p.resolve()) for p in Path(__file__).parent.glob("*.py")}
-    required.update({plan["gpu_config"], str(Path(__file__).resolve().parents[1] /
-                                           "research_handoff/core/processes.py")})
+    required.update({plan["gpu_config"], str(PROCESS_SOURCE), str(PROCESS_SOURCE.with_name("__init__.py"))})
     if not isinstance(hashes, dict) or not required.issubset(hashes):
         raise ValueError("service plan must pin its lifecycle code and GPU config")
     for source, expected in hashes.items():

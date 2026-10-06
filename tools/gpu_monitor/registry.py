@@ -9,14 +9,17 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from typing import Any, Optional, Union
 import uuid
 
 DEFAULT_CONFIG = Path(__file__).resolve().with_name('tasks.json')
 TERMINAL = {'COMPLETED', 'FAILED', 'STOPPED'}
 UNKNOWN = {'UNREACHABLE', 'UNKNOWN'}
+UNSAFE_ALERTS = {'OBSERVATION_ERROR', 'IDENTITY_MISMATCH', 'STATUS_CONFLICT',
+                 'CONTROLLER_TYPE_MISMATCH', 'CONTROLLER_IDENTITY_MISMATCH'}
 
 
-def timestamp(value):
+def timestamp(value: Any) -> Optional[float]:
     if not isinstance(value, str):
         return None
     try:
@@ -25,7 +28,7 @@ def timestamp(value):
         return None
 
 
-def eligible(snapshot, now, max_age=300):
+def eligible(snapshot: dict[str, Any], now: float, max_age: float = 300) -> dict[str, str]:
     """Only fresh observations without live processes or observation errors qualify."""
     selected = {}
     for task in snapshot.get('tasks', []):
@@ -34,7 +37,7 @@ def eligible(snapshot, now, max_age=300):
             continue
         if task.get('state') in UNKNOWN or task.get('processes'):
             continue
-        if set(task.get('alerts', [])) & {'OBSERVATION_ERROR', 'IDENTITY_MISMATCH', 'STATUS_CONFLICT'}:
+        if set(task.get('alerts', [])) & UNSAFE_ALERTS:
             continue
         deadline = timestamp(task.get('deadline_at'))
         if task.get('state') in TERMINAL:
@@ -44,7 +47,7 @@ def eligible(snapshot, now, max_age=300):
     return selected
 
 
-def atomic_json(path, value):
+def atomic_json(path: Union[str, Path], value: Any) -> None:
     path = Path(path)
     fd, temporary = tempfile.mkstemp(prefix='.'+path.name+'.', dir=path.parent)
     try:
@@ -58,7 +61,8 @@ def atomic_json(path, value):
         Path(temporary).unlink(missing_ok=True)
 
 
-def archive(config_path, reasons, apply=False, expected_digest=None):
+def archive(config_path: Union[str, Path], reasons: dict[str, str], apply: bool = False,
+            expected_digest: Optional[str] = None) -> dict[str, Any]:
     config_path = Path(config_path).resolve()
     # Load the raw configuration, never monitor.load_config() (which resolves credentials).
     with config_path.with_suffix('.lock').open('a') as lock:
@@ -100,7 +104,7 @@ def archive(config_path, reasons, apply=False, expected_digest=None):
         return result
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=DEFAULT_CONFIG)
     commands = parser.add_subparsers(dest='action', required=True)

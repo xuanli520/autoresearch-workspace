@@ -10,7 +10,7 @@ from controller import dispatch
 from core.longrun import check_storage
 
 
-def main():
+def main() -> int:
     try:
         payload = json.loads(sys.stdin.buffer.read(2*1024*1024))
         args = argparse.Namespace(**payload['args'])

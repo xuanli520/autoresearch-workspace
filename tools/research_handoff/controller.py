@@ -19,15 +19,17 @@ import time
 import traceback
 import uuid
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE / 'core'))
-from longrun import (ControllerError, TERMINAL_STATES, COMPLETION_TERMINAL_STATES, append_event, apply_context_usage, atomic_json,
+from longrun import (ControllerError, DEFAULTS, TERMINAL_STATES, COMPLETION_TERMINAL_STATES, append_event, apply_context_usage, atomic_json,
     begin_run, budget_view, check_storage, compact_context, epoch, file_lock, finish_active_interval,
-    load_config, load_state, new_state, read_json, record_context_usage, reopen_context, safe_summary,
+    context_guard_deadline, load_config, load_state, new_state, read_json, record_context_usage, reopen_context, safe_summary,
     run_config, save_state, start_active_interval, state_path, utc_now, validate_config)
+from turn_outcome import compute_turn_outcome
 from processes import boot_id, pid_matches, process_start_ticks, scope_members, signal_identity, terminate_scope
 from cleanup import cleanup_task
 from credit import partial_report, validate_evidence, validate_intervals
@@ -37,7 +39,7 @@ from completion import (COMPLETION_FAILURES, contract_for_run, diagnostic_receip
 
 STOP_FILE = 'STOP'
 DEFAULT_STATE_DIR = '.autoresearch-controller'
-MAX_LINE = 131072
+MAX_LINE = DEFAULTS.max_agent_line_bytes
 EXIT_CODES = {'FAILED': 1, 'EXPIRED': 3, 'FINALIZING': 4,
               **{status: 4 for status in COMPLETION_FAILURES}}
 RETRYABLE_TURN_REASONS = frozenset({
@@ -82,7 +84,7 @@ def persist_exit(run_dir: Path, state: dict[str, Any]) -> int:
     return code
 
 
-def frozen_completion_contract(run_dir, state):
+def frozen_completion_contract(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     path = within(run_dir, state['completion']['contract'])
     value = read_json(path)
     if digest(value) != state['completion']['contract_hash']:
@@ -90,7 +92,7 @@ def frozen_completion_contract(run_dir, state):
     return value
 
 
-def completion_step(run_dir, state, config, *, live=False):
+def completion_step(run_dir: Path, state: dict[str, Any], config: dict[str, Any], *, live: bool = False) -> str:
     """One durable close-out step. This function has no job submission path."""
     if state['status'] in COMPLETION_TERMINAL_STATES:
         return state['status']
@@ -163,7 +165,7 @@ def completion_step(run_dir, state, config, *, live=False):
     return status
 
 
-def init_run(config_path: Path | None, state_dir: Path, run: str, *, config: dict | None = None) -> dict:
+def init_run(config_path: Path | None, state_dir: Path, run: str, *, config: dict[str, Any] | None = None) -> dict[str, Any]:
     config = load_config(config_path) if config is None else validate_config(config)
     if not Path(config['root']).is_absolute():
         raise ControllerError('root must be absolute for remote initialization')
@@ -186,14 +188,14 @@ def init_run(config_path: Path | None, state_dir: Path, run: str, *, config: dic
     state['completion']['contract_hash'] = digest(contract)
     state.update(config_sha256=sha256(run_dir / 'config.json'), process_boot_id=boot_id(), storage=storage)
     # Pin executable sources used by this run. Running code is never hot-updated.
-    from bundle import render
-    state['source_sha256'] = {name: hashlib.sha256(data).hexdigest() for name, data in render().items()}
+    from bundle import source_hashes
+    state['source_sha256'] = source_hashes()
     save_state(run_dir, state)
     append_event(run_dir, 'run.created', config_sha256=state['config_sha256'], storage=storage)
     return safe_summary(state)
 
 
-def recover_locked(run_dir: Path, *, reason: str = 'controller_lost') -> dict:
+def recover_locked(run_dir: Path, *, reason: str = 'controller_lost') -> dict[str, Any]:
     state = load_state(run_dir)
     if pid_matches(state.get('controller_pid'), state.get('controller_start_ticks'), state.get('process_boot_id')):
         raise ControllerError('controller is still alive')
@@ -234,12 +236,12 @@ def recover_locked(run_dir: Path, *, reason: str = 'controller_lost') -> dict:
     return safe_summary(state)
 
 
-def recover_run(run_dir: Path) -> dict:
+def recover_run(run_dir: Path) -> dict[str, Any]:
     with file_lock(run_dir / '.controller.lock', blocking=False):
         return recover_locked(run_dir)
 
 
-def rebase_boot_run(run_dir: Path, *, reason: str) -> dict:
+def rebase_boot_run(run_dir: Path, *, reason: str) -> dict[str, Any]:
     """Reconcile a controller-lost run after a host reboot.
 
     A reboot invalidates the old monotonic clock, but it does not consume the
@@ -287,15 +289,18 @@ def rebase_boot_run(run_dir: Path, *, reason: str) -> dict:
             raise ControllerError('boot rebase requires an intact original deadline')
         if abs(declared - configured) > 1e-6:
             raise ControllerError('boot rebase requires the declared deadline to remain unchanged')
-        wall = max(0.0, time.time() - started)
+        now = time.time()
+        if now < state['budget'].get('last_observed_epoch', started):
+            raise ControllerError('wall clock rolled back; original deadline cannot be reconciled safely')
+        wall = max(float(state['budget'].get('wall_age_seconds', 0)), now - started)
         remaining = min(state['budget']['hard_limit_seconds'] - wall, deadline - time.time())
         if remaining <= 0:
             raise ControllerError('original hard deadline has passed; use the expiry extension contract')
         if state['budget']['active_seconds'] >= state['budget']['window_seconds']:
             raise ControllerError('research target is already reached')
 
-        from bundle import render
-        sources = {name: hashlib.sha256(data).hexdigest() for name, data in render().items()}
+        from bundle import source_hashes
+        sources = source_hashes()
         recovery_root = run_dir / 'recovery'
         recovery_root.mkdir(exist_ok=True)
         number = 1
@@ -337,9 +342,9 @@ def rebase_boot_run(run_dir: Path, *, reason: str) -> dict:
         return {'recovery': receipt, 'status': safe_summary(state)}
 
 
-def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_turn: int,
-              reason: str, credit: dict | None = None, extend_expired_budget: bool = False,
-              storage_migration_source: Path | None = None) -> dict:
+def amend_run(run_dir: Path, config: dict[str, Any], *, expected_sha256: str, expected_turn: int,
+              reason: str, credit: dict[str, Any] | None = None, extend_expired_budget: bool = False,
+              storage_migration_source: Path | None = None) -> dict[str, Any]:
     if not isinstance(reason, str) or not reason.strip():
         raise ControllerError('amend requires an explicit authorization reason')
     with file_lock(run_dir / '.controller.lock', blocking=False), file_lock(run_dir / '.state.lock'):
@@ -434,8 +439,8 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         except (OSError, ValueError, KeyError) as exc:
             raise ControllerError(str(exc)) from exc
         delta = sum(b - a for a, b in ordered)
-        from bundle import render
-        sources = {name: hashlib.sha256(data).hexdigest() for name, data in render().items()}
+        from bundle import source_hashes
+        sources = source_hashes()
         number = 1
         while (run_dir / 'amendments' / f'{number:06d}').exists():
             number += 1
@@ -481,19 +486,20 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
 
 
 class LongRunController:
-    def __init__(self, run_dir: Path, *, resume=False, with_guard=True, request_id=None):
+    def __init__(self, run_dir: Path, *, resume: bool = False, with_guard: bool = True,
+                 request_id: str | None = None) -> None:
         self.run_dir = run_dir.resolve()
         self.config = task_config(run_dir)
         self.state = load_state(run_dir)
         self.resume, self.with_guard = resume, with_guard
         self.request_id = request_id or uuid.uuid4().hex
-        self.process = None
-        self.guard = None
+        self.process: subprocess.Popen[bytes] | None = None
+        self.guard: subprocess.Popen[bytes] | None = None
         self.signalled = False
-        self.pending_reason = None
-        self.summary = None
-        self.result = {}
-        self.partial_credit = {}
+        self.pending_reason: str | None = None
+        self.summary: str | None = None
+        self.result: dict[str, Any] = {}
+        self.partial_credit: dict[str, Any] = {}
         self.context_reported = False
         self.offset = 0
         self.fragment = b''
@@ -502,14 +508,19 @@ class LongRunController:
         self.retry_pending = False
         self.context_guard_triggered = False
 
-    def save(self):
+    def save(self) -> None:
         self.state['controller_heartbeat_monotonic'] = time.monotonic()
+        if self.state['budget'].get('started_at'):
+            self.state['budget'].update(
+                wall_age_seconds=budget_view(self.state)['wall_age_seconds'],
+                last_observed_epoch=max(self.state['budget'].get('last_observed_epoch', 0), time.time()),
+            )
         save_state(self.run_dir, self.state)
 
-    def event(self, event, **fields):
+    def event(self, event: str, **fields: Any) -> None:
         append_event(self.run_dir, event, **fields)
 
-    def check_startable(self):
+    def check_startable(self) -> None:
         state = self.state
         if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
             raise ControllerError('requires Linux pidfd support (kernel 5.3+, Python 3.10+)')
@@ -529,8 +540,10 @@ class LongRunController:
             raise ControllerError('owned worker is still alive; recover before starting')
         if state['turn'].get('token') and not cleanup_task(Path(state['turn']['dir'])):
             raise ControllerError('previous task cleanup is incomplete; inspect cleanup.log')
+        from bundle import source_hashes
+        current_sources = source_hashes()
         for name, expected in state['source_sha256'].items():
-            if sha256(HERE / name) != expected:
+            if current_sources.get(name) != expected:
                 raise ControllerError(f'run source differs: {name}; use the original release')
         storage = check_storage(self.config['storage']['data_mount'], self.run_dir, Path(self.config['root']))
         if storage != state['storage']:
@@ -539,7 +552,7 @@ class LongRunController:
             (self.run_dir / STOP_FILE).unlink(missing_ok=True)
         state['resume_required'] = False
 
-    def start_guard(self):
+    def start_guard(self) -> None:
         if not self.with_guard:
             return
         with (self.run_dir / 'guard.log').open('a') as log:
@@ -550,7 +563,7 @@ class LongRunController:
         self.state.update(guard_pid=self.guard.pid, guard_start_ticks=process_start_ticks(self.guard.pid))
         self.save()
 
-    def prepare_context(self, turn_dir):
+    def prepare_context(self, turn_dir: Path) -> Path:
         ctx = self.state['context']
         snapshot = None
         if ctx.get('last_snapshot'):
@@ -568,14 +581,20 @@ class LongRunController:
         atomic_json(self.run_dir / 'context/current.json', payload)
         return turn_dir / 'context.json'
 
-    def start_turn(self):
+    def start_turn(self) -> None:
         self.process = None
         self.partial_credit = {}
         if self.config['docker_network']['enabled']:
             receipt = bridge_preflight(self.config['docker_network'],
                                        repair_forwarding=self.config['docker_network']['repair_forwarding'])
             self.event('docker.network_preflight', **receipt)
-        self._context_completion_deadline = None
+        self.state['context'].update(
+            guard_boot_id=None,
+            summary_deadline_monotonic=None,
+            summary_deadline_at=None,
+            completion_grace_deadline_monotonic=None,
+            completion_grace_deadline_at=None,
+        )
         self.context_guard_triggered = False
         number = self.state['turn']['number'] + 1
         while (self.run_dir / 'turns' / f'{number:06d}').exists():
@@ -599,12 +618,13 @@ class LongRunController:
             'hard_limit' if seconds == view['remaining_seconds'] else 'turn_timeout')
         self.state['turn'].update(deadline_monotonic=time.monotonic()+seconds, deadline_reason=deadline_reason,
                                   execution_seconds=seconds, runtime_synced=False)
-        dirs = {name: str(turn_dir / name) for name in ('tmp', 'cache')}
+        dirs = {name: turn_dir / name for name in ('tmp', 'cache')}
         for path in dirs.values():
-            Path(path).mkdir()
-        env = {'TMPDIR': dirs['tmp'], 'XDG_CACHE_HOME': dirs['cache'], 'PIP_CACHE_DIR': dirs['cache']+'/pip',
-               'HF_HOME': dirs['cache']+'/huggingface', 'TORCH_HOME': dirs['cache']+'/torch',
-               'npm_config_cache': dirs['cache']+'/npm', **self.config['env'],
+            path.mkdir()
+        cache_dir = dirs['cache']
+        env = {'TMPDIR': str(dirs['tmp']), 'XDG_CACHE_HOME': str(cache_dir),
+               'PIP_CACHE_DIR': str(cache_dir / 'pip'), 'HF_HOME': str(cache_dir / 'huggingface'),
+               'TORCH_HOME': str(cache_dir / 'torch'), 'npm_config_cache': str(cache_dir / 'npm'), **self.config['env'],
                'AUTORESEARCH_RUN_ID': self.state['run_id'], 'AUTORESEARCH_TASK_ID': self.state['task_id'],
                'AUTORESEARCH_TURN': str(number), 'AUTORESEARCH_TURN_DIR': str(turn_dir),
                'AUTORESEARCH_CONTEXT_FILE': str(context_file),
@@ -638,7 +658,7 @@ class LongRunController:
         (turn_dir / 'GO').touch()
         self.event('turn.started', turn=number, generation=self.state['context']['generation'], seconds=seconds)
 
-    def ingest_line(self, line: bytes):
+    def ingest_line(self, line: bytes) -> None:
         try:
             value = json.loads(line, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite JSON')))
         except (ValueError, UnicodeError, RecursionError):
@@ -701,7 +721,7 @@ class LongRunController:
             self.pending_reason = 'invalid_agent_event'
             self.event('agent.event_rejected', error=str(exc))
 
-    def ingest_output(self):
+    def ingest_output(self) -> None:
         path = Path(self.state['turn']['dir']) / 'stdout.log'
         with path.open('rb') as stream:
             stream.seek(self.offset)
@@ -786,10 +806,9 @@ class LongRunController:
                    summary_sha256=hashlib.sha256(summary.encode()).hexdigest())
         return summary
 
-    def monitor(self):
+    def monitor(self) -> str:
         cfg = self.config
         turn = self.state['turn']
-        summary_deadline = None
         while True:
             started_path = Path(turn['dir']) / 'worker-start.json'
             if not turn['runtime_synced'] and started_path.exists():
@@ -816,24 +835,20 @@ class LongRunController:
 
             ctx = self.state['context']
             if ctx['state'] == 'COMPACTION_REQUIRED':
-                if summary_deadline is None:
-                    summary_deadline = now + cfg['context']['summary_seconds']
+                request_needed = not (Path(turn['dir']) / 'context-request.json').exists()
+                context_reason = context_guard_deadline(ctx,
+                    summary_seconds=cfg['context']['summary_seconds'],
+                    grace_seconds=cfg['turn']['grace_seconds'],
+                    summary_present=self.summary is not None, now_monotonic=now)
+                # Commit deadlines before asking the worker to exit; a crash
+                # between the two writes cannot grant another grace period.
+                self.save()
+                if request_needed:
                     atomic_json(Path(turn['dir']) / 'context-request.json', {'generation': ctx['generation'],
-                        'action': 'summarize_and_exit', 'remaining_tokens': max(0, ctx['max_tokens']-ctx['used_tokens'])})
-                # A well-behaved adapter emits its compact summary and
-                # completion event together, but stdout delivery can split
-                # those records. Allow only the normal turn grace period for
-                # the completion record; a non-cooperative process is still
-                # hard-stopped at the context boundary.
-                if self.summary is not None:
-                    completion_deadline = getattr(self, '_context_completion_deadline', None)
-                    if completion_deadline is None:
-                        completion_deadline = now + cfg['turn']['grace_seconds']
-                        self._context_completion_deadline = completion_deadline
-                    if reason is None and now >= completion_deadline:
-                        reason = 'context_window'
-                elif reason is None and (ctx['used_tokens'] >= ctx['max_tokens'] or now >= summary_deadline):
-                    reason = 'context_window'
+                        'action': 'summarize_and_exit', 'remaining_tokens': max(0, ctx['max_tokens']-ctx['used_tokens']),
+                        'summary_deadline_at': ctx['summary_deadline_at']})
+                if reason is None:
+                    reason = context_reason
             if reason == 'context_window' and not self.context_guard_triggered:
                 self.context_guard_triggered = True
                 ctx['guard_triggered_at'] = utc_now()
@@ -869,58 +884,44 @@ class LongRunController:
                 return self.finish_turn(reason)
             time.sleep(min(cfg['heartbeat']['interval_seconds'], max(.01, turn['deadline_monotonic']-now)))
 
-    def finish_turn(self, reason):
+    def finish_turn(self, reason: str | None) -> str:
         turn = self.state['turn']
         worker = read_json(Path(turn['dir']) / 'worker-exit.json', {})
         code = worker.get('returncode', self.process.poll())
-        reason = reason or self.pending_reason
-        # Context accounting can race the final process-exit event. If the
-        # adapter supplied a complete, credited turn and a non-empty compact
-        # summary, preserve that successful boundary for auto-compaction.
-        if (reason == 'context_window' and worker.get('reason') in ('process_exit', 'signal_stop') and code == 0
-                and self.summary and self.context_reported and self.result.get('credit') is True):
-            self.event('context.completion_recovered', turn=turn['number'], generation=turn['generation'],
-                       used_tokens=self.state['context']['used_tokens'])
-            reason = None
-        if reason is None:
-            if not worker:
-                reason = 'worker_exit_missing'
-            elif worker.get('reason') in ('turn_timeout', 'hard_limit'):
-                reason = turn['deadline_reason'] if worker['reason'] == 'turn_timeout' else 'hard_limit'
-            elif worker.get('reason') != 'process_exit' or code != 0:
-                reason = 'agent_exit_nonzero'
-            elif self.config['context']['required'] and not self.context_reported:
-                reason = 'context_usage_missing'
-            elif self.config['budget']['credit_policy'] in ('successful_turn', 'reported') and self.result.get('credit') is not True:
-                reason = 'completion_missing'
-            else:
-                reason = 'turn_completed'
         retry_state = self.state.setdefault('retry', {'anchor_turn': None, 'used': 0})
         view = budget_view(self.state)
         target_reached = view['target_reached']
         if self.config['budget']['mode'] == 'active' and self.config['budget']['credit_policy'] in ('successful_turn', 'reported'):
             target_reached = self.state['budget']['active_seconds'] >= self.state['budget']['window_seconds']
-        retry_pending = (reason in RETRYABLE_TURN_REASONS and
-                         stop_reason(self.run_dir) is None and not self.signalled and
-                         not view['hard_reached'] and not target_reached and
-                         self.state['context']['state'] != 'COMPACTION_REQUIRED')
+        facts = dict(
+            context_required=self.config['context']['required'], context_reported=self.context_reported,
+            summary_present=bool(self.summary), result=self.result,
+            credit_policy=self.config['budget']['credit_policy'], retryable_reasons=RETRYABLE_TURN_REASONS,
+            stop_requested=stop_reason(self.run_dir) is not None or self.signalled,
+            hard_reached=view['hard_reached'], target_reached=target_reached,
+            context_state=self.state['context']['state'], deadline_reason=turn['deadline_reason'],
+        )
+        observed_reason = reason or self.pending_reason
+        if reason == 'context_window' and self.pending_reason is not None:
+            observed_reason = self.pending_reason
+        protocol = compute_turn_outcome(observed_reason, worker, code, **facts)
+        if protocol.context_completion_recovered:
+            self.event('context.completion_recovered', turn=turn['number'], generation=turn['generation'],
+                       used_tokens=self.state['context']['used_tokens'])
         process_cleanup_ok = terminate_scope(turn['token'], 0)
         # Automatic compaction needs the same task resources in its next generation.
         retain_for_compaction = (
             self.config['context']['auto_compact']
             and self.state['context']['state'] == 'COMPACTION_REQUIRED'
-            and reason in CONTEXT_BOUNDARY_REASONS
+            and protocol.reason in CONTEXT_BOUNDARY_REASONS
             and not budget_view(self.state)['hard_reached']
             and stop_reason(self.run_dir) is None
             and not self.signalled
         )
-        task_cleanup_ok = cleanup_task(Path(turn['dir']), retry_pending=retry_pending or retain_for_compaction)
-        if not process_cleanup_ok or not task_cleanup_ok:
-            reason = 'cleanup_incomplete'
-            retry_pending = False
-        completed = reason == 'turn_completed'
+        task_cleanup_ok = cleanup_task(Path(turn['dir']), retry_pending=protocol.retry_pending or retain_for_compaction)
+        cleanup_ok = process_cleanup_ok and task_cleanup_ok
         partial_error = None
-        if not completed and self.config['budget']['allow_partial_credit'] and process_cleanup_ok and task_cleanup_ok:
+        if not protocol.completed and self.config['budget']['allow_partial_credit'] and cleanup_ok:
             report_path = self.partial_credit.get('credit_evidence') or str(Path(turn['dir']) / 'partial-credit.json')
             if self.partial_credit or Path(report_path).is_file():
                 try:
@@ -934,30 +935,22 @@ class LongRunController:
                     partial_error = str(exc)
                     self.partial_credit = {}
                     self.event('agent.partial_credit_rejected', error=partial_error)
-        credit = self.config['budget']['credit_policy'] == 'running' or (completed and self.result.get('credit') is True)
-        partial = (not completed and bool(self.partial_credit)
-                   and self.config['budget']['allow_partial_credit']
-                   and reason in RETRYABLE_TURN_REASONS | {'operator_stop', 'hard_limit', 'context_window'}
-                   and process_cleanup_ok and task_cleanup_ok)
-        credit = credit or partial
-        if reason in ('controller_lost', 'cleanup_incomplete', 'invalid_agent_event', 'context_usage_missing',
-                      'deterministic_evidence_failure'):
-            credit = False
         duration = worker.get('runtime_seconds', 0)
-        reported = None
-        if self.config['budget']['credit_policy'] == 'reported':
-            observed = min(duration, max(0, time.monotonic() - self.state['budget']['active_monotonic']))
-            report = self.partial_credit if partial else self.result
-            reported = report.get('credited_seconds', 0) if credit else 0
-            if reported > observed:
-                reason, credit, completed, reported, retry_pending = 'invalid_agent_event', False, False, 0, False
-                self.event('agent.credit_rejected', reported_seconds=self.result.get('credited_seconds'), observed_seconds=observed)
-        elapsed = finish_active_interval(self.state, credit=credit, duration=duration, credited_duration=reported)
-        turn.update(status='COMPLETED' if completed else (
+        observed = min(duration, max(0, time.monotonic() - self.state['budget']['active_monotonic']))
+        final = compute_turn_outcome(observed_reason, worker, code, **facts,
+            cleanup_ok=cleanup_ok, allow_partial_credit=self.config['budget']['allow_partial_credit'],
+            partial_report=self.partial_credit, observed_seconds=observed)
+        if final.credit_rejected:
+            report = self.partial_credit if self.partial_credit else self.result
+            self.event('agent.credit_rejected', reported_seconds=report.get('credited_seconds'), observed_seconds=observed)
+        elapsed = finish_active_interval(self.state, credit=final.credit, duration=duration,
+                                         credited_duration=final.reported_seconds)
+        reason = final.reason
+        turn.update(status='COMPLETED' if final.completed else (
             'FAILED' if reason == 'deterministic_evidence_failure' else 'STOPPED'), ended_at=utc_now(), returncode=code,
-                    reason=reason, elapsed_seconds=elapsed, credited=credit,
-                    credited_seconds=(reported if reported is not None else elapsed) if credit else 0, result=self.result)
-        if partial:
+                    reason=reason, elapsed_seconds=elapsed, credited=final.credit,
+                    credited_seconds=(final.reported_seconds if final.reported_seconds is not None else elapsed) if final.credit else 0, result=self.result)
+        if final.partial_credit:
             turn['partial_credit'] = self.partial_credit
         if partial_error:
             turn['partial_credit_error'] = partial_error
@@ -965,10 +958,10 @@ class LongRunController:
         self.save()
         self.event('turn.finished', **turn)
         self.process.wait(timeout=3)
-        self.retry_pending = retry_pending
-        if completed:
+        self.retry_pending = final.retry_pending
+        if final.completed:
             self.state['retry'] = {'anchor_turn': None, 'used': 0}
-        elif retry_pending:
+        elif final.retry_pending:
             anchor = retry_state.get('anchor_turn') or turn['number']
             used = retry_state.get('used', 0) + 1
             self.state['retry'] = {'anchor_turn': anchor, 'used': used}
@@ -979,7 +972,7 @@ class LongRunController:
         self.save()
         return reason
 
-    def wait_retry_backoff(self):
+    def wait_retry_backoff(self) -> bool:
         deadline = time.monotonic() + self.config['policy']['retry_backoff_seconds']
         while time.monotonic() < deadline:
             reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None)
@@ -995,7 +988,7 @@ class LongRunController:
                            max(.01, deadline - time.monotonic())))
         return True
 
-    def loop(self):
+    def loop(self) -> None:
         while True:
             view = budget_view(self.state)
             reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None)
@@ -1051,11 +1044,11 @@ class LongRunController:
                 self.state.update(status='FAILED', stop_reason=reason, resume_required=True)
                 return
 
-    def finalize(self):
+    def finalize(self) -> None:
         self.event('run.finalizing', original_deadline=self.state['budget']['hard_deadline_at'])
         previous = None
         last_pulse = time.monotonic()
-        def pulse():
+        def pulse() -> None:
             nonlocal last_pulse
             now = time.monotonic()
             if now - last_pulse >= min(1, self.config['heartbeat']['interval_seconds']):
@@ -1085,12 +1078,12 @@ class LongRunController:
             time.sleep(min(self.config['heartbeat']['interval_seconds'],
                            max(.01, budget_view(self.state)['remaining_seconds'])))
 
-    def run(self):
+    def run(self) -> int:
         with file_lock(self.run_dir / '.controller.lock', blocking=False):
             self.state = load_state(self.run_dir)
             self.check_startable()
             old_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
-            def stopped(_sig, _frame):
+            def stopped(_sig: int, _frame: FrameType | None) -> None:
                 self.signalled = True
             for sig in old_handlers:
                 signal.signal(sig, stopped)
@@ -1141,7 +1134,7 @@ class LongRunController:
             return code
 
 
-def start_background(run_dir: Path, resume: bool, with_guard: bool) -> dict:
+def start_background(run_dir: Path, resume: bool, with_guard: bool) -> dict[str, Any]:
     request = uuid.uuid4().hex
     with (run_dir / 'controller.log').open('a') as log:
         args = [sys.executable, '-B', str(HERE / 'controller.py'), '--state-dir', str(run_dir.parents[1]),
@@ -1175,7 +1168,7 @@ def start_background(run_dir: Path, resume: bool, with_guard: bool) -> dict:
     raise ControllerError('launch acknowledgement timed out; status is UNKNOWN, inspect before retrying')
 
 
-def operator_stop(run_dir: Path, reason: str, *, signal_controller=True):
+def operator_stop(run_dir: Path, reason: str, *, signal_controller: bool = True) -> dict[str, Any]:
     state = load_state(run_dir)
     if not reason.strip():
         raise ControllerError('stop reason must be non-empty')
@@ -1196,7 +1189,7 @@ def operator_stop(run_dir: Path, reason: str, *, signal_controller=True):
     return safe_summary(load_state(run_dir))
 
 
-def guard_loop(run_dir: Path, attempt: int):
+def guard_loop(run_dir: Path, attempt: int) -> int:
     config = task_config(run_dir)
     poll = min(.5, config['heartbeat']['interval_seconds'])
     while True:
@@ -1242,7 +1235,7 @@ def guard_loop(run_dir: Path, attempt: int):
         time.sleep(poll)
 
 
-def doctor_run(run_dir: Path):
+def doctor_run(run_dir: Path) -> dict[str, Any]:
     state = load_state(run_dir)
     errors, warnings = [], []
     try:
@@ -1250,8 +1243,10 @@ def doctor_run(run_dir: Path):
         storage = check_storage(config['storage']['data_mount'], run_dir, Path(config['root']))
         if storage != state['storage']:
             errors.append('data device changed since init')
+        from bundle import source_hashes
+        current_sources = source_hashes()
         for name, expected in state['source_sha256'].items():
-            if sha256(HERE / name) != expected:
+            if current_sources.get(name) != expected:
                 errors.append(f'source changed: {name}')
         if config['docker_network']['enabled']:
             bridge_preflight(config['docker_network'])
@@ -1285,7 +1280,7 @@ def doctor_run(run_dir: Path):
             'next_action': 'context compact' if state['context']['state'] == 'COMPACTION_REQUIRED' else 'inspect exit.json and turn logs'}
 
 
-def tail(path: Path, size: int):
+def tail(path: Path, size: int) -> str:
     if not path.is_file():
         return ''
     with path.open('rb') as stream:
@@ -1293,7 +1288,7 @@ def tail(path: Path, size: int):
         return stream.read(size).decode('utf-8', errors='replace')
 
 
-def watch_run(run_dir: Path, interval: float, maximum: float | None, as_json: bool):
+def watch_run(run_dir: Path, interval: float, maximum: float | None, as_json: bool) -> int:
     started = time.monotonic()
     while True:
         value = safe_summary(load_state(run_dir))
@@ -1303,14 +1298,14 @@ def watch_run(run_dir: Path, interval: float, maximum: float | None, as_json: bo
         time.sleep(interval)
 
 
-def format_status(value):
+def format_status(value: dict[str, Any]) -> str:
     b, c = value['budget']['view'], value['context']['view']
     return (f"{value['run_id']} {value['observed_status']} turn={value['turn']['number']} "
         f"active={b['active_seconds']:.1f}s remaining={b['remaining_seconds']:.1f}s "
         f"context={c['used_tokens']}/{c['max_tokens']} generation={c['generation']} reason={value['stop_reason']}")
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state-dir')
     parser.add_argument('--remote', type=Path, help='SSH connection config; supervisor remains on the execution host')
@@ -1362,7 +1357,7 @@ def build_parser():
     return parser
 
 
-def dispatch(args, *, remote_payload=None):
+def dispatch(args: argparse.Namespace, *, remote_payload: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, int]:
     if args.action == 'deploy':
         raise ControllerError('deploy requires --remote')
     if args.action == 'docker-network':
@@ -1420,7 +1415,7 @@ def dispatch(args, *, remote_payload=None):
     raise ControllerError('unknown command')
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

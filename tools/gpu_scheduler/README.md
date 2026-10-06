@@ -48,7 +48,7 @@ python3 -B tools/gpu_scheduler/cli.py serve --config /mnt/data/ops/gpu-config.js
 | `max_jobs` | 单次服务会话最多接收的不同请求，默认 10000；保留历史以维持幂等 |
 | `min_free_disk_mib` | 数据盘空余阈值，低于时拒绝新作业并停止已有作业；属于采样保护，不是磁盘硬 quota |
 | `external_process_policy` | 默认 `exclusive_admission` 对未知计算进程暂停新作业；显式 `shared` 允许按实时余量与预约额度共享，不停止外部进程 |
-| `shared_headroom_mib` | `shared` 准入额外保留的显存余量，默认 2048 MiB、最小 1024 MiB；不是显存硬隔离 |
+| `shared_headroom_mib` | `shared` 准入额外保留的经验余量，默认 2048 MiB、最小 1024 MiB；补偿外部负载增长、采样间隔和碎片风险，须按本机峰值调整，不是驱动计费值或显存硬隔离 |
 
 ### 无需续期的持久服务
 
@@ -88,6 +88,8 @@ python3 -B tools/gpu_scheduler/cli.py stop --root /mnt/data/autoresearch/gpu-que
 
 `cancel` 只停止指定作业，`stop` 取消排队并停止本服务全部运行作业；对 `serve` 进程发送 Ctrl-C/SIGTERM 也执行服务级清理。`CANCELLING` 和等待中断不表示清理完成，须检查真实 `exit.cleanup_ok`；服务停止时正在运行的作业可先通知等待者，再由独立执行器完成回收。
 
+`wait`/`cancel` 的 `--job-id` 与 `--id` 等价；也支持 `python3 -B -m tools.gpu_scheduler.cli cancel ...`。本地 Unix socket 和 SSH `rpc` 均提供同一 `cancel` 操作，无 HTTP 依赖。监控器保持只读，停止仍使用本工具已有连接配置和原 `session_id`。
+
 CLI 退出码：0 表示请求成功；阻塞 `submit`/`wait` 收到非成功终态或 `UNKNOWN` 返回 1；可恢复的等待超时或关键中断返回 3，stderr 含 JSON 身份/状态；配置、通信和服务错误返回 2。通信失败的 outcome 为 `UNKNOWN`，先查询原请求，不自动重放。进程真实退出码在 `exit.returncode`，`SUCCEEDED` 仅指进程正常退出及清理成功，不证明评分或科研目标完成。
 
 `submit`/`wait` 的 `--timeout` 只限制本次等待，允许 0–43200 秒，不改变作业的排队/执行上限或父级截止。默认不设置客户端等待超时，但作业仍受原始预算约束。普通排队原因、STARTING/RUNNING 和进度更新不唤醒 Agent 进入下一步；这些更新留在 `status.json`/`events.jsonl` 中，关键中断和终态才结束调用。
@@ -115,6 +117,7 @@ result = client.submit({
     'queue_timeout_seconds': 3600,
     # 如属于已有长程 run，应传入其原始绝对截止：
     # 'deadline_epoch': parent_run_deadline_epoch,
+    # 或 'deadline_at': parent_run_hard_deadline_at（必须包含时区，两者择一）,
 })
 # submit 默认已等待到终态；不要再重复启动同一个 request_id。
 assert result['state'] in {'SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'EXPIRED', 'UNKNOWN'}
@@ -187,6 +190,8 @@ jobs = client.jobs()
 
 分配检查同时考虑实时已用显存和每个运行作业尚未实际分配的预约显存，防止延迟分配的任务被提前借走显存。发现未知 GPU 计算进程、遥测过期/缺失、显存读数不可用、容量配置超过实际容量时，暂停向对应卡分配；不会杀死未知进程。遥测不与外部启动程序原子联动，仍应把授权任务统一接入本服务。
 
+遥测使用 NVIDIA 的 FB 显存读数 `memory.used` 与逐进程 `used_gpu_memory`，框架缓存池已实际占用的显存也在读数内；它们不是 PyTorch `memory_allocated()`。两次查询并非原子采样，因此总占用取 GPU 读数与逐进程合计的较大值，再补足各作业尚未消费的预约。只有当前 GPU 上唯一归属的 PID 才能抵扣该作业预约；未知、重复归属或运行在另一张卡上的 PID 保持外部占用，预约不会因此释放。不查询 NVIDIA CLI 未保证支持的 `reserved_memory` 字段。
+
 工作区最新共享口径允许在不影响他人的前提下继续正在运行的训练，不因其他计算进程出现本身停止自己的任务。默认未知进程规则仅限制新作业准入，不是终止已有训练的依据。显式 `external_process_policy: shared` 将外部实时占用、尚未分配的预约显存及 `shared_headroom_mib` 一起核算；未知或过期遥测仍拒绝准入。题目适配器还须落实峰值/负载观察与自身退出条件，不干预外部任务。
 
 **显存 MiB、计算份额、CPU 和 RAM 均为合作式预约额度，不是硬隔离。** `CUDA_VISIBLE_DEVICES` 选择设备，线程变量提供默认线程数；它们不能阻止候选修改行为。没有 MPS/MIG/cgroup 显存强制限额，也不会凭瞬时低利用率撤销已有预约。作业超报/漏报峰值可能导致干扰/OOM，需先测量再配置。不能用本工具直接证明题面的进程显存硬上限已执行。
@@ -210,11 +215,13 @@ QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
 ```
 
 - 只在执行器退出、清理回执有效且归属子进程消失后释放资源；成功主进程遗留的后台子进程也会清理。
-- 进程身份和定向清理复用 `research_handoff/core/processes.py`，按随机归属 token 和 PID 启动身份操作，覆盖保留标记的 setsid 后代；不使用名称匹配或无范围 pkill。
+- 进程身份和定向清理复用 `tools/process_control/processes.py`，按随机归属 token 和 PID 启动身份操作，覆盖保留标记的 setsid 后代；不使用名称匹配或无范围 pkill。
+- 服务在事件循环内先持久化 STARTING 预约和固定截止，再由后台线程启动独立执行器；慢启动期间仍计入全部资源和并发上限，查询与取消可继续处理。取消记录通过 STOP.json 交给执行器，启动延迟不会重置执行截止。
+- 执行器丢失时，进程/容器回收与归属扫描在后台完成，状态提交仍由事件循环单写者处理。确认回收前继续占预约；有余量的其他作业仍可分配，失败则保持 UNKNOWN 并隔离对应卡。
 - 服务被 SIGKILL 后，已启动执行器继续按绝对截止和单调时钟上限回收。执行器持有主机用户级互斥锁，完成前新服务拒绝启动，即使更换运行根也一样。
 - 服务仍存活而执行器意外退出时，服务尝试定向清理其子进程，单独保存 `recovery-exit.json`；无法确认则 `UNKNOWN` 并隔离该 GPU，不自动重试。
 - 调度器与执行器同时被强杀、进程清除归属标记、跨 UID 或经外部 daemon 启动的作业超出本机合作式保护范围。不能把本工具当作恶意代码沙箱。服务 socket 不应直接暴露给公开 solver；由可信题目适配器代理。所有同用户客户端可查看/取消所有作业，没有租户权限隔离。
-- 清理一般需要少量时间；发出超时信号不等于内核立即回收。正常服务退出最多等 8 秒，残留执行器继续持锁，直到原截止及清理完成。
+- 清理一般需要少量时间；发出超时信号不等于内核立即回收。服务退出先等待已经发出的执行器启动与异常回收确定结果，保留继承锁；随后对正常执行器最多观察 8 秒，残留执行器继续持锁，直到原截止及清理完成。
 
 每次启动创建独立 `session_id`，不读旧文件重建队列。`status.json` 是历史证据，调度器死亡后其中的 QUEUED/RUNNING 可能已过时；原执行器的真实 `exit.json` 更晚写入。旧排队请求必须由调用方在核对后重新提交。
 
@@ -243,7 +250,9 @@ python3 -B -W error::ResourceWarning -m unittest discover -s tools/gpu_scheduler
 
 测试通过模拟 GPU 遥测和真实本地 CPU 子进程验证四并发、owner 公平、等待老化、持续短作业下的大作业保护、多GPU回填、持久服务与作业预算隔离，以及阻塞提交、事件唤醒、资源排队、校验拒绝、幂等、取消、超时、断线释放、可恢复中断、后代清理、服务崩溃与旧会话拒绝；临时文件集中于 `notes/gpu-scheduler-v1/scratch/` 并由测试清理。`serve/validate --local-test` 仅用于 CPU 诊断，跳过数据盘校验并模拟 GPU，不能用于真实实验。真实 GPU/SSH 验收脚本需要持续采样和并行故障注入，因此显式使用 `submit_async`，不代表普通控制 Agent 应默认异步提交。
 
-部署保持相对结构：`tools/gpu_scheduler/*.py` 与唯一依赖 `tools/research_handoff/core/processes.py`，另带 README 和示例。复制到新的不可变数据盘发布目录，核对文件哈希；运行服务的 `service.json` 自动记录实际代码哈希。不要热覆盖已有执行器的源码。没有自动部署、购买或云 API 调用。
+部署保持相对结构：`tools/gpu_scheduler/*.py` 和 `tools/process_control/{__init__,processes}.py`，另带 README 和示例。共享进程实现只维护在 `tools/process_control/`；research_handoff bundle 将同一源码嵌入 `core/processes.py`，保持独立可运行。复制到新的不可变数据盘发布目录，核对文件哈希；运行服务的 `service.json` 自动记录实际代码哈希。不要热覆盖已有执行器的源码。没有自动部署、购买或云 API 调用。
+
+作业的 `deadline_at` 接受带时区的 ISO8601 字符串，校验时统一为 `deadline_epoch`，与父级/服务截止取较早者。例如 `2026-10-07T00:00:00+08:00` 与 `2026-10-06T16:00:00Z` 均为 `1791302400`。无时区或同时指定两种截止均拒绝；相同截止的不同表示规范化后不破坏 request 幂等。历史数值时间戳和已有记录无需迁移。
 
 升级时同步发布客户端与服务端：`submit` 由异步受理改为默认阻塞，是调用行为变更；旧的“提交后逐项监控/并行提交”调用需改为 `submit_async`（CLI `enqueue`）。旧服务不支持新增等待协议，不能只换客户端。既有 run/release 与历史哈希不改，当前作业结束后再按授权采用新发布路径。2026-10-01 变更、测试与发布索引见 [阻塞协议记录](../../notes/gpu-scheduler-v2-blocking/incident.md)。
 
@@ -261,6 +270,8 @@ python3 -B tools/gpu_scheduler/tests/cloud_smoke.py --config /mnt/data/ops/smoke
 
 ### 已到期专用容器运行时恢复
 
+已有 GNU timeout 启动的专用运行时续期前，`lifecycle.py probe --config <不可变续期配置>` 在相同主机运行一对短时 timeout：一个仅终止其监督进程，另一个保留作为截止对照。只有对照按截止退出、其子进程消失且脱离子进程仍存活，才记录 detachment 成功；全部 probe 进程均定向清理，失败也写出 `timeout-probe.json`。安装续期必须使用本次 boot 中含 `control_deadline_verified: true` 的成功回执。该 probe 核验原 GNU timeout 启动方式，不能用新 systemd scope 替代原进程的监督关系验证。
+
 明确授权延长研究截止时，必须同步核对专用 Docker/containerd 的期限。已停止的专用运行时可用 `lifecycle.py restart-runtime-plan --config <不可变计划>` 恢复，`runtime-plan-status` 查询同一计划。此入口使用 Python 3.11+ 和 systemd，保留既有 socket、隔离桥、Docker/containerd 数据与状态目录，核验原启动身份死亡、无其他 daemon 接管同一数据根、所有源码/输入哈希及真实数据盘。计划须声明授权、绝对截止（未来最多48h）、原运行合同/launch/config、独立 unit 前缀及证据目录。
 
-systemd 分别托管 containerd 与 dockerd，按剩余绝对期限设置 RuntimeMaxSec、准备/退出超时、数据盘日志和缓存；不自动重启 daemon，不修改 GPU 队列或公共服务。`planned.json` 在启动前持久化，`installed.json` 或 `failure.json` 留证。已尝试计划不能重放；未知结果先查询同一 unit。恢复后须核验网络、容器隔离和实际模型工具调用，启动受理不等于科研恢复。仅调用该运行时入口不会修改 Agent 截止，Agent 仍由官方 handoff 管理。
+systemd 分别托管 containerd 与 dockerd，按剩余绝对期限设置 RuntimeMaxSec、准备/退出超时、数据盘日志和缓存；不自动重启 daemon，不修改 GPU 队列或公共服务。`planned.json` 在启动前持久化，`installed.json` 或 `failure.json` 留证。失败清理对两个专用单元分别执行 `stop` 和 `reset-failed`，逐项记录返回码和异常；即使停止超时，也继续清理 failed state 并保留原始启动错误。已尝试计划不能重放；未知结果先查询同一 unit。恢复后须核验网络、容器隔离和实际模型工具调用，启动受理不等于科研恢复。仅调用该运行时入口不会修改 Agent 截止，Agent 仍由官方 handoff 管理。

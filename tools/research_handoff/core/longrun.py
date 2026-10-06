@@ -17,6 +17,7 @@ import os
 import re
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -39,13 +40,28 @@ TERMINAL_STATES = COMPLETION_TERMINAL_STATES | {"STOPPED", "FAILED"}
 # These defaults leave enough headroom for the provider response, tool output,
 # and a durable handoff summary. A task may override them when its provider has
 # a different context contract.
-DEFAULT_CONTEXT_MAX_TOKENS = 150_000
-DEFAULT_CONTEXT_COMPACT_AT_TOKENS = 120_000
-DEFAULT_CONTEXT_RESERVE_TOKENS = 16_384
+@dataclass(frozen=True)
+class ControllerDefaults:
+    context_max_tokens: int = 150_000
+    context_compact_at_tokens: int = 120_000
+    context_reserve_tokens: int = 16_384
+    turn_seconds: int = 5_400
+    max_agent_line_bytes: int = 128 * 1024
+    budget_window_seconds: int = 39_600
+    budget_hard_limit_seconds: int = 43_200
+    extended_hard_limit_seconds: int = 172_800
+    summary_seconds: int = 60
+    max_summary_bytes: int = 65_536
+
+
+DEFAULTS = ControllerDefaults()
+DEFAULT_CONTEXT_MAX_TOKENS = DEFAULTS.context_max_tokens
+DEFAULT_CONTEXT_COMPACT_AT_TOKENS = DEFAULTS.context_compact_at_tokens
+DEFAULT_CONTEXT_RESERVE_TOKENS = DEFAULTS.context_reserve_tokens
 # A model turn is allowed to run for 90 minutes by default.  Task adapters may
 # choose a shorter value for probes, but the generic contract never defaults
 # to the old 55-minute Harbor limit.
-DEFAULT_TURN_SECONDS = 5_400
+DEFAULT_TURN_SECONDS = DEFAULTS.turn_seconds
 
 
 class ControllerError(ValueError):
@@ -60,7 +76,10 @@ def epoch(value: str | None) -> float | None:
     if value is None:
         return None
     try:
-        return _datetime.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        parsed = _datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("timezone is required")
+        return parsed.timestamp()
     except (TypeError, ValueError, OverflowError) as exc:
         raise ControllerError(f"invalid timestamp: {value!r}") from exc
 
@@ -117,12 +136,12 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     except ImportError:
         from completion import validate_contract
     contract = validate_contract(config)
-    def section(name, defaults):
+    def section(name: str, defaults: dict[str, Any]) -> dict[str, Any]:
         value = config.get(name, {})
         if not isinstance(value, dict) or set(value) - set(defaults):
             raise ControllerError(f"invalid or unknown fields in {name}")
         return {**defaults, **value}
-    def boolean(value, name):
+    def boolean(value: Any, name: str) -> bool:
         if type(value) is not bool:
             raise ControllerError(f"{name} must be boolean")
         return value
@@ -142,8 +161,8 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(env, dict) or not all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
             and not k.startswith("AUTORESEARCH_") and isinstance(v, str) and "\0" not in v for k, v in env.items()):
         raise ControllerError("env requires valid string keys/values; AUTORESEARCH_* is reserved")
-    budget = section("budget", {"mode": "active", "window_seconds": 39600,
-                                "hard_limit_seconds": 43200, "credit_policy": "running",
+    budget = section("budget", {"mode": "active", "window_seconds": DEFAULTS.budget_window_seconds,
+                                "hard_limit_seconds": DEFAULTS.budget_hard_limit_seconds, "credit_policy": "running",
                                 "allow_extended_hard_limit": False, "allow_partial_credit": False})
     window = positive_number(budget["window_seconds"], "budget.window_seconds")
     hard = positive_number(budget["hard_limit_seconds"], "budget.hard_limit_seconds")
@@ -151,7 +170,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ControllerError("budget.allow_extended_hard_limit must be boolean")
     if type(budget["allow_partial_credit"]) is not bool or (budget["allow_partial_credit"] and budget["credit_policy"] != "reported"):
         raise ControllerError("budget.allow_partial_credit requires boolean and reported credit policy")
-    hard_cap = 172800 if budget["allow_extended_hard_limit"] else 43200
+    hard_cap = DEFAULTS.extended_hard_limit_seconds if budget["allow_extended_hard_limit"] else DEFAULTS.budget_hard_limit_seconds
     if not window <= hard <= hard_cap:
         raise ControllerError(f"0 < window_seconds <= hard_limit_seconds <= {hard_cap} is required")
     if budget["mode"] not in ("active", "wall") or budget["credit_policy"] not in ("running", "successful_turn", "reported"):
@@ -165,7 +184,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     context = section("context", {"max_tokens": DEFAULT_CONTEXT_MAX_TOKENS,
         "compact_at_tokens": DEFAULT_CONTEXT_COMPACT_AT_TOKENS,
         "reserve_tokens": DEFAULT_CONTEXT_RESERVE_TOKENS, "required": True, "auto_compact": True,
-        "summary_seconds": 60, "max_summary_bytes": 65536})
+        "summary_seconds": DEFAULTS.summary_seconds, "max_summary_bytes": DEFAULTS.max_summary_bytes})
     # Defaults are conservative for the standard 150K contract; adapters should
     # override them when the selected provider has a smaller real capacity.
     for name in ("max_tokens", "compact_at_tokens", "reserve_tokens", "max_summary_bytes"):
@@ -327,6 +346,7 @@ def new_state(config: dict[str, Any], run: str, run_dir: Path) -> dict[str, Any]
             "started_monotonic": None,
             "active_started_at": None,
             "active_monotonic": None,
+            "wall_age_seconds": 0.0,
         },
         "context": {
             "generation": 0,
@@ -343,6 +363,11 @@ def new_state(config: dict[str, Any], run: str, run_dir: Path) -> dict[str, Any]
             "last_report_at": None,
             "last_snapshot": None,
             "last_reopen_at": None,
+            "guard_boot_id": None,
+            "summary_deadline_monotonic": None,
+            "summary_deadline_at": None,
+            "completion_grace_deadline_monotonic": None,
+            "completion_grace_deadline_at": None,
         },
         "turn": {
             "number": 0,
@@ -414,6 +439,8 @@ def active_elapsed(state: dict[str, Any], now_epoch: float | None = None) -> flo
     b = state["budget"]
     pending = 0.0
     if b.get("active_started_at"):
+        if b.get("boot_id") != boot_id():
+            return float(b["active_seconds"])
         if now_epoch is None and b.get("boot_id") == boot_id() and b.get("active_monotonic") is not None:
             pending = max(0, time.monotonic() - b["active_monotonic"])
         else:
@@ -425,7 +452,7 @@ def budget_view(state: dict[str, Any], now_epoch: float | None = None) -> dict[s
     now = time.time() if now_epoch is None else now_epoch
     b = state["budget"]
     started = epoch(b.get("started_at"))
-    wall = 0 if started is None else max(0, now - started)
+    wall = 0 if started is None else max(float(b.get("wall_age_seconds", 0)), now - started)
     if now_epoch is None and b.get("boot_id") == boot_id() and b.get("started_monotonic") is not None:
         wall = max(wall, time.monotonic() - b["started_monotonic"])
     active = float(b["active_seconds"]) if b["credit_policy"] == "reported" else active_elapsed(state, now_epoch)
@@ -433,14 +460,67 @@ def budget_view(state: dict[str, Any], now_epoch: float | None = None) -> dict[s
     remaining = max(0, b["hard_limit_seconds"] - wall)
     if b.get("hard_deadline_at"):
         remaining = min(remaining, max(0, epoch(b["hard_deadline_at"]) - now))
-    if b.get('started_at') and b.get('boot_id') != boot_id():
+    clock_issue = None
+    if started is not None and b.get('boot_id') != boot_id():
+        clock_issue = "host_rebooted"
+    elif started is not None and (now < started or (
+            now_epoch is None and now < b.get("last_observed_epoch", started))):
+        clock_issue = "wall_clock_rollback"
+    elif (now_epoch is None and b.get("started_monotonic") is not None
+          and time.monotonic() < b["started_monotonic"]):
+        clock_issue = "monotonic_clock_rollback"
+    if clock_issue:
         remaining = 0  # A reboot invalidates monotonic continuity; fail closed.
     return {"mode": b["mode"], "active_seconds": active, "credited_seconds": b["active_seconds"],
             "runtime_seconds": b["runtime_seconds"], "wall_age_seconds": wall,
             "window_seconds": b["window_seconds"], "hard_limit_seconds": b["hard_limit_seconds"],
             "remaining_seconds": remaining, "target_remaining_seconds": max(0, b["window_seconds"] - progress),
             "target_reached": progress >= b["window_seconds"], "hard_reached": remaining <= 0,
-            "hard_deadline_at": b.get("hard_deadline_at"), "hard_deadline_passed": remaining <= 0}
+            "hard_deadline_at": b.get("hard_deadline_at"), "hard_deadline_passed": remaining <= 0,
+            "clock_issue": clock_issue}
+
+
+def context_guard_deadline(
+    context: dict[str, Any], *, summary_seconds: float, grace_seconds: float,
+    summary_present: bool, now_monotonic: float | None = None,
+    now_epoch: float | None = None,
+) -> str | None:
+    """Arm durable context deadlines once and return a reached guard reason.
+
+    Both clocks are stored: a restart on the same boot keeps the original
+    monotonic deadline, and loss of that clock never grants a new grace period.
+    """
+    if context["state"] != "COMPACTION_REQUIRED":
+        return None
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    wall = time.time() if now_epoch is None else now_epoch
+    current_boot = boot_id()
+    guard_boot = context.get("guard_boot_id")
+    if guard_boot is not None and guard_boot != current_boot:
+        return "context_window"
+    context["guard_boot_id"] = current_boot
+
+    def arm(prefix: str, seconds: float) -> None:
+        mono_key, wall_key = prefix + "_monotonic", prefix + "_at"
+        if context.get(mono_key) is None:
+            # A legacy state with an absolute deadline must retain it.
+            absolute = epoch(context.get(wall_key))
+            context[mono_key] = now + (seconds if absolute is None else max(0, absolute - wall))
+        if context.get(wall_key) is None:
+            absolute = wall + max(0, context[mono_key] - now)
+            context[wall_key] = _datetime.datetime.fromtimestamp(absolute, _datetime.timezone.utc).isoformat()
+
+    arm("summary_deadline", summary_seconds)
+    if summary_present:
+        arm("completion_grace_deadline", grace_seconds)
+        prefix = "completion_grace_deadline"
+    else:
+        if context["used_tokens"] >= context["max_tokens"]:
+            return "context_window"
+        prefix = "summary_deadline"
+    if now >= context[prefix + "_monotonic"] or wall >= epoch(context[prefix + "_at"]):
+        return "context_window"
+    return None
 
 
 def context_view(state: dict[str, Any]) -> dict[str, Any]:
@@ -546,7 +626,9 @@ def _rotate_context(run_dir: Path, summary: str, *, reason: str, conversation_id
                    generation=generation, conversation_id=conversation_id, used_tokens=0,
                    input_tokens=0, output_tokens=0, state="OPEN", limit_exceeded=False,
                    guard_triggered_at=None, last_snapshot=relative,
-                   last_report_at=None, last_reopen_at=utc_now(), summary_deadline_monotonic=None)
+                   last_report_at=None, last_reopen_at=utc_now(), guard_boot_id=None,
+                   summary_deadline_monotonic=None, summary_deadline_at=None,
+                   completion_grace_deadline_monotonic=None, completion_grace_deadline_at=None)
         if state["status"] in ("WAITING_COMPACTION", "CONTEXT_COMPACTION_REQUIRED", "READY"):
             state.update(status="READY", stop_reason=None)
         save_state(run_dir, state)

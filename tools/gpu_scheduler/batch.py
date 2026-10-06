@@ -10,15 +10,16 @@ import subprocess
 import time
 from copy import copy
 from pathlib import Path
+from typing import Any, Callable
 
-from .client import SchedulerError
+from .client import Client, SchedulerError
 from .common import JobWaitInterrupted, JobWaitTimeout, atomic_json
 from .remote import RemoteClient
 
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "EXPIRED", "TIMED_OUT", "UNKNOWN"}
 
 
-def execute_one(client, spec, existing):
+def execute_one(client: Client, spec: dict[str, Any], existing: dict[str, dict[str, Any]]) -> dict[str, Any]:
     job = existing.get(spec["request_id"])
     while True:
         try:
@@ -39,7 +40,7 @@ def execute_one(client, spec, existing):
             raise RuntimeError("batch deadline reached; query existing job before continuing")
 
 
-def recover_request(client, spec):
+def recover_request(client: Client, spec: dict[str, Any]) -> dict[str, Any]:
     for attempt in range(3):
         try:
             return client.get(request_id=spec["request_id"])
@@ -49,7 +50,7 @@ def recover_request(client, spec):
             time.sleep(attempt + 1)
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--remote", required=True, type=Path)
     parser.add_argument("--session", required=True)
@@ -67,7 +68,7 @@ def main():
     return submit_stage(args)
 
 
-def run_stages(args):
+def run_stages(args: argparse.Namespace) -> int:
     stages = json.loads(args.stages.read_text())
     identities = [name for stage in stages for name in stage["candidate_ids"]]
     if len(identities) != len(set(identities)):
@@ -87,7 +88,7 @@ def run_stages(args):
     return 0
 
 
-def submit_stage(args):
+def submit_stage(args: argparse.Namespace) -> int:
     if args.receipts is None:
         raise ValueError("single batch requires --receipts")
     specs = json.loads(args.specs.read_text())
@@ -100,7 +101,7 @@ def submit_stage(args):
         return run_stage_locked(args, specs)
 
 
-def run_stage_locked(args, specs):
+def run_stage_locked(args: argparse.Namespace, specs: list[dict[str, Any]]) -> int:
     started = time.time()
     atomic_json(args.receipts / "batch-launch.json", {
         "pid": os.getpid(), "started_at_epoch": started, "concurrent": args.concurrent,
@@ -111,7 +112,7 @@ def run_stage_locked(args, specs):
     existing = {job["request_id"]: job for job in base.jobs()}
     jobs, errors = [], []
 
-    def status(state):
+    def status(state: str) -> None:
         atomic_json(args.receipts / "batch-status.json", {
             "state": state, "updated_at_epoch": time.time(), "completed": len(jobs),
             "total": len(specs), "concurrent": args.concurrent, "interruptions": errors,
@@ -119,11 +120,11 @@ def run_stage_locked(args, specs):
 
     status("RUNNING")
 
-    def run(spec):
+    def run(spec: dict[str, Any]) -> dict[str, Any]:
         client = RemoteClient(args.remote, session_id=args.session)
         return execute_one(client, spec, existing)
 
-    def completed(spec, job):
+    def completed(spec: dict[str, Any], job: dict[str, Any]) -> None:
         path = args.receipts / (job["id"] + ".json")
         atomic_json(path, job)
         jobs.append(job)
@@ -135,7 +136,7 @@ def run_stage_locked(args, specs):
         print(json.dumps({"request_id": spec["request_id"], "state": job["state"],
                           "completed": len(jobs), "total": len(specs)}), flush=True)
 
-    def failed(spec, error):
+    def failed(spec: dict[str, Any], error: Exception) -> None:
         errors.append({"request_id": spec["request_id"], "error": str(error)})
         atomic_json(args.receipts / "interruptions.json", errors)
         status("INTERRUPTED")
@@ -147,14 +148,17 @@ def run_stage_locked(args, specs):
     return 1 if errors else 0
 
 
-def run_batch(specs, concurrency, run, completed, failed):
+def run_batch(specs: list[dict[str, Any]], concurrency: int,
+              run: Callable[[dict[str, Any]], dict[str, Any]],
+              completed: Callable[[dict[str, Any], dict[str, Any]], None],
+              failed: Callable[[dict[str, Any], Exception], None]) -> None:
     """Admit replacements only after the completion/cleanup hook succeeds."""
     pending = iter(specs)
     stopped = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = {}
 
-        def admit():
+        def admit() -> None:
             spec = next(pending, None)
             if spec is not None:
                 futures[pool.submit(run, spec)] = spec

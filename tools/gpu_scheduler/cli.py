@@ -21,7 +21,7 @@ from .remote import RemoteClient
 from .server import serve
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="单机 GPU 内存队列；资源约束、可配置并发与公平调度")
     commands = parser.add_subparsers(dest="command", required=True)
     rpc = commands.add_parser("rpc", help="SSH 桥接：从 stdin 接收一个请求并转发本机 socket")
@@ -47,7 +47,7 @@ def main():
             identity.add_argument("--id")
             identity.add_argument("--request-id")
         if op in ("wait", "cancel"):
-            command.add_argument("--id", required=True)
+            command.add_argument("--id", "--job-id", dest="id", required=True)
         if op == "cancel":
             command.add_argument("--reason", required=True)
         if op == "wait":
@@ -57,7 +57,7 @@ def main():
                                  help="阻塞等待上限；超时不会取消已接受的作业")
     args = parser.parse_args()
     if args.command in ("submit", "wait"):
-        def interrupted(signum, frame):
+        def interrupted(signum: int, frame: object) -> None:
             raise KeyboardInterrupt
         signal.signal(signal.SIGTERM, interrupted)
     try:

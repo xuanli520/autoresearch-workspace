@@ -1,12 +1,14 @@
 """Validate trusted host evidence before accepting interrupted-turn credit."""
+from __future__ import annotations
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+from typing import Any
 
 
-def checked_file(path, allowed, expected=None):
+def checked_file(path: str | Path, allowed: str | Path, expected: str | None = None) -> tuple[Path, str]:
     path = Path(path)
     if path.is_symlink():
         raise ValueError('credit evidence must not be symlinked')
@@ -19,7 +21,7 @@ def checked_file(path, allowed, expected=None):
     return path, digest
 
 
-def validate_intervals(pairs, lower, upper, maximum):
+def validate_intervals(pairs: list[list[float]], lower: float, upper: float, maximum: float) -> float:
     if not isinstance(pairs, list):
         raise ValueError('credit intervals must be an array')
     ordered = []
@@ -38,7 +40,7 @@ def validate_intervals(pairs, lower, upper, maximum):
     return seconds
 
 
-def validate_evidence(evidence, allowed, *, required=True):
+def validate_evidence(evidence: list[dict[str, Any]], allowed: str | Path, *, required: bool = True) -> None:
     if not isinstance(evidence, list) or required and not evidence:
         raise ValueError('credit requires hashed original evidence')
     for item in evidence:
@@ -47,8 +49,9 @@ def validate_evidence(evidence, allowed, *, required=True):
         checked_file(item['path'], allowed, item['sha256'])
 
 
-def partial_report(path, *, run_id, turn, lower, upper, maximum, allowed,
-                   expected_sha256=None, expected_seconds=None):
+def partial_report(path: str | Path, *, run_id: str, turn: int, lower: float, upper: float,
+                   maximum: float, allowed: str | Path, expected_sha256: str | None = None,
+                   expected_seconds: float | None = None) -> dict[str, Any]:
     path, digest = checked_file(path, allowed, expected_sha256)
     if path.stat().st_size > 4*1024*1024:
         raise ValueError('partial credit report exceeds 4 MiB')

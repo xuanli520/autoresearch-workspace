@@ -1,19 +1,24 @@
 """Validation and the existing workspace's process/storage primitives."""
 from __future__ import annotations
 
-import importlib.util
+import datetime as dt
 import json
 import math
 import os
 import re
 from pathlib import Path
+from typing import Any, Iterable
 
-# Load the existing dependency-free process helpers without changing their source
-# or injecting generic module names ("processes", "longrun") into sys.modules.
-PROCESS_SOURCE = Path(__file__).resolve().parents[1] / "research_handoff/core/processes.py"
-_spec = importlib.util.spec_from_file_location("_gpu_scheduler_processes", PROCESS_SOURCE)
-processes = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(processes)
+try:
+    from tools.process_control import processes
+except ImportError:  # standalone scheduler release
+    import importlib.util
+    _process_path = Path(__file__).resolve().parents[1] / "research_handoff/core/processes.py"
+    _process_spec = importlib.util.spec_from_file_location("_gpu_scheduler_processes", _process_path)
+    processes = importlib.util.module_from_spec(_process_spec)
+    _process_spec.loader.exec_module(processes)
+
+PROCESS_SOURCE = Path(processes.__file__).resolve()
 
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "EXPIRED"}
 WAITABLE_TERMINAL = TERMINAL | {"UNKNOWN"}
@@ -21,17 +26,18 @@ MAX_MESSAGE = 1024 * 1024
 
 
 class JobWaitTimeout(TimeoutError):
-    def __init__(self, message, job):
+    def __init__(self, message: str, job: dict[str, Any]) -> None:
         super().__init__(message)
         self.job = job
 
     @property
-    def job_id(self):
+    def job_id(self) -> str:
         return self.job["id"]
 
 
 class JobWaitInterrupted(RuntimeError):
-    def __init__(self, reason, *, job=None, session_id=None, job_id=None, request_id=None):
+    def __init__(self, reason: str, *, job: dict[str, Any] | None = None, session_id: str | None = None,
+                 job_id: str | None = None, request_id: str | None = None) -> None:
         super().__init__(f"wait interrupted: {reason}; inspect the original job before continuing")
         self.reason = reason
         self.job = job
@@ -40,12 +46,13 @@ class JobWaitInterrupted(RuntimeError):
         self.request_id = job["request_id"] if job is not None else request_id
 
 
-def validate_wait_timeout(timeout):
+def validate_wait_timeout(timeout: float | None) -> float | None:
     return None if timeout is None else number(timeout, "timeout", 0, 43200)
 
 
-def fit_job_time_limits(max_runtime_seconds, queue_timeout_seconds, remaining_seconds,
-                        *, queue_reserve_seconds=600, grace_seconds=30, min_runtime_seconds=120):
+def fit_job_time_limits(max_runtime_seconds: float, queue_timeout_seconds: float, remaining_seconds: float,
+                        *, queue_reserve_seconds: float = 600, grace_seconds: float = 30,
+                        min_runtime_seconds: float = 120) -> dict[str, float]:
     """Fit a new request's queue and execution limits inside its parent budget.
 
     Use only before submitting: accepted/unknown requests must retain their spec.
@@ -67,19 +74,19 @@ def fit_job_time_limits(max_runtime_seconds, queue_timeout_seconds, remaining_se
     return {"max_runtime_seconds": runtime, "queue_timeout_seconds": queue}
 
 
-def number(value, name, low=0, high=float("inf")):
+def number(value: Any, name: str, low: float = 0, high: float = float("inf")) -> float:
     if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
         raise ValueError(f"{name} must be finite and in [{low}, {high}]")
     return value
 
 
-def integer(value, name, low=1, high=2**31):
+def integer(value: Any, name: str, low: int = 1, high: int = 2**31) -> int:
     if type(value) is not int:
         raise ValueError(f"{name} must be an integer")
     return number(value, name, low, high)
 
 
-def fields(value, required, optional=()):
+def fields(value: Any, required: Iterable[str], optional: Iterable[str] = ()) -> None:
     if not isinstance(value, dict):
         raise ValueError("expected a JSON object")
     missing, extra = set(required) - value.keys(), value.keys() - set(required) - set(optional)
@@ -87,19 +94,19 @@ def fields(value, required, optional=()):
         raise ValueError(f"missing fields: {sorted(missing)}; unknown fields: {sorted(extra)}")
 
 
-def label(value, name):
+def label(value: str, name: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}", value):
         raise ValueError(f"invalid {name}")
     return value
 
 
-def absolute(value, name):
+def absolute(value: str, name: str) -> str:
     if not isinstance(value, str) or "\0" in value or not Path(value).is_absolute():
         raise ValueError(f"{name} must be an absolute path")
     return str(Path(value).resolve())
 
 
-def check_storage(config, *paths):
+def check_storage(config: dict[str, Any], *paths: str | Path) -> None:
     """Reject the system device and changed/nested mounts before new writes."""
     if config["local_test"]:
         return
@@ -126,7 +133,7 @@ def check_storage(config, *paths):
             raise ValueError(f"unexpected device: {path}")
 
 
-def atomic_json(path, value):
+def atomic_json(path: str | Path, value: Any) -> None:
     """Unique temporary file, replace, fsync; no shared queue is stored here."""
     import tempfile
     path = Path(path)
@@ -147,7 +154,7 @@ def atomic_json(path, value):
         Path(temp).unlink(missing_ok=True)
 
 
-def validate_config(raw, *, local_test=False):
+def validate_config(raw: dict[str, Any], *, local_test: bool = False) -> dict[str, Any]:
     fields(raw, {"version", "root", "data_mount", "gpus", "cpu_cores", "ram_mib"},
            {"poll_seconds", "service_seconds", "persistent", "max_running", "scheduling_policy",
             "starvation_seconds", "max_bypass", "max_jobs", "min_free_disk_mib",
@@ -217,11 +224,28 @@ def validate_config(raw, *, local_test=False):
     return cfg
 
 
-def validate_job(raw, config):
+def deadline_timestamp(value: str) -> float:
+    """Convert an explicit timezone offset to UTC epoch without host timezone."""
+    if not isinstance(value, str):
+        raise ValueError("deadline_at must be an ISO8601 timestamp with timezone")
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("timezone is required")
+        return number(parsed.timestamp(), "deadline_at", 1)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError("deadline_at must be an ISO8601 timestamp with timezone") from exc
+
+
+def validate_job(raw: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     fields(raw, {"request_id", "owner", "command", "cwd", "memory_mib", "compute_units",
                  "max_runtime_seconds"},
-           {"cpu_cores", "ram_mib", "queue_timeout_seconds", "deadline_epoch", "gpu_uuid"})
+           {"cpu_cores", "ram_mib", "queue_timeout_seconds", "deadline_epoch", "deadline_at", "gpu_uuid"})
     spec = dict(raw)
+    if "deadline_at" in spec:
+        if "deadline_epoch" in spec:
+            raise ValueError("specify exactly one of deadline_at and deadline_epoch")
+        spec["deadline_epoch"] = deadline_timestamp(spec.pop("deadline_at"))
     for key in ("request_id", "owner"):
         label(spec[key], key)
     cmd = spec["command"]
@@ -252,5 +276,5 @@ def validate_job(raw, config):
     return spec
 
 
-def read_json(path):
+def read_json(path: str | Path) -> Any:
     return json.loads(Path(path).read_text())

@@ -4,6 +4,7 @@ Forecasts assume external memory usage stays unchanged. They are diagnostics,
 not promised start times. Allocation always uses a fresh real snapshot.
 """
 from __future__ import annotations
+from typing import Any
 
 from .resources import choose_gpu
 
@@ -11,12 +12,13 @@ from .resources import choose_gpu
 CLEANUP_SECONDS = 10
 
 
-def protected(job, config, now):
+def protected(job: dict[str, Any], config: dict[str, Any], now: float) -> bool:
     return (job["bypasses"] >= config["max_bypass"] or
             now - job["submitted_mono"] >= config["starvation_seconds"])
 
 
-def order_queue(queue, active, config, owner_dispatch, now):
+def order_queue(queue: list[dict[str, Any]], active: list[dict[str, Any]],
+                config: dict[str, Any], owner_dispatch: dict[str, int], now: float) -> list[dict[str, Any]]:
     if config["scheduling_policy"] == "fifo" or config["max_bypass"] == 0:
         return sorted(queue, key=lambda j: j["submitted_mono"])
     totals = {k: sum(g[k] for g in config["gpus"]) for k in ("memory_mib", "compute_units")}
@@ -28,7 +30,7 @@ def order_queue(queue, active, config, owner_dispatch, now):
         for key in totals:
             row[key] += job["spec"][key] / totals[key]
 
-    def key(job):
+    def key(job: dict[str, Any]) -> tuple[float, float, float, float]:
         if protected(job, config, now):
             return (0, job["submitted_mono"], 0, 0)
         owner = job["spec"]["owner"]
@@ -38,7 +40,7 @@ def order_queue(queue, active, config, owner_dispatch, now):
     return sorted(queue, key=key)
 
 
-def release_at(job, now):
+def release_at(job: dict[str, Any], now: float) -> float | None:
     if job.get("state") in ("UNKNOWN", "CANCELLING"):
         return None
     deadline = job.get("execution_deadline_mono")
@@ -47,7 +49,8 @@ def release_at(job, now):
     return deadline + CLEANUP_SECONDS
 
 
-def forecast_snapshot(snapshot, released, pid_sets):
+def forecast_snapshot(snapshot: dict[str, Any] | None, released: list[dict[str, Any]],
+                      pid_sets: dict[str, set[int]]) -> dict[str, Any] | None:
     if snapshot is None:
         return None
     pids = set().union(*(pid_sets.get(j["id"], set()) for j in released)) if released else set()
@@ -59,7 +62,9 @@ def forecast_snapshot(snapshot, released, pid_sets):
     return {**snapshot, "gpus": gpus}
 
 
-def projected_start(spec, active, config, snapshot, quarantined, pid_sets, now):
+def projected_start(spec: dict[str, Any], active: list[dict[str, Any]], config: dict[str, Any],
+                    snapshot: dict[str, Any] | None, quarantined: set[str],
+                    pid_sets: dict[str, set[int]], now: float) -> float | None:
     releases = {j["id"]: release_at(j, now) for j in active}
     points = sorted({now, *(t for t in releases.values() if t is not None)})
     for at in points:
@@ -72,7 +77,9 @@ def projected_start(spec, active, config, snapshot, quarantined, pid_sets, now):
     return None
 
 
-def safe_backfill(candidate, gpu_uuid, blockers, active, config, snapshot, quarantined, pid_sets, now):
+def safe_backfill(candidate: dict[str, Any], gpu_uuid: str, blockers: list[dict[str, Any]],
+                  active: list[dict[str, Any]], config: dict[str, Any], snapshot: dict[str, Any] | None,
+                  quarantined: set[str], pid_sets: dict[str, set[int]], now: float) -> bool:
     hypothetical = {"id": "backfill/" + candidate["id"], "gpu_uuid": gpu_uuid,
                     "spec": candidate["spec"], "state": "RUNNING",
                     "execution_deadline_mono": now + candidate["spec"]["max_runtime_seconds"]}

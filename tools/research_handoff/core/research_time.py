@@ -5,20 +5,24 @@ import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable, Iterable
 
 
-def timestamp(value):
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+def timestamp(value: str) -> float:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("session timestamps must include timezone")
+    return parsed.timestamp()
 
 
-def token_usage(payload, previous=None):
+def token_usage(payload: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Native token_count events can omit usage; retain the last real report."""
     info = payload.get("info")
     usage = info.get("last_token_usage") if isinstance(info, dict) else None
     return usage if isinstance(usage, dict) else previous
 
 
-def texts(value):
+def texts(value: Any) -> str:
     if isinstance(value, str):
         try:
             decoded = json.loads(value)
@@ -33,7 +37,7 @@ def texts(value):
     return ""
 
 
-def merge(intervals):
+def merge(intervals: Iterable[Iterable[float]]) -> list[list[float]]:
     merged = []
     for start, end in sorted(intervals):
         if end <= start:
@@ -45,7 +49,7 @@ def merge(intervals):
     return merged
 
 
-def subtract(interval, excluded):
+def subtract(interval: tuple[float, float], excluded: Iterable[Iterable[float]]) -> list[list[float]]:
     pieces = [list(interval)]
     for left, right in merge(excluded):
         result = []
@@ -61,8 +65,11 @@ def subtract(interval, excluded):
     return pieces
 
 
-def audit_session(path, lower=None, upper=None, *, allow_partial=False,
-                  feedback_reader=lambda value: (), method_reader=None, idle_limit=300):
+def audit_session(path: str | Path, lower: float | None = None, upper: float | None = None,
+                  *, allow_partial: bool = False,
+                  feedback_reader: Callable[[Any], Iterable[Any]] = lambda value: (),
+                  method_reader: Callable[[dict[str, Any], Any], bool] | None = None,
+                  idle_limit: float = 300) -> dict[str, Any]:
     path = Path(path)
     raw = path.read_bytes()
     events = []

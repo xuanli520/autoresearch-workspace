@@ -5,13 +5,14 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from .client import Client, SchedulerError, _REQUEST_DEFAULT
 from .common import MAX_MESSAGE, JobWaitInterrupted, JobWaitTimeout, fields, number, read_json
 
 
 class RemoteClient(Client):
-    def __init__(self, config_file, *, session_id=None):
+    def __init__(self, config_file: str | Path, *, session_id: str | None = None) -> None:
         config_path = Path(config_file).resolve()
         config = read_json(config_path)
         fields(config, {"version", "auth_file", "python", "cli", "root"},
@@ -31,12 +32,12 @@ class RemoteClient(Client):
                                    "wait_timeout_seconds", 1, 43210)
         self.session_id = session_id or self._request("hello")["session_id"]
 
-    def _wait_transport_timeout(self, timeout):
+    def _wait_transport_timeout(self, timeout: float | None) -> float:
         if timeout is None:
             return self.wait_timeout
         return min(self.wait_timeout, max(self.timeout, timeout + 5))
 
-    def _request(self, op, *, request_timeout=_REQUEST_DEFAULT, **kwargs):
+    def _request(self, op: str, *, request_timeout: Any = _REQUEST_DEFAULT, **kwargs: Any) -> Any:
         from tools.gpu_monitor import monitor
 
         request = dict(op=op, session_id=getattr(self, "session_id", None), **kwargs)

@@ -11,17 +11,22 @@ import subprocess
 import time
 import tomllib
 from pathlib import Path
+from typing import Any
 
-from .common import atomic_json
+from .common import PROCESS_SOURCE, atomic_json
 from tools.research_handoff.core.longrun import check_storage
-from tools.research_handoff.core import processes
+try:
+    from tools.process_control import processes
+except ImportError:
+    from tools.research_handoff.core import processes
 
 
-def read(path):
+def read(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text())
 
 
-def load_plan(path, *, require_future=True):
+def load_plan(path: str | Path, *, require_future: bool = True) -> tuple[
+        dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     plan = read(path)
     expected = {'version', 'root', 'data_mount', 'runtime_contract', 'runtime_launch',
                 'docker_config', 'containerd_config', 'deadline_epoch', 'authorization',
@@ -43,6 +48,7 @@ def load_plan(path, *, require_future=True):
     required = {plan[k] for k in ('runtime_contract', 'runtime_launch', 'docker_config', 'containerd_config')}
     required.update(str(p.resolve()) for p in Path(__file__).parent.glob('*.py'))
     required.update(str(p.resolve()) for p in (
+        PROCESS_SOURCE, PROCESS_SOURCE.with_name('__init__.py'),
         Path(__file__).parents[1] / 'research_handoff/core/processes.py',
         Path(__file__).parents[1] / 'research_handoff/core/longrun.py'))
     if not isinstance(hashes, dict) or not required.issubset(hashes):
@@ -74,7 +80,7 @@ def load_plan(path, *, require_future=True):
     return plan, contract, docker, containerd
 
 
-def ensure_stopped(plan, docker, containerd):
+def ensure_stopped(plan: dict[str, Any], docker: dict[str, Any], containerd: dict[str, Any]) -> None:
     old = read(plan['runtime_launch'])['processes']
     if {item['name'] for item in old} != {'dockerd', 'containerd'}:
         raise ValueError('original runtime launch is incomplete')
@@ -109,7 +115,7 @@ def ensure_stopped(plan, docker, containerd):
             continue
 
 
-def unit_command(plan, name, *, now=None):
+def unit_command(plan: dict[str, Any], name: str, *, now: float | None = None) -> list[str]:
     remaining = plan['deadline_epoch'] - (time.time() if now is None else now)
     if remaining <= 0:
         raise ValueError('runtime deadline expired before launch')
@@ -130,7 +136,7 @@ def unit_command(plan, name, *, now=None):
             *['--property=' + value for value in properties], executable, flag, config]
 
 
-def prepare_bridge(plan, docker):
+def prepare_bridge(plan: dict[str, Any], docker: dict[str, Any]) -> dict[str, Any] | None:
     name = docker.get('bridge')
     if name in (None, 'none'):
         return None
@@ -166,7 +172,21 @@ def prepare_bridge(plan, docker):
     return receipt
 
 
-def restart_plan(path):
+def _cleanup_unit(unit: str) -> dict[str, Any]:
+    receipt: dict[str, Any] = {"unit": unit}
+    for operation, key in (("stop", "returncode"), ("reset-failed", "reset_failed_returncode")):
+        try:
+            result = subprocess.run(["systemctl", operation, unit], capture_output=True, text=True, timeout=20)
+            receipt[key] = result.returncode
+            if result.returncode:
+                receipt[operation + "_error"] = result.stderr.strip()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            receipt[key] = None
+            receipt[operation + "_error"] = str(exc)
+    return receipt
+
+
+def restart_plan(path: str | Path) -> dict[str, Any]:
     if os.geteuid() != 0:
         raise ValueError('runtime restoration must run as root')
     plan, contract, docker, containerd = load_plan(path)
@@ -208,14 +228,13 @@ def restart_plan(path):
         cleanup = []
         for name in ('dockerd', 'containerd'):
             unit = plan['unit_prefix'] + '-' + name + '.service'
-            stopped = subprocess.run(['systemctl', 'stop', unit], capture_output=True, text=True, timeout=20)
-            cleanup.append({'unit': unit, 'returncode': stopped.returncode})
+            cleanup.append(_cleanup_unit(unit))
         atomic_json(root / 'failure.json', {'at_epoch': time.time(), 'installed_units': installed,
                                           'error': str(exc), 'cleanup': cleanup})
         raise
 
 
-def status_plan(path):
+def status_plan(path: str | Path) -> dict[str, Any]:
     plan, _, _, _ = load_plan(path, require_future=False)
     units = [plan['unit_prefix'] + '-' + name + '.service' for name in ('containerd', 'dockerd')]
     result = subprocess.run(['systemctl', 'show', *units, '--no-pager',

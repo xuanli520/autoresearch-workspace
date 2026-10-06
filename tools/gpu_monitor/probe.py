@@ -2,6 +2,7 @@
 
 Only the standard library is required. Never imports training code or writes remotely.
 """
+import base64
 import csv
 import io
 import json
@@ -11,9 +12,14 @@ from pathlib import Path
 import stat
 import subprocess
 import time
+from typing import Any
+
+DEFAULT_TAIL_BYTES = 64 * 1024
+MAX_METADATA_BYTES = 256 * 1024
+GPU_QUERY_TIMEOUT_SECONDS = 8
 
 
-def field(value, key, default=None):
+def field(value: Any, key: str, default: Any = None) -> Any:
     for part in key.split('.'):
         if not isinstance(value, dict) or part not in value:
             return default
@@ -21,7 +27,7 @@ def field(value, key, default=None):
     return value
 
 
-def read_file(root, name, limit, tail=False):
+def read_file(root: Path, name: str, limit: int, tail: bool = False) -> dict:
     p = (root / name).resolve()
     if not p.is_relative_to(root):
         return {'error': 'path escapes task root'}
@@ -35,19 +41,37 @@ def read_file(root, name, limit, tail=False):
             if not tail and st.st_size > limit:
                 return {'error': 'metadata exceeds byte limit', 'size': st.st_size}
             offset = max(0, st.st_size - limit) if tail else 0
+            at_boundary = True
+            if offset:
+                f.seek(offset - 1)
+                at_boundary = f.read(1) == b'\n'
             f.seek(offset)
             data = f.read(limit)
-        if offset:
-            data = data.split(b'\n', 1)[-1] if b'\n' in data else b''
-        return {'text': data.decode('utf-8', errors='replace'), 'size': st.st_size,
-                'mtime': st.st_mtime, 'inode': st.st_ino, 'truncated': bool(offset)}
+            read_end = offset + len(data)
+        if offset and not at_boundary and b'\n' in data:
+            # The first record may begin before the bounded tail.  Discard it
+            # and report the exact byte offset of the first complete record so
+            # callers can safely resume incremental parsing.
+            skipped, data = data.split(b'\n', 1)
+            offset += len(skipped) + 1
+        elif offset and not at_boundary:
+            data = b''
+            offset = read_end
+        entry = {'text': data.decode('utf-8', errors='replace'), 'size': st.st_size,
+                 'mtime': st.st_mtime, 'mtime_ns': st.st_mtime_ns,
+                 'inode': st.st_ino, 'device': st.st_dev, 'offset': offset,
+                 'read_end': read_end, 'truncated': bool(offset)}
+        if tail:
+            # Preserve exact bytes when an append splits a UTF-8 code point.
+            entry['raw_b64'] = base64.b64encode(data).decode('ascii')
+        return entry
     except FileNotFoundError:
         return {'missing': True}
     except OSError as e:
         return {'error': f'{type(e).__name__}: {e}'}
 
 
-def process_table():
+def process_table() -> tuple[list[dict[str, Any]], int]:
     rows = []
     errors = 0
     for p in Path('/proc').iterdir():
@@ -76,10 +100,10 @@ def process_table():
     return rows, errors
 
 
-def gpu_query(query, names):
+def gpu_query(query: str, names: list[str]) -> dict[str, Any]:
     try:
         p = subprocess.run(['nvidia-smi', query, '--format=csv,noheader,nounits'],
-                           text=True, capture_output=True, timeout=8)
+                           text=True, capture_output=True, timeout=GPU_QUERY_TIMEOUT_SECONDS)
         if p.returncode:
             return {'error': p.stderr.strip()[:500] or p.stdout.strip()[:500]}
         return {'rows': [dict(zip(names, [v.strip() for v in row]))
@@ -88,7 +112,7 @@ def gpu_query(query, names):
         return {'error': type(e).__name__ + ': ' + str(e)}
 
 
-def collect(config):
+def collect(config: dict[str, Any]) -> dict[str, Any]:
     now = time.time()
     processes, proc_errors = process_table()
     gpu = gpu_query('--query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu,temperature.gpu',
@@ -112,9 +136,9 @@ def collect(config):
         for selector in task.get('processes', []):
             if selector.get('pid_file'):
                 names.add(selector['pid_file'])
-        files = {name: read_file(root, name, config.get('metadata_bytes', 262144)) for name in names}
+        files = {name: read_file(root, name, config.get('metadata_bytes', MAX_METADATA_BYTES)) for name in names}
         for stream in task.get('streams', []):
-            files[stream['path']] = read_file(root, stream['path'], config.get('tail_bytes', 65536), tail=True)
+            files[stream['path']] = read_file(root, stream['path'], config.get('tail_bytes', DEFAULT_TAIL_BYTES), tail=True)
         matched = {}
         identities = []
         process_errors = []

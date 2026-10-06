@@ -11,6 +11,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from .common import (TERMINAL, WAITABLE_TERMINAL, PROCESS_SOURCE, JobWaitInterrupted,
                      JobWaitTimeout, atomic_json, check_storage, processes, read_json,
@@ -20,7 +21,7 @@ from .fairness import order_queue, projected_start, protected, safe_backfill
 
 
 class Scheduler:
-    def __init__(self, config, lock_fd):
+    def __init__(self, config: dict[str, Any], lock_fd: int) -> None:
         self.config, self.lock_fd = config, lock_fd
         self.id = uuid.uuid4().hex
         self.root = Path(config["root"])
@@ -28,6 +29,8 @@ class Scheduler:
         self.directory.mkdir(parents=True)
         self.jobs, self.requests = {}, {}
         self._job_events = {}
+        self._spawn_tasks: set[asyncio.Task[None]] = set()
+        self._recovery_tasks: dict[str, asyncio.Task[tuple[dict[str, Any], bool]]] = {}
         self.snapshot = None
         self.probe_error = None
         self.quarantined = set()
@@ -47,7 +50,7 @@ class Scheduler:
                     raise ValueError("infrastructure lease has expired")
             self.deadline_epoch = time.time() + seconds
             self.deadline_mono = time.monotonic() + seconds
-        sources = sorted(Path(__file__).parent.glob("*.py")) + [PROCESS_SOURCE]
+        sources = sorted(Path(__file__).parent.glob("*.py")) + [PROCESS_SOURCE, PROCESS_SOURCE.with_name("__init__.py")]
         atomic_json(self.directory / "service.json", {
             "session_id": self.id, "pid": os.getpid(), "at": time.time(), "config": config,
             "identity": {"pid": os.getpid(), "start_ticks": processes.process_start_ticks(os.getpid()),
@@ -56,15 +59,17 @@ class Scheduler:
             "source_sha256": {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
         })
 
-    def active(self):
+    def active(self) -> list[dict[str, Any]]:
         return [j for j in self.jobs.values() if j["state"] not in TERMINAL | {"QUEUED"}]
 
-    def view(self, job):
+    def view(self, job: dict[str, Any]) -> dict[str, Any]:
         result = {k: job[k] for k in ("id", "state", "reason", "gpu_uuid", "submitted_at", "started_at",
                                       "finished_at", "bypasses", "directory", "revision")}
         result.update(session_id=self.id, request_id=job["spec"]["request_id"], owner=job["spec"]["owner"],
                       resources={k: job["spec"][k] for k in ("memory_mib", "compute_units", "cpu_cores", "ram_mib")},
                       exit=job.get("exit"))
+        if job["state"] == "QUEUED" and self.probe_error is not None:
+            result["telemetry_error"] = self.probe_error
         if job["state"] == "QUEUED":
             now = time.monotonic()
             cutoff = job["submitted_at"] + job["spec"]["queue_timeout_seconds"]
@@ -79,7 +84,7 @@ class Scheduler:
                                "projection_scope": "active_job_runtime_bounds; external_usage_may_change"}
         return result
 
-    def transition(self, job, state, reason):
+    def transition(self, job: dict[str, Any], state: str, reason: str) -> None:
         if (job["state"], job["reason"]) == (state, reason):
             return
         job.update(state=state, reason=reason)
@@ -97,7 +102,7 @@ class Scheduler:
         event.set()
         self._job_events[job["id"]] = asyncio.Event()
 
-    def submit(self, raw):
+    def submit(self, raw: dict[str, Any]) -> dict[str, Any]:
         if self.closing:
             raise ValueError("scheduler is stopping")
         spec = validate_job(raw, self.config)
@@ -134,7 +139,7 @@ class Scheduler:
         self.transition(job, "QUEUED", "awaiting_dispatch")
         return self.view(job)
 
-    async def wait(self, job_id, *, timeout=None):
+    async def wait(self, job_id: str, *, timeout: float | None = None) -> dict[str, Any]:
         timeout = validate_wait_timeout(timeout)
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
@@ -161,14 +166,14 @@ class Scheduler:
                     raise JobWaitTimeout("client wait timed out; the job was NOT cancelled",
                                          self.view(job)) from exc
 
-    def get(self, job_id=None, request_id=None):
+    def get(self, job_id: str | None = None, request_id: str | None = None) -> dict[str, Any]:
         if request_id is not None:
             job_id = self.requests.get(request_id)
         if job_id not in self.jobs:
             raise ValueError("unknown job/request in this in-memory session; no automatic replay")
         return self.jobs[job_id]
 
-    def cancel(self, job_id, reason="user_cancel"):
+    def cancel(self, job_id: str, reason: str = "user_cancel") -> dict[str, Any]:
         job = self.get(job_id)
         if job["state"] == "QUEUED":
             self.transition(job, "CANCELLED", reason)
@@ -178,7 +183,7 @@ class Scheduler:
             self.transition(job, "CANCELLING", reason)
         return self.view(job)
 
-    def begin_shutdown(self, reason="service_stop"):
+    def begin_shutdown(self, reason: str = "service_stop") -> None:
         if self.closing:
             return
         self.closing = True
@@ -188,7 +193,7 @@ class Scheduler:
         for job in self.jobs.values():
             self.cancel(job["id"], reason)
 
-    def launch(self, job, gpu_uuid):
+    def _prepare_launch(self, job: dict[str, Any], gpu_uuid: str) -> tuple[Path, dict[str, str]]:
         directory = Path(job["directory"])
         check_storage(self.config, directory, job["spec"]["cwd"])
         job["gpu_uuid"] = gpu_uuid
@@ -205,55 +210,148 @@ class Scheduler:
         self.transition(job, "STARTING", "executor_starting")
         env = os.environ.copy()
         env.pop("AUTORESEARCH_PROCESS_TOKEN", None)
-        try:
-            with (directory / "executor.log").open("ab") as log:
-                job["process"] = subprocess.Popen(
-                    [sys.executable, "-B", str(Path(__file__).with_name("worker.py")),
-                     str(directory), str(self.lock_fd)],
-                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, env=env,
-                    start_new_session=True, pass_fds=(self.lock_fd,))
-        except OSError as exc:
-            job["exit"] = {"returncode": None, "cleanup_ok": True, "reason": "spawn_error"}
-            atomic_json(directory / "exit.json", {"at": time.time(), **job["exit"]})
-            self.transition(job, "FAILED", f"spawn_error:{type(exc).__name__}")
+        return directory, env
 
-    def reconcile(self):
+    @staticmethod
+    def _spawn_worker(directory: Path, lock_fd: int, env: dict[str, str]) -> subprocess.Popen:
+        with (directory / "executor.log").open("ab") as log:
+            return subprocess.Popen(
+                [sys.executable, "-B", str(Path(__file__).with_name("worker.py")),
+                 str(directory), str(lock_fd)],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log, env=env,
+                start_new_session=True, pass_fds=(lock_fd,))
+
+    async def _spawn_worker_async(self, job: dict[str, Any], directory: Path,
+                                  env: dict[str, str]) -> None:
+        # Cancellation can arrive while the executor is being prepared. Keep
+        # the reservation's terminal receipt authoritative and avoid spawning
+        # work after a stop request when the handoff has not reached Popen yet.
+        if job["state"] == "CANCELLING" or self.closing:
+            job["exit"] = {"returncode": None, "cleanup_ok": True, "reason": "cancelled"}
+            atomic_json(directory / "exit.json", {"at": time.time(), **job["exit"]})
+            self.transition(job, "CANCELLED", "cancelled")
+            return
+        try:
+            job["process"] = await asyncio.to_thread(self._spawn_worker, directory, self.lock_fd, env)
+        except OSError as exc:
+            cancelled = job["state"] == "CANCELLING"
+            job["exit"] = {"returncode": None, "cleanup_ok": True,
+                           "reason": "cancelled" if cancelled else "spawn_error"}
+            atomic_json(directory / "exit.json", {"at": time.time(), **job["exit"]})
+            self.transition(job, "CANCELLED" if cancelled else "FAILED",
+                            "cancelled" if cancelled else f"spawn_error:{type(exc).__name__}")
+
+    def launch(self, job: dict[str, Any], gpu_uuid: str) -> None:
+        directory, env = self._prepare_launch(job, gpu_uuid)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                job["process"] = self._spawn_worker(directory, self.lock_fd, env)
+            except OSError as exc:
+                job["exit"] = {"returncode": None, "cleanup_ok": True, "reason": "spawn_error"}
+                atomic_json(directory / "exit.json", {"at": time.time(), **job["exit"]})
+                self.transition(job, "FAILED", f"spawn_error:{type(exc).__name__}")
+        else:
+            task = asyncio.create_task(self._spawn_worker_async(job, directory, env))
+            self._spawn_tasks.add(task)
+
+    def _recover_receipt(self, job: dict[str, Any]) -> dict[str, Any]:
+        directory = Path(job["directory"])
+        try:
+            return read_json(directory / "exit.json")
+        except (OSError, ValueError):
+            receipt = {"reason": "executor_lost", "returncode": None,
+                       "cleanup_ok": processes.terminate_scope(job["token"], 1)}
+            try:
+                from .container_ownership import cleanup_job
+                receipt["container_cleanup"] = cleanup_job(directory)
+            except Exception as exc:
+                receipt["container_cleanup"] = {"cleanup_ok": False, "error": type(exc).__name__ + ": " + str(exc)}
+                receipt["cleanup_ok"] = False
+            atomic_json(directory / "recovery-exit.json", {"at": time.time(), **receipt})
+            return receipt
+
+    def _finish_receipt(self, job: dict[str, Any], receipt: dict[str, Any], *,
+                        scope_remaining: bool | None = None) -> None:
+        job["exit"] = receipt
+        if scope_remaining is None:
+            scope_remaining = bool(processes.scope_members(job["token"]))
+        if not receipt.get("cleanup_ok") or scope_remaining:
+            self.quarantined.add(job["gpu_uuid"])
+            self.transition(job, "UNKNOWN", "cleanup_unconfirmed_gpu_quarantined")
+            return
+        reason = receipt["reason"]
+        state = ("TIMED_OUT" if reason == "deadline" else "CANCELLED" if reason == "cancelled"
+                 else "SUCCEEDED" if reason == "process_exit" and receipt["returncode"] == 0 else "FAILED")
+        self.transition(job, state, reason)
+
+    def _recover_and_inspect(self, job: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        receipt = self._recover_receipt(job)
+        return receipt, bool(processes.scope_members(job["token"]))
+
+    def reconcile(self) -> None:
         for job in self.active():
             if job["state"] == "UNKNOWN":
                 continue
             proc = job["process"]
+            if proc is None:
+                continue  # Resource reservation exists before async Popen completes.
             directory = Path(job["directory"])
             if proc.poll() is None:
                 if job["state"] == "STARTING" and (directory / "started.json").exists():
                     job["started_at"] = read_json(directory / "started.json")["at"]
                     self.transition(job, "RUNNING", "executing")
                 continue
-            try:
-                receipt = read_json(directory / "exit.json")
-            except (OSError, ValueError):
-                # Unexpected executor loss: reclaim only this exact token.
-                receipt = {"reason": "executor_lost", "returncode": None,
-                           "cleanup_ok": processes.terminate_scope(job["token"], 1)}
-                try:
-                    from .container_ownership import cleanup_job
-                    receipt["container_cleanup"] = cleanup_job(directory)
-                except Exception as exc:
-                    receipt["container_cleanup"] = {"cleanup_ok": False, "error": type(exc).__name__ + ": " + str(exc)}
-                    receipt["cleanup_ok"] = False
-                atomic_json(directory / "recovery-exit.json", {"at": time.time(), **receipt})
-            job["exit"] = receipt
-            if not receipt.get("cleanup_ok") or processes.scope_members(job["token"]):
-                self.quarantined.add(job["gpu_uuid"])
-                self.transition(job, "UNKNOWN", "cleanup_unconfirmed_gpu_quarantined")
-                continue
-            reason = receipt["reason"]
-            state = ("TIMED_OUT" if reason == "deadline" else "CANCELLED" if reason == "cancelled"
-                     else "SUCCEEDED" if reason == "process_exit" and receipt["returncode"] == 0 else "FAILED")
-            self.transition(job, state, reason)
+            self._finish_receipt(job, self._recover_receipt(job))
 
-    def tick(self, snapshot=None, error=None):
+    async def reconcile_async(self) -> None:
+        """Reconcile without running process/container cleanup in the event loop."""
+        for task in list(self._spawn_tasks):
+            if task.done():
+                self._spawn_tasks.remove(task)
+                task.result()
+        for job in self.active():
+            if job["state"] == "UNKNOWN":
+                continue
+            proc = job["process"]
+            if proc is None:
+                continue
+            directory = Path(job["directory"])
+            if proc.poll() is None:
+                if job["state"] == "STARTING" and (directory / "started.json").exists():
+                    job["started_at"] = read_json(directory / "started.json")["at"]
+                    self.transition(job, "RUNNING", "executing")
+                continue
+            task = self._recovery_tasks.get(job["id"])
+            if task is None:
+                self._recovery_tasks[job["id"]] = asyncio.create_task(
+                    asyncio.to_thread(self._recover_and_inspect, job))
+            elif task.done():
+                del self._recovery_tasks[job["id"]]
+                receipt, scope_remaining = task.result()
+                self._finish_receipt(job, receipt, scope_remaining=scope_remaining)
+
+    async def tick_async(self, snapshot: dict[str, Any] | None = None,
+                         error: str | None = None) -> None:
+        await self.reconcile_async()
+        pid_sets = await asyncio.to_thread(process_map, self.active(), snapshot)
+        self.tick(snapshot, error, reconciled=True, pid_sets=pid_sets)
+
+    async def settle_background(self) -> None:
+        """Retain references and the inherited service lock until spawn completes."""
+        if self._spawn_tasks:
+            await asyncio.gather(*list(self._spawn_tasks))
+            self._spawn_tasks.clear()
+        if self._recovery_tasks:
+            await asyncio.gather(*list(self._recovery_tasks.values()))
+            await self.reconcile_async()
+
+    def tick(self, snapshot: dict[str, Any] | None = None, error: str | None = None, *,
+             reconciled: bool = False, pid_sets: dict[str, set[int]] | None = None) -> None:
         self.snapshot, self.probe_error = snapshot, error
-        self.reconcile()
+        if not reconciled:
+            self.reconcile()
         if (self.deadline_mono is not None and time.monotonic() >= self.deadline_mono) or \
                 (self.deadline_epoch is not None and time.time() >= self.deadline_epoch):
             self.begin_shutdown("service_deadline")
@@ -273,7 +371,7 @@ class Scheduler:
                 self.transition(job, "EXPIRED", "insufficient_remaining_budget")
         queue = [j for j in queue if j["state"] == "QUEUED"]
         # Inspect /proc once per tick, not once for every candidate/forecast.
-        pid_sets = process_map(self.active(), snapshot)
+        pid_sets = process_map(self.active(), snapshot) if pid_sets is None else pid_sets
         while queue:
             now = time.monotonic()
             active = self.active()
@@ -317,7 +415,7 @@ class Scheduler:
             else:
                 break
 
-    def status(self):
+    def status(self) -> dict[str, Any]:
         return {"session_id": self.id, "stopping": self.closing, "max_running": self.config["max_running"],
                 "active_count": len(self.active()), "queued_count": sum(j["state"] == "QUEUED" for j in self.jobs.values()),
                 "quarantined_gpus": sorted(self.quarantined), "telemetry": self.snapshot,

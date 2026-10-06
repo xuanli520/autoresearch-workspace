@@ -15,34 +15,43 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.gpu_scheduler.common import atomic_json, check_storage, validate_config
-from tools.research_handoff.core import processes
+try:
+    from tools.process_control import processes
+except ImportError:
+    from tools.research_handoff.core import processes
 
 
-def read(path):
+PROBE_TIMEOUT_SECONDS = 2
+PROBE_WAIT_SECONDS = 5
+PROBE_POLL_SECONDS = .02
+
+
+def read(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text())
 
 
-def digest(path):
+def digest(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def identity(pid):
+def identity(pid: int) -> dict[str, Any]:
     return {"pid": pid, "start_ticks": processes.process_start_ticks(pid),
             "boot_id": processes.boot_id()}
 
 
-def alive(item):
+def alive(item: dict[str, Any]) -> bool:
     return processes.pid_matches(item["pid"], item["start_ticks"], item["boot_id"])
 
 
-def argv(pid):
+def argv(pid: int) -> list[str]:
     return [part.decode() for part in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0") if part]
 
 
-def child(parent, executable):
+def child(parent: int, executable: str) -> int:
     ids = Path(f"/proc/{parent}/task/{parent}/children").read_text().split()
     matches = [int(pid) for pid in ids if Path(argv(int(pid))[0]).name == executable]
     if len(matches) != 1:
@@ -50,7 +59,7 @@ def child(parent, executable):
     return matches[0]
 
 
-def load(path):
+def load(path: str | Path) -> tuple[dict[str, Any], dict[str, Any]]:
     c = read(path)
     cfg = validate_config(read(c["gpu_config"]))
     check_storage(cfg, path, c["root"], c["runtime_contract"], c["runtime_launch"],
@@ -69,7 +78,7 @@ def load(path):
     return c, cfg
 
 
-def runtime_identities(c):
+def runtime_identities(c: dict[str, Any]) -> list[dict[str, Any]]:
     result = []
     for wrapper in read(c["runtime_launch"])["processes"]:
         if not alive(wrapper):
@@ -88,15 +97,16 @@ def runtime_identities(c):
     return result
 
 
-def run(command):
+def run(command: list[str]) -> str:
     return subprocess.run(command, capture_output=True, text=True, timeout=20, check=True).stdout
 
 
-def calendar(epoch):
+def calendar(epoch: float) -> str:
     return datetime.fromtimestamp(math.ceil(epoch), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def schedule(c, config_path, suffix, epoch, operation, *, user=None):
+def schedule(c: dict[str, Any], config_path: str | Path, suffix: str, epoch: float,
+             operation: str, *, user: str | None = None) -> dict[str, Any]:
     unit = c["unit_prefix"] + "-" + suffix
     properties = ["--property=Type=oneshot", "--property=TimeoutStartSec=0",
                   "--property=StandardOutput=append:" + str(Path(c["root"]) / (suffix + ".log")),
@@ -112,48 +122,81 @@ def schedule(c, config_path, suffix, epoch, operation, *, user=None):
     return {"unit": unit, "at_epoch": epoch, "argv": command}
 
 
-def probe(root):
+def _probe_child(proc: subprocess.Popen[bytes]) -> dict[str, Any]:
+    end = time.monotonic() + PROBE_TIMEOUT_SECONDS
+    while True:
+        try:
+            return identity(child(proc.pid, "sleep"))
+        except (OSError, ValueError):
+            if proc.poll() is not None or time.monotonic() >= end:
+                raise RuntimeError("probe child did not start")
+            time.sleep(PROBE_POLL_SECONDS)
+
+
+def probe(root: str | Path) -> dict[str, Any]:
     if os.geteuid() != 0:
         raise ValueError("timeout detachment probe must run as root")
-    proc = subprocess.Popen(["timeout", "--signal=TERM", "--kill-after=1", "2", "sleep", "30"],
+    command = ["timeout", "--signal=TERM", "--kill-after=1", str(PROBE_TIMEOUT_SECONDS), "sleep", "30"]
+    proc = subprocess.Popen(command,
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, start_new_session=True)
-    daemon = None
+    daemon = control = control_child = None
+    result: dict[str, Any] = {"argv": command, "child_survived_original_deadline": False,
+                              "control_deadline_verified": False, "boot_id": processes.boot_id()}
     try:
-        end = time.monotonic() + 2
-        while daemon is None:
-            try:
-                daemon = identity(child(proc.pid, "sleep"))
-            except (OSError, ValueError):
-                if time.monotonic() >= end:
-                    raise RuntimeError("probe child did not start")
-                time.sleep(.02)
-        processes.signal_identity(proc.pid, processes.process_start_ticks(proc.pid), signal.SIGKILL,
-                                  processes.boot_id())
+        daemon = _probe_child(proc)
+        result['daemon'] = daemon
+        # Start the control later: its observed expiry proves we passed the
+        # detached wrapper's deadline, using this host's actual timeout behavior.
+        control_started = time.monotonic()
+        control = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, start_new_session=True)
+        control_child = _probe_child(control)
+        result['control_child'] = control_child
+        if not processes.signal_identity(proc.pid, processes.process_start_ticks(proc.pid), signal.SIGKILL,
+                                         processes.boot_id()):
+            raise RuntimeError("probe timeout identity changed before detachment")
         proc.wait(timeout=2)
-        time.sleep(2.2)
-        result = {"timeout_exit_code": proc.returncode, "child_survived_original_deadline": alive(daemon),
-                  "daemon": daemon, "at_epoch": time.time()}
+        if proc.returncode != -signal.SIGKILL:
+            raise RuntimeError("probe timeout did not exit from the detachment signal")
+        control.wait(timeout=PROBE_WAIT_SECONDS)
+        elapsed = time.monotonic() - control_started
+        result.update(timeout_exit_code=proc.returncode, control_timeout_exit_code=control.returncode,
+                      control_elapsed_seconds=elapsed, daemon=daemon, control_child=control_child,
+                      control_deadline_verified=(control.returncode == 124 and not alive(control_child)
+                                                 and elapsed >= PROBE_TIMEOUT_SECONDS),
+                      child_survived_original_deadline=alive(daemon))
+        if not result["control_deadline_verified"]:
+            raise RuntimeError("GNU timeout control did not enforce its original deadline")
         if not result["child_survived_original_deadline"]:
             raise RuntimeError("GNU timeout cannot be detached on this host")
+    except Exception as exc:
+        result["error"] = type(exc).__name__ + ": " + str(exc)
+        raise
     finally:
-        if daemon:
-            processes.signal_identity(daemon["pid"], daemon["start_ticks"], signal.SIGTERM, daemon["boot_id"])
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=2)
-    atomic_json(Path(root) / "timeout-probe.json", result)
+        for item in (daemon, control_child):
+            if item:
+                processes.signal_identity(item["pid"], item["start_ticks"], signal.SIGKILL, item["boot_id"])
+        for wrapper in (proc, control):
+            if wrapper is not None and wrapper.poll() is None:
+                wrapper.kill()
+                wrapper.wait(timeout=2)
+        result["at_epoch"] = time.time()
+        atomic_json(Path(root) / "timeout-probe.json", result)
     return result
 
 
-def install(path):
+def install(path: str | Path) -> dict[str, Any]:
     if os.geteuid() != 0:
         raise ValueError("systemd renewal installation must run as root")
     c, cfg = load(path)
     root = Path(c["root"])
     if (root / "installed.json").exists() or time.time() >= c["original_deadline_epoch"] - 30:
         raise ValueError("already installed or original service is about to expire; inspect receipts")
-    if not read(root / "timeout-probe.json")["child_survived_original_deadline"]:
+    probe_receipt = read(root / "timeout-probe.json")
+    if (probe_receipt.get("child_survived_original_deadline") is not True
+            or probe_receipt.get("control_deadline_verified") is not True
+            or probe_receipt.get("boot_id") != processes.boot_id()):
         raise ValueError("required timeout detachment probe is missing")
     daemons = runtime_identities(c)
     if not alive(read(c["gpu_launch"])):
@@ -196,7 +239,7 @@ def install(path):
     return result
 
 
-def expire(path):
+def expire(path: str | Path) -> list[dict[str, Any]]:
     c, cfg = load(path)
     root = Path(c["root"])
     planned = read(root / "planned.json")
@@ -218,7 +261,7 @@ def expire(path):
     return result
 
 
-def continue_gpu(path):
+def continue_gpu(path: str | Path) -> dict[str, Any]:
     c, cfg = load(path)
     root = Path(c["root"])
     planned = read(root / "planned.json")
@@ -245,7 +288,7 @@ def continue_gpu(path):
     return {"at_epoch": time.time(), "service_exited": True}
 
 
-def status(path):
+def status(path: str | Path) -> dict[str, Any]:
     c, cfg = load(path)
     root = Path(c["root"])
     files = ("timeout-probe.json", "planned.json", "detachment.json", "installed.json",
@@ -260,7 +303,7 @@ def status(path):
             "runtime_daemons_alive": [alive(item["daemon"]) for item in receipts.get("planned.json", {}).get("daemons", [])]}
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("operation", choices=("probe", "install", "status", "expire", "continue-gpu",
                                         "install-gpu-plan", "serve-gpu-plan",

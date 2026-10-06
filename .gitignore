@@ -67,6 +67,9 @@
 # Generic GPU monitor source, README, and example configuration.
 /tools/*
 !/tools/README.md
+!/tools/process_control/
+/tools/process_control/*
+!/tools/process_control/*.py
 !/tools/research_completion/
 !/tools/research_completion/*.py
 !/tools/gpu_monitor/
@@ -111,6 +114,15 @@
 **/tests/
 **/test_*.py
 **/*_test.py
+!/tools/gpu_monitor/tests/
+/tools/gpu_monitor/tests/*
+!/tools/gpu_monitor/tests/*.py
+!/tools/gpu_scheduler/tests/
+/tools/gpu_scheduler/tests/*
+!/tools/gpu_scheduler/tests/test_*.py
+!/tools/research_handoff/tests/
+/tools/research_handoff/tests/*
+!/tools/research_handoff/tests/test_*.py
 **/.env
 **/.env.*
 **/api_key.txt

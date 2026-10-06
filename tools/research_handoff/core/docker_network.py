@@ -6,9 +6,10 @@ import json
 import re
 import shlex
 import subprocess
+from typing import Any, Callable, Iterable
 
 
-def validate_network_config(value):
+def validate_network_config(value: dict[str, Any]) -> dict[str, Any]:
     defaults = {"enabled": False, "docker_host": "unix:///var/run/docker.sock",
                 "build_network": "default", "runtime_mode": "isolated",
                 "model_host_addresses": {}, "bridge_interface": None,
@@ -39,12 +40,13 @@ def validate_network_config(value):
     return config
 
 
-def model_forwarding(config, interface, subnet, *, repair=False,
-                     restore_default_forwarding=False, runner=subprocess.run):
-    def run(argv, check=True):
+def model_forwarding(config: dict[str, Any], interface: str, subnet: str, *, repair: bool = False,
+                     restore_default_forwarding: bool = False,
+                     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> dict[str, Any]:
+    def run(argv: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
         return runner(argv, capture_output=True, text=True, timeout=15, check=check)
 
-    def iptables(table, action, chain, rule):
+    def iptables(table: str, action: str, chain: str, rule: list[str]) -> bool:
         argv = ["sudo", "-n", "iptables", "-w", "5", "-t", table, action, chain, *rule]
         result = run(argv, check=False)
         if result.returncode not in (0, 1) or action != "-C" and result.returncode:
@@ -86,7 +88,7 @@ def model_forwarding(config, interface, subnet, *, repair=False,
             listed = run(["sudo", "-n", "iptables", "-w", "5", "-t", "filter", "-S", "FORWARD"])
             ordered = [shlex.split(line)[2:] for line in listed.stdout.splitlines() if line.startswith('-A FORWARD ')]
             user_jumps = [i for i, rule in enumerate(ordered) if rule == ['-j', 'DOCKER-USER']]
-            def rule_key(rule):
+            def rule_key(rule: list[str]) -> list[tuple[str, str, bool]] | None:
                 options, index, inverted = [], 0, False
                 while index < len(rule):
                     if rule[index] == '!':
@@ -138,7 +140,7 @@ def model_forwarding(config, interface, subnet, *, repair=False,
             "relocated_default_rules": relocated}
 
 
-def egress_rules(addresses):
+def egress_rules(addresses: Iterable[str]) -> str:
     rules = ["delete table inet gost_egress", "table inet gost_egress {",
              "chain egress { type filter hook output priority filter; policy drop;",
              'oifname "lo" accept']
@@ -148,14 +150,15 @@ def egress_rules(addresses):
     return "\n".join([*rules, "reject", "}", "}"])
 
 
-def bridge_preflight(config, *, repair=False, repair_forwarding=False,
-                     restore_default_forwarding=False, runner=subprocess.run):
+def bridge_preflight(config: dict[str, Any], *, repair: bool = False, repair_forwarding: bool = False,
+                     restore_default_forwarding: bool = False,
+                     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> dict[str, Any]:
     """Inspect bridge and forwarding; repairs never restart or flush shared services."""
     config = validate_network_config(config)
     if restore_default_forwarding and (not config["enabled"] or config["bridge_interface"] != "docker0"):
         raise ValueError("default forwarding restoration requires enabled networking and explicit docker0")
     docker = ["docker", "--host", config["docker_host"]]
-    def run(argv, check=True):
+    def run(argv: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
         return runner(argv, capture_output=True, text=True, timeout=15, check=check)
     rows = json.loads(run([*docker, "network", "inspect", "bridge"]).stdout)
     if len(rows) != 1 or rows[0].get("Driver") != "bridge":

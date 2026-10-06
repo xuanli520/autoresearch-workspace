@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """AutoResearch GPU task monitor: read-only collection, local alerts and handoff."""
+from __future__ import annotations
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import base64
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 import datetime as dt
 import fcntl
 import hashlib
@@ -18,14 +21,25 @@ import tempfile
 import textwrap
 import time
 import uuid
+from typing import Any
 
 try:
     from .probe import field
+    from .askpass import (FIFO_IDENTITY_ENV, FIFO_PATH_ENV, MAX_PASSWORD_BYTES,
+                          inspect_fifo, open_password_fifo, validate_helper)
 except ImportError:  # Preserve direct script execution.
     from probe import field
+    from askpass import (FIFO_IDENTITY_ENV, FIFO_PATH_ENV, MAX_PASSWORD_BYTES,
+                         inspect_fifo, open_password_fifo, validate_helper)
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / 'tasks.json'
+DEFAULT_STALE_THRESHOLD_SECONDS = 15 * 60
+DEFAULT_MIN_DISK_FREE_GIB = 2
+DEFAULT_TAIL_BYTES = 64 * 1024
+MAX_METADATA_BYTES = 256 * 1024
+MAX_READ_BYTES = 1024 * 1024
+MAX_PROBE_WORKERS = 8
 
 # 唯一认证来源：工作区根目录的 auth.txt 结构化凭据文件。其余认证方式（配置内
 # password、内嵌密码表、password_env 环境变量、identity_file 密钥、SSH config 别名）
@@ -42,10 +56,23 @@ AUTH_LABELS = {
 AUTH_REQUIRED = ('host', 'user', 'password')
 
 TERMINAL = {'COMPLETED', 'FAILED', 'STOPPED'}
+IDENTITY_ALERTS = {'CONTROLLER_TYPE_MISMATCH', 'CONTROLLER_IDENTITY_MISMATCH'}
+UNCERTAIN_LIFECYCLE_ALERTS = IDENTITY_ALERTS | {'OBSERVATION_ERROR', 'IDENTITY_MISMATCH', 'STATUS_CONFLICT'}
+DEFAULT_ERROR_PATTERNS = (
+    {'pattern': r'Traceback \(most recent call last\)', 'severity': 'error'},
+    {'pattern': r'CUDA out of memory', 'severity': 'critical'},
+    {'pattern': r'OutOfMemoryError', 'severity': 'critical'},
+    {'pattern': r'NCCL.*(?:Error|error)', 'severity': 'error'},
+)
+DEFAULT_ERROR_WINDOW_LINES = 100
+MAX_STREAM_CACHE_ENTRIES = 256
+_STREAM_CACHES: OrderedDict[str, dict] = OrderedDict()
 SUGGESTIONS = {
     'UNREACHABLE': '检查 SSH 网络和交互认证；远端训练是否存活未知。',
     'EXITED_WITHOUT_RESULT': '进程已不见但无可靠终态；检查退出码、OOM、控制器日志。',
-    'STATUS_CONFLICT': '终态仍有所属进程存活；核对控制器及子任务，勿直接重启。',
+    'STATUS_CONFLICT': '退出码、声明状态或存活进程相互冲突；核对控制器及子任务，勿直接重启。',
+    'CONTROLLER_TYPE_MISMATCH': '状态文件的控制器类型与登记不符；修正登记或状态路径，计时保持未知。',
+    'CONTROLLER_IDENTITY_MISMATCH': '状态文件的 run_id 与登记不符；核对运行身份，不能混用另一运行的计时。',
     'STALE_LOG': '日志长时间未更新；核对是否在评估、保存、等待资源或阻塞。',
     'STALLED_PROGRESS': '步数长期无推进；核对训练阶段、数据加载和日志频率。',
     'NONFINITE': '出现 NaN/Inf；核对数值稳定性、输入和损失。',
@@ -106,6 +133,15 @@ def _split_label(line):
     return re.sub(r'\s+', '', label).lower(), value
 
 
+def password_bytes(password: str) -> bytes:
+    if not isinstance(password, str) or not password:
+        raise ValueError('SSH password is required from auth.txt')
+    secret = password.encode('utf-8')
+    if len(secret) > MAX_PASSWORD_BYTES or any(c in secret for c in (b'\n', b'\r', b'\x00')):
+        raise ValueError('SSH password is too long or contains unsupported control characters')
+    return secret
+
+
 def load_auth(path):
     """Parse the labelled credential file; the only source of SSH auth material.
 
@@ -154,19 +190,58 @@ def load_auth(path):
         raise ValueError(f'凭据文件 {path} 的 IP地址无效: {host}')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', fields['user']):
         raise ValueError(f'凭据文件 {path} 的用户名无效: {fields["user"]}')
+    password_bytes(fields['password'])
     return {'host': host, 'user': fields['user'], 'password': fields['password'], 'port': port}
 
 
-def apply_auth(host, auth):
+def validate_ssh_host(host: dict, *, allow_credentials: bool = False) -> None:
+    legacy = {'target', 'password_env', 'identity_file'} & host.keys()
+    if legacy:
+        raise ValueError('legacy SSH authentication fields are unsupported: ' + ', '.join(sorted(legacy)))
+    if not allow_credentials:
+        configured = {'hostname', 'host', 'user', 'port', 'password'} & host.keys()
+        if configured:
+            raise ValueError('SSH credentials must come from auth.txt: ' + ', '.join(sorted(configured)))
+    options = host.get('options', [])
+    if not isinstance(options, list) or not all(isinstance(value, str) for value in options):
+        raise ValueError('SSH options must be an argv list of strings')
+    allowed = {'addressfamily', 'compression', 'connectionattempts', 'connecttimeout',
+               'ipqos', 'loglevel', 'serveraliveinterval', 'serveralivecountmax', 'tcpkeepalive'}
+    index = 0
+    while index < len(options):
+        option = options[index]
+        index += 1
+        if option in ('-4', '-6'):
+            continue
+        if option == '-o' and index < len(options):
+            setting = options[index]
+            index += 1
+        elif option.startswith('-o') and len(option) > 2:
+            setting = option[2:]
+        else:
+            raise ValueError('SSH options may only set approved connection and diagnostic options')
+        key, separator, value = setting.partition('=')
+        if not separator or key.lower() not in allowed or not value or any(c in setting for c in '\x00\r\n'):
+            raise ValueError('SSH option is not approved: ' + key)
+
+
+def apply_auth(host: dict, auth: dict) -> dict:
     """Overlay the credential file onto an SSH host; auth.txt is authoritative."""
+    validate_ssh_host(host, allow_credentials=True)
+    password_bytes(auth['password'])
     host = dict(host)
     host.update(hostname=auth['host'], user=auth['user'], port=auth['port'], password=auth['password'])
-    for stale in ('target', 'password_env', 'identity_file'):
-        host.pop(stale, None)
     return host
 
 
-def load_config(path, auth=None):
+def validate_pattern(pattern: str) -> None:
+    try:
+        re.compile(pattern)
+    except (re.error, TypeError) as exc:
+        raise ValueError(f'invalid stream regular expression: {exc}') from exc
+
+
+def load_config(path: Path, auth: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = json.loads(path.read_text())
     if cfg.get('version') != 1 or not isinstance(cfg.get('tasks'), list) or not isinstance(cfg.get('hosts'), dict):
         raise ValueError('config requires version=1, hosts object and tasks array')
@@ -183,9 +258,15 @@ def load_config(path, auth=None):
         raise ValueError('connection_attempts must be an integer')
     if not finite(cfg['retry_delay_seconds']) or cfg['retry_delay_seconds'] < 0:
         raise ValueError('retry_delay_seconds must be nonnegative')
+    cfg.setdefault('probe_round_timeout_seconds',
+                   cfg['timeout_seconds'] * cfg['connection_attempts']
+                   + cfg['retry_delay_seconds'] * (cfg['connection_attempts'] - 1))
+    if not finite(cfg['probe_round_timeout_seconds']) or cfg['probe_round_timeout_seconds'] <= 0:
+        raise ValueError('probe_round_timeout_seconds must be positive')
     if cfg['interval_seconds'] < 1:
         raise ValueError('interval_seconds must be >= 1')
-    for key, default, upper in [('tail_bytes', 65536, 1048576), ('metadata_bytes', 262144, 1048576)]:
+    for key, default, upper in [('tail_bytes', DEFAULT_TAIL_BYTES, MAX_READ_BYTES),
+                               ('metadata_bytes', MAX_METADATA_BYTES, MAX_READ_BYTES)]:
         cfg.setdefault(key, default)
         if not isinstance(cfg[key], int) or not 256 <= cfg[key] <= upper:
             raise ValueError(f'{key} must be an integer in [256, {upper}]')
@@ -195,6 +276,7 @@ def load_config(path, auth=None):
         if transport not in ('ssh', 'local'):
             raise ValueError(f'{name}: transport must be ssh or local')
         if transport == 'ssh':
+            validate_ssh_host(host)
             if auth is not None:
                 host = cfg['hosts'][name] = apply_auth(host, auth)
             if host.get('connect_timeout_seconds') is not None and (not isinstance(host['connect_timeout_seconds'], int) or host['connect_timeout_seconds'] < 1):
@@ -230,8 +312,7 @@ def load_config(path, auth=None):
                 raise ValueError('process selectors require nonempty contains tokens')
             if selector.get('pid_file'):
                 paths.append(selector['pid_file'])
-        stop = task.get('stop')
-        if stop:
+        if any(key in task for key in ('stop', 'marker', 'process_groups')):
             raise ValueError(f"{task['id']}: custom stop contracts are unsupported; use the official controller")
         stream_ids = set()
         for stream in task.get('streams', []):
@@ -242,9 +323,22 @@ def load_config(path, auth=None):
             if stream.get('format', 'jsonl') not in ('jsonl', 'regex', 'text'):
                 raise ValueError('stream format must be jsonl, regex or text')
             if stream.get('format') == 'regex':
-                re.compile(stream['pattern'])
+                validate_pattern(stream['pattern'])
             if stream.get('complete_pattern'):
-                re.compile(stream['complete_pattern'])
+                validate_pattern(stream['complete_pattern'])
+            if 'error_patterns' in stream:
+                patterns = stream['error_patterns']
+                if not isinstance(patterns, list):
+                    raise ValueError('error_patterns must be an array')
+                for rule in patterns:
+                    if (not isinstance(rule, dict) or not isinstance(rule.get('pattern'), str)
+                            or not rule['pattern'] or rule.get('severity', 'error') not in
+                            ('warning', 'error', 'critical')):
+                        raise ValueError('error_patterns require a pattern and valid severity')
+                    validate_pattern(rule['pattern'])
+            window = stream.get('error_window_lines', DEFAULT_ERROR_WINDOW_LINES)
+            if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
+                raise ValueError('error_window_lines must be a positive integer')
         if any(Path(p).is_absolute() or '..' in Path(p).parts for p in paths):
             raise ValueError('file paths must stay relative to task root')
         if task.get('deadline_at'):
@@ -257,7 +351,7 @@ HOST_KEY_ERRORS = ('host key verification failed', 'remote host identification h
                    'no matching host key type found')
 
 
-def known_hosts_options():
+def known_hosts_options() -> list[str]:
     """Pin verification to a managed known_hosts so host rotation cannot break startup."""
     KNOWN_HOSTS.parent.mkdir(parents=True, exist_ok=True)
     return ['-o', 'StrictHostKeyChecking=accept-new',
@@ -266,7 +360,7 @@ def known_hosts_options():
             '-o', 'HashKnownHosts=no']
 
 
-def purge_host_key(host):
+def purge_host_key(host, timeout: float = 10):
     """Drop any stored key for the target so a reused cloud IP re-verifies cleanly."""
     name = host.get('hostname')
     if not name:
@@ -280,7 +374,7 @@ def purge_host_key(host):
         # host-key cleanup is diagnostic and must not block the SSH attempt.
         subprocess.run(['ssh-keygen', '-R', spec, '-f', str(KNOWN_HOSTS)],
                        capture_output=True, text=True, encoding='utf-8',
-                       errors='replace', timeout=10)
+                       errors='replace', timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         pass
     # ssh-keygen -R backs the previous file up; keep the managed dir tidy.
@@ -294,18 +388,20 @@ def prepare_ssh(cfg):
             purge_host_key(host)
 
 
-def ssh_command(host, remote_command, password_auth=False):
+def ssh_command(host: dict, remote_command: str, password_auth: bool = False) -> list[str]:
     """Build a non-interactive SSH command without reusing potentially stale mux sockets."""
+    validate_ssh_host(host, allow_credentials=True)
     target = f"{host['user']}@{host['hostname']}" if host.get('user') else host['hostname']
-    command = ['ssh', '-o', f"BatchMode={'no' if password_auth else 'yes'}",
+    command = ['ssh', '-F', '/dev/null', '-T', '-o', f"BatchMode={'no' if password_auth else 'yes'}",
                '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
                '-o', f"ConnectTimeout={host.get('connect_timeout_seconds', 10)}",
-               '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2']
+               '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2',
+               '-o', 'PubkeyAuthentication=no', '-o', 'HostbasedAuthentication=no',
+               '-o', 'GSSAPIAuthentication=no']
     command += known_hosts_options()
     if password_auth:
         # 密钥认证已移除：只允许密码／键盘交互，不尝试 publickey。
         command.extend(['-o', 'PreferredAuthentications=keyboard-interactive,password',
-                        '-o', 'PubkeyAuthentication=no',
                         '-o', 'NumberOfPasswordPrompts=1'])
     if host.get('port') is not None:
         command.extend(['-p', str(host['port'])])
@@ -314,7 +410,7 @@ def ssh_command(host, remote_command, password_auth=False):
     return command
 
 
-def run_ssh(host, command, code, timeout):
+def run_ssh(host: dict, command: list[str], code: str, timeout: float) -> subprocess.CompletedProcess:
     """Run SSH with the askpass password resolved from auth.txt.
 
     OpenSSH execs the askpass helper after closefrom(), so an inherited descriptor
@@ -322,27 +418,33 @@ def run_ssh(host, command, code, timeout):
     environment. The secret stays out of argv, the inherited environment and any
     regular file.
     """
-    password = host.get('password')
-    if not password:
-        return subprocess.run(command, input=code, text=True, capture_output=True, timeout=timeout)
+    secret = password_bytes(host.get('password'))
+    helper = HERE / 'askpass.py'
+    validate_helper(helper)
 
     env = os.environ.copy()
     secrets_dir = tempfile.mkdtemp(prefix='autoresearch-askpass-')
     fifo_path = os.path.join(secrets_dir, 'password.fifo')
-    os.mkfifo(fifo_path, 0o600)
-    # Hold the FIFO open read-write: the write never blocks on a reader and the
-    # buffered secret survives until the askpass helper consumes it.
-    fifo_fd = os.open(fifo_path, os.O_RDWR)
+    fifo_fd = None
     try:
-        os.write(fifo_fd, password.encode() + b'\n')
-        env.update({'AUTORESEARCH_SSH_PASSWORD_FIFO': fifo_path,
-                    'SSH_ASKPASS': str(HERE / 'askpass.py'),
+        os.mkfifo(fifo_path, 0o600)
+        identity = inspect_fifo(fifo_path)
+        # An atomic nonblocking write keeps the secret in the verified FIFO
+        # until askpass consumes it, with no inherited descriptor required.
+        fifo_fd = open_password_fifo(fifo_path, identity, os.O_RDWR)
+        payload = secret + b'\n'
+        if len(payload) > os.fpathconf(fifo_fd, 'PC_PIPE_BUF') or os.write(fifo_fd, payload) != len(payload):
+            raise ValueError('SSH password could not be written atomically')
+        inspect_fifo(fifo_path, identity)
+        env.update({FIFO_PATH_ENV: fifo_path, FIFO_IDENTITY_ENV: identity,
+                    'SSH_ASKPASS': str(helper),
                     'SSH_ASKPASS_REQUIRE': 'force',
                     'DISPLAY': env.get('DISPLAY') or ':autoresearch-gpu-monitor'})
         return subprocess.run(command, input=code, text=True, capture_output=True, timeout=timeout,
                               env=env)
     finally:
-        os.close(fifo_fd)
+        if fifo_fd is not None:
+            os.close(fifo_fd)
         shutil.rmtree(secrets_dir, ignore_errors=True)
 
 
@@ -361,7 +463,8 @@ def ssh_error_hint(stderr, host):
     return ''
 
 
-def probe_host(host, tasks, cfg):
+def probe_host(host: dict[str, Any], tasks: list[dict[str, Any]], cfg: dict[str, Any],
+               deadline: float | None = None) -> dict[str, Any]:
     request = {'tasks': tasks, 'tail_bytes': cfg['tail_bytes'], 'metadata_bytes': cfg['metadata_bytes']}
     # Encode JSON as a Python literal, never interpolate task data into shell commands.
     code = (HERE / 'probe.py').read_text() + '\nprint(json.dumps(collect(json.loads(' + repr(json.dumps(request)) + '))))\n'
@@ -373,16 +476,23 @@ def probe_host(host, tasks, cfg):
     try:
         attempts = int(cfg.get('connection_attempts', 1)) if host.get('transport', 'ssh') == 'ssh' else 1
         for attempt in range(attempts):
+            remaining = deadline - time.monotonic() if deadline is not None else cfg['timeout_seconds']
+            if remaining <= 0:
+                return {'error': 'probe round timeout'}
+            timeout = min(cfg['timeout_seconds'], remaining)
             try:
                 result = (subprocess.run(command, input=code, text=True, capture_output=True,
-                                         timeout=cfg['timeout_seconds']) if host.get('transport', 'ssh') == 'local'
-                          else run_ssh(host, command, code, cfg['timeout_seconds']))
+                                         timeout=timeout) if host.get('transport', 'ssh') == 'local'
+                          else run_ssh(host, command, code, timeout))
                 if result.returncode:
                     error = f'probe exit {result.returncode}: {result.stderr.strip()[-1000:]}'
                     if any(token in result.stderr.lower() for token in HOST_KEY_ERRORS):
                         # A rotated cloud IP can present a new host key; drop the stale
                         # record and retry so credential swaps stay seamless.
-                        purge_host_key(host)
+                        remaining = deadline - time.monotonic() if deadline is not None else 10
+                        if remaining <= 0:
+                            return {'error': 'probe round timeout'}
+                        purge_host_key(host, timeout=min(10, remaining))
                         if attempt + 1 == attempts:
                             return {'error': f'{error} {ssh_error_hint(result.stderr, host)}'.strip()}
                         continue
@@ -402,56 +512,46 @@ def probe_host(host, tasks, cfg):
                 error = f'{type(e).__name__}: {e}'
                 if attempt + 1 == attempts:
                     return {'error': error}
-            time.sleep(cfg.get('retry_delay_seconds', 0))
+            delay = cfg.get('retry_delay_seconds', 0)
+            if deadline is not None:
+                delay = min(delay, max(0, deadline - time.monotonic()))
+            time.sleep(delay)
         return {'error': error}
     except (OSError, subprocess.TimeoutExpired, ValueError) as e:
         return {'error': f'{type(e).__name__}: {e}'}
 
 
-def stop_task(cfg, task, reason, dry_run, state):
-    monitor_cmd = f"python3 tools/gpu_monitor/monitor.py watch --view agents --task {task['id']}"
+def stop_task(cfg: dict[str, Any], task: dict[str, Any], reason: str, dry_run: bool,
+              state: Path, config_path: Path | None = None, auth_path: Path | None = None) -> int:
+    if not reason.strip():
+        raise ValueError('a nonempty stop reason is required')
+    if any(key in task for key in ('stop', 'marker', 'process_groups')):
+        raise ValueError('custom stop contracts are unsupported; use the official controller')
+    monitor_argv = ['python3', 'tools/gpu_monitor/monitor.py', 'watch', '--view', 'agents',
+                    '--interval', '60', '--max-hours', '12']
+    if config_path is not None:
+        monitor_argv.extend(['--config', str(config_path)])
+    if auth_path is not None:
+        monitor_argv.extend(['--auth', str(auth_path)])
+    monitor_cmd = shlex.join(monitor_argv)
+    verification_cmd = shlex.join(monitor_argv + ['--task', task['id']])
     if not task.get('controller') and not task.get('scheduler'):
         raise ValueError(f"{task['id']}: stopping requires an official controller registration")
-    if not task.get('stop'):
-        print(dump({'task': task['id'], 'result': 'OFFICIAL_STOP_REQUIRED',
-                    'reason': reason, 'dry_run': dry_run,
-                    'advice': '请调用 research_handoff stop 或 gpu_scheduler cancel；监控器保持只读。',
-                    'monitor_command': monitor_cmd}))
-        print('停止后轮询监控命令: ' + monitor_cmd)
-        return 2
-    host = cfg['hosts'][task['host']]
-    code = (HERE / 'stopper.py').read_text() + '\nprint(json.dumps(request_stop(json.loads(' + repr(json.dumps(task)) + '), ' + repr(reason) + ', ' + repr(dry_run) + ')))\n'
-    if host.get('transport', 'ssh') == 'local':
-        command = [sys.executable, '-']
-    else:
-        command = ssh_command(host, shlex.join([host.get('python', 'python3'), '-']),
-                              password_auth=bool(host.get('password')))
     state.mkdir(parents=True, exist_ok=True)
-    failed = False
-    try:
-        result = (subprocess.run(command, input=code, text=True, capture_output=True, timeout=cfg['timeout_seconds'])
-                  if host.get('transport', 'ssh') == 'local'
-                  else run_ssh(host, command, code, cfg['timeout_seconds']))
-        if result.returncode:
-            failed = True
-            receipt = {'task': task['id'], 'time': utc(), 'result': 'STOP_COMMAND_ERROR',
-                       'dry_run': dry_run, 'error': result.stderr[-1500:]}
-        else:
-            receipt = json.loads(result.stdout)
-    except (OSError, subprocess.TimeoutExpired, ValueError) as e:
-        failed = True
-        receipt = {'task': task['id'], 'time': utc(), 'result': 'STOP_OUTCOME_UNKNOWN',
-                   'dry_run': dry_run, 'error': str(e), 'advice': '先查询真实状态，不能假定停止已执行或未执行。'}
+    receipt = {'task': task['id'], 'time': utc(), 'result': 'OFFICIAL_STOP_REQUIRED',
+               'reason': reason, 'dry_run': dry_run, 'training_stopped_confirmed': False,
+               'controller': task.get('controller'), 'scheduler': task.get('scheduler'),
+               'advice': '请调用 research_handoff stop 或 gpu_scheduler cancel；监控器保持只读。',
+               'monitor_command': monitor_cmd, 'verification_command': verification_cmd}
     with (state / 'stop-requests.jsonl').open('a') as f:
         f.write(dump(receipt) + '\n')
     print(dump(receipt))
-    # Stopping a task should leave operators with the one canonical read-only
-    # command needed to confirm the controller's eventual terminal state.
     print('停止后轮询监控命令: ' + monitor_cmd)
-    return 1 if failed else 0
+    print('单任务复核命令: ' + verification_cmd)
+    return 2
 
 
-def metadata(raw, spec):
+def metadata(raw: dict[str, Any], spec: dict[str, Any] | None) -> Any:
     if not spec:
         return None
     entry = raw['files'].get(spec['path'], {})
@@ -462,39 +562,167 @@ def metadata(raw, spec):
         return None
 
 
-def parse_stream(spec, entry, old, now, alive, default_stale):
-    text = entry.get('text', '')
-    rows = []
-    errors = []
+def read_budget(task: dict[str, Any], raw: dict[str, Any], launch: Any,
+                status_doc: dict[str, Any]) -> dict[str, Any]:
+    """Select one budget authority; a mismatched official run never uses legacy credit."""
+    controller = task.get('controller')
+    registered = isinstance(controller, dict) and bool(controller)
+    document_official = status_doc.get('controller') == 'autoresearch-longrun'
+    official = False
+    alerts = []
+    mode, source = 'unknown', 'unknown'
+    effective = target = limit = wall_limit = deadline = None
+    launch = launch if isinstance(launch, dict) else {}
+    if registered:
+        if controller.get('type') != 'research_handoff' or not document_official:
+            if status_doc or controller.get('type') != 'research_handoff':
+                alerts.append('CONTROLLER_TYPE_MISMATCH')
+        elif status_doc.get('run_id') != controller.get('run_id'):
+            alerts.append('CONTROLLER_IDENTITY_MISMATCH')
+        else:
+            official = True
+            source = 'research_handoff'
+            budget = status_doc.get('budget')
+            budget = budget if isinstance(budget, dict) else {}
+            mode = budget.get('mode', 'unknown')
+            wall_limit = budget.get('hard_limit_seconds')
+            window = budget.get('window_seconds')
+            if (mode not in ('active', 'wall') or not finite(window) or window <= 0
+                    or not finite(wall_limit) or wall_limit < window):
+                alerts.append('OBSERVATION_ERROR')
+            if mode == 'active':
+                effective, target = budget.get('active_seconds'), window
+                if not finite(effective) or effective < 0:
+                    alerts.append('OBSERVATION_ERROR')
+            deadline = budget.get('hard_deadline_at')
+    elif document_official:
+        alerts.append('CONTROLLER_TYPE_MISMATCH')
+    else:
+        source = 'legacy'
+        mode = status_doc.get('budget_mode', launch.get('budget_mode', 'wall'))
+        if mode == 'effective':
+            status_key = task.get('status', {}).get('key', '')
+            match = re.fullmatch(r'agents\.(sol|seed)\.status', status_key)
+            agent = field(status_doc, f'agents.{match[1]}', {}) if match else {}
+            effective = agent.get('effective_seconds') if isinstance(agent, dict) else None
+            target = status_doc.get('effective_target_seconds')
+            limit = status_doc.get('effective_limit_seconds')
+            if not (finite(effective) and effective >= 0 and finite(target)
+                    and finite(limit) and 0 < target <= limit):
+                alerts.append('OBSERVATION_ERROR')
+        else:
+            deadline = task.get('deadline_at') or metadata(raw, task.get('deadline_file'))
+    deadline_ts = None
+    try:
+        if deadline is not None:
+            deadline_ts = timestamp(deadline)
+        if official and finite(wall_limit) and wall_limit > 0:
+            started = timestamp(field(status_doc, 'budget.started_at'))
+            if started is not None:
+                hard_deadline = started + wall_limit
+                deadline_ts = min(deadline_ts, hard_deadline) if deadline_ts is not None else hard_deadline
+        elif not registered and not document_official and mode != 'effective':
+            budget_seconds = field(launch, task.get('budget_key', 'budget_seconds'))
+            started = timestamp(field(launch, task.get('started_key', 'started_at')))
+            if deadline_ts is None and finite(budget_seconds) and started is not None:
+                deadline_ts = started + budget_seconds
+    except (ValueError, TypeError, OverflowError):
+        alerts.append('OBSERVATION_ERROR')
+    return {'mode': mode, 'source': source, 'official': official, 'alerts': alerts,
+            'effective': effective if finite(effective) and effective >= 0 else None,
+            'target': target if finite(target) and target > 0 else None,
+            'limit': limit if finite(limit) and limit > 0 else None,
+            'wall_limit': wall_limit if finite(wall_limit) and wall_limit > 0 else None,
+            'deadline_ts': deadline_ts}
+
+
+def _parse_stream_line(spec: dict, line: str, pattern: re.Pattern | None) -> dict | None:
+    try:
+        if spec.get('format', 'jsonl') == 'jsonl':
+            row = json.loads(line)
+            if not isinstance(row, dict) or any(field(row, k) != v for k, v in spec.get('where', {}).items()):
+                return None
+            row = {k: field(row, v) for k, v in spec.get('fields', {'step': 'step', 'elapsed_seconds': 'elapsed_seconds'}).items()}
+        elif pattern:
+            match = pattern.search(line)
+            if not match:
+                return None
+            row = {k: float(v) for k, v in match.groupdict().items() if v is not None}
+        else:
+            return None
+        return row if any(v is not None for v in row.values()) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _stream_records(spec: dict, entry: dict, old: dict) -> tuple[list[dict], bytes, bool, str]:
+    """Reuse complete records only while their exact bytes remain in the tail.
+
+    Cache data stays in process memory, so daily observation files do not grow
+    by an extra copy of every parsed log window.  A restarted watch reparses its
+    first window.  Each cache is bounded by that window and the LRU entry limit.
+    """
+    data = (base64.b64decode(entry['raw_b64'], validate=True) if 'raw_b64' in entry
+            else entry.get('text', '').encode('utf-8'))
+    start = entry.get('offset', max(0, (entry.get('size') or len(data)) - len(data)))
+    end = entry.get('read_end', start + len(data))
+    signature = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
+    cache_key = old.get('_cache_key')
+    cached = _STREAM_CACHES.get(cache_key, {})
+    same_file = (entry.get('inode') is not None and entry.get('inode') == old.get('inode')
+                 and (entry.get('device') is None or old.get('device') is None
+                      or entry.get('device') == old.get('device'))
+                 and (entry.get('size') or 0) >= (old.get('size') or 0)
+                 and not entry.get('missing') and not entry.get('error'))
+    if cache_key and cache_key.partition(':')[0] != signature:
+        same_file = False
+    if cached and cached.get('signature') != signature:
+        same_file = False
+    compatible = (same_file and cached.get('signature') == signature
+                  and cached.get('start', start) <= start <= cached.get('end', -1) <= end)
+    if compatible:
+        overlap_end = cached['end'] - start
+        old_overlap = cached['data'][start - cached['start']:]
+        compatible = data[:overlap_end] == old_overlap
+        if not compatible:
+            same_file = False
+    if compatible:
+        records = [record for record in cached['records'] if record['start'] >= start]
+        partial = cached['partial'] if cached['partial_start'] >= start else b''
+        partial_start = cached['partial_start'] if partial else cached['end']
+        new_data = partial + data[cached['end'] - start:]
+        parse_start = partial_start
+    else:
+        records, new_data, parse_start = [], data, start
+        _STREAM_CACHES.pop(cache_key, None)
+        cache_key = signature + ':' + uuid.uuid4().hex
     pattern = re.compile(spec['pattern']) if spec.get('format') == 'regex' else None
+    for line in new_data.split(b'\n')[:-1]:
+        raw_line = line + b'\n'
+        records.append({'start': parse_start, 'end': parse_start + len(raw_line),
+                        'row': _parse_stream_line(spec, raw_line.decode('utf-8', errors='replace'), pattern)})
+        parse_start += len(raw_line)
+    partial = new_data[parse_start - (partial_start if compatible else start):]
+    _STREAM_CACHES[cache_key] = {'signature': signature, 'start': start, 'end': end, 'data': data,
+                                 'records': records, 'partial_start': parse_start, 'partial': partial}
+    _STREAM_CACHES.move_to_end(cache_key)
+    while len(_STREAM_CACHES) > MAX_STREAM_CACHE_ENTRIES:
+        _STREAM_CACHES.popitem(last=False)
+    return records, data, same_file, cache_key
+
+
+def parse_stream(spec: dict, entry: dict, old: dict, now: float,
+                 alive: bool, default_stale: float) -> dict:
+    records, data, same_file, cache_key = _stream_records(spec, entry, old)
+    text = data.decode('utf-8', errors='replace')
+    rows = [record['row'] for record in records if record['row'] is not None]
+    errors = []
     fmt = spec.get('format', 'jsonl')
-    # Ignore an incomplete final JSONL record, but still scan it for error signals.
-    for line in text.splitlines():
-        try:
-            if fmt == 'jsonl':
-                row = json.loads(line)
-                if not isinstance(row, dict):
-                    continue
-                if any(field(row, k) != v for k, v in spec.get('where', {}).items()):
-                    continue
-                row = {k: field(row, v) for k, v in spec.get('fields', {'step': 'step', 'elapsed_seconds': 'elapsed_seconds'}).items()}
-            elif pattern:
-                match = pattern.search(line)
-                if not match:
-                    continue
-                row = {k: float(v) for k, v in match.groupdict().items() if v is not None}
-            else:
-                continue
-            if any(v is not None for v in row.values()):
-                rows.append(row)
-        except (ValueError, TypeError):
-            continue
     latest = rows[-1] if rows else {}
     metric = latest.get('metric')
     values = [r['metric'] for r in rows if finite(r.get('metric'))]
     step = latest.get('step')
     previous_step = old.get('latest', {}).get('step')
-    same_file = entry.get('inode') == old.get('inode') and (entry.get('size') or 0) >= (old.get('size') or 0)
     changed = not same_file or step != previous_step
     progress_since = now if changed else old.get('progress_since', now)
     rate = None
@@ -525,7 +753,11 @@ def parse_stream(spec, entry, old, now, alive, default_stale):
             errors.append('STALLED_PROGRESS')
     if re.search(r'(?i)(?<![\w])(?:nan|[+-]?inf(?:inity)?)(?![\w])', text):
         errors.append('NONFINITE')
-    if re.search(r'Traceback \(most recent call last\)|CUDA out of memory|OutOfMemoryError|NCCL.*(?:Error|error)', text):
+    error_text = '\n'.join(text.splitlines()[-spec.get('error_window_lines', DEFAULT_ERROR_WINDOW_LINES):])
+    error_matches = [{'pattern': item['pattern'], 'severity': item.get('severity', 'error')}
+                     for item in spec.get('error_patterns', DEFAULT_ERROR_PATTERNS)
+                     if re.search(item['pattern'], error_text)]
+    if error_matches:
         errors.append('ERROR_LOG')
     if entry.get('error'):
         errors.append('OBSERVATION_ERROR')
@@ -536,11 +768,14 @@ def parse_stream(spec, entry, old, now, alive, default_stale):
             'step_per_second': rate, 'eta_seconds': eta, 'total_steps': total,
             'phase_complete': phase_complete,
             'log_age_seconds': age, 'progress_since': progress_since, 'observed_at': now,
-            'inode': entry.get('inode'), 'size': entry.get('size'), 'missing': entry.get('missing', False),
-            'tail': text.splitlines()[-spec.get('tail_lines', 3):], 'alerts': errors}
+            'inode': entry.get('inode'), 'device': entry.get('device'), 'size': entry.get('size'),
+            'missing': entry.get('missing', False), '_cache_key': cache_key,
+            'tail': text.splitlines()[-spec.get('tail_lines', 3):],
+            'error_matches': error_matches, 'alerts': errors}
 
 
-def evaluate(task, host, previous=None):
+def evaluate(task: dict[str, Any], host: dict[str, Any],
+             previous: dict[str, Any] | None = None) -> dict[str, Any]:
     previous = previous or {}
     result = {'id': task['id'], 'host': task['host'], 'label': task.get('label', task['id']),
               'protocol': task.get('protocol'), 'alerts': []}
@@ -561,30 +796,40 @@ def evaluate(task, host, previous=None):
     processes = raw['processes']
     alive = bool(processes)
     declared = metadata(raw, task.get('status'))
+    launch = metadata(raw, task.get('launch')) or {}
+    status_spec = task.get('status', {})
+    status_doc = metadata(raw, {'path': status_spec['path']}) if status_spec.get('path') else {}
+    status_doc = status_doc if isinstance(status_doc, dict) else {}
+    budget_view = read_budget(task, raw, launch, status_doc)
+    identity_conflict = bool(IDENTITY_ALERTS.intersection(budget_view['alerts']))
     rc = metadata(raw, task.get('exit'))
     if not isinstance(rc, int) or isinstance(rc, bool):
         rc = None
     states = {'COMPLETED': ['COMPLETED', 'COMPLETE', 'DONE', 'OK', 'SUCCESS'],
               'FAILED': ['FAILED', 'ERROR'], 'STOPPED': ['STOPPED', 'CANCELLED', 'CANCELED']}
     states.update(task.get('terminal_states', {}))
-    terminal = next((k for k, vals in states.items() if declared in vals), None)
-    if terminal is None and rc is not None:
-        terminal = 'COMPLETED' if rc == 0 else 'FAILED'
-    if terminal:
+    terminal = next((k for k, vals in states.items() if declared in vals), None) if not identity_conflict else None
+    state_source = 'processes'
+    if rc is not None:
+        state = 'COMPLETED' if rc == 0 else 'FAILED'
+        state_source = 'exit_code'
+    elif terminal:
         state = terminal
-        if alive or (terminal == 'COMPLETED' and rc is not None and rc != 0):
-            result['alerts'].append('STATUS_CONFLICT')
-        if terminal == 'COMPLETED' and rc is not None and rc != 0:
-            state = 'FAILED'
+        state_source = 'declared_state'
     elif alive:
         state = 'PAUSED' if all(p['state'] in ('T', 't') for p in processes) else 'RUNNING'
-    elif task.get('scheduler') is not None and declared in ('QUEUED', 'STARTING'):
+    elif not identity_conflict and task.get('scheduler') is not None and declared in ('QUEUED', 'STARTING'):
         state = declared
+    elif identity_conflict:
+        state = 'UNKNOWN'
+        state_source = 'identity_conflict'
     elif declared is not None or rc is not None or any(s.get('text') for s in raw['files'].values()):
         state = 'EXITED_WITHOUT_RESULT'
         result['alerts'].append(state)
     else:
         state = 'NOT_STARTED'
+    if (state in TERMINAL and alive) or (rc is not None and terminal is not None and terminal != state):
+        result['alerts'].append('STATUS_CONFLICT')
     if host.get('proc_permission_errors') or raw.get('process_errors'):
         result['alerts'].append('OBSERVATION_ERROR')
         if state in ('NOT_STARTED', 'EXITED_WITHOUT_RESULT'):
@@ -604,54 +849,20 @@ def evaluate(task, host, previous=None):
             file_errors[spec['path']] = 'invalid JSON or missing configured key'
     if file_errors:
         result['alerts'].append('OBSERVATION_ERROR')
-    launch = metadata(raw, task.get('launch')) or {}
-    status_spec = task.get('status', {})
-    status_doc = metadata(raw, {'path': status_spec['path']}) if status_spec.get('path') else {}
-    status_doc = status_doc if isinstance(status_doc, dict) else {}
-    group_match = re.fullmatch(r'agents\.(sol|seed)\.status', status_spec.get('key', ''))
-    agent = status_doc.get('agents', {}).get(group_match[1], {}) if group_match else {}
-    mode = status_doc.get('budget_mode', launch.get('budget_mode', 'wall')) if isinstance(launch, dict) else status_doc.get('budget_mode', 'wall')
-    effective = agent.get('effective_seconds')
-    target = status_doc.get('effective_target_seconds')
-    limit = status_doc.get('effective_limit_seconds')
-    controller = task.get('controller') if isinstance(task.get('controller'), dict) else {}
-    official = (controller.get('type') == 'research_handoff'
-                and status_doc.get('controller') == 'autoresearch-longrun'
-                and status_doc.get('run_id') == controller.get('run_id'))
+    mode = budget_view['mode']
+    effective, target, limit = (budget_view[key] for key in ('effective', 'target', 'limit'))
+    official = budget_view['official']
+    result['alerts'].extend(budget_view['alerts'])
     if official:
-        budget = status_doc.get('budget', {})
-        mode = budget.get('mode')
-        if mode == 'active':
-            effective = budget.get('active_seconds')
-            target = budget.get('window_seconds')
-            limit = None
-            if not (finite(effective) and effective >= 0 and finite(target) and target > 0
-                    and finite(budget.get('hard_limit_seconds')) and budget['hard_limit_seconds'] > 0):
-                result['alerts'].append('OBSERVATION_ERROR')
         result.update(current_turn=field(status_doc, 'turn.number'),
                       heartbeat_stale=field(status_doc, 'heartbeat.stale'),
                       scientific_score=field(status_doc, 'completion.scientific_score'))
-    if mode == 'effective' and not (finite(effective) and effective >= 0 and finite(target) and finite(limit) and 39600 <= target < limit <= 43200):
-        result['alerts'].append('OBSERVATION_ERROR')
     if finite(effective) and finite(target) and effective < target and (state in TERMINAL or state == 'EXITED_WITHOUT_RESULT'):
         result['alerts'].append('EFFECTIVE_TARGET_NOT_REACHED')
     if finite(effective) and finite(limit) and effective > limit:
         result['alerts'].append('EFFECTIVE_LIMIT_EXCEEDED')
-    deadline = (task.get('deadline_at') or metadata(raw, task.get('deadline_file'))) if mode != 'effective' else None
-    if official:
-        deadline = status_doc.get('budget', {}).get('hard_deadline_at')
-    deadline_ts = None
-    try:
-        if deadline:
-            deadline_ts = timestamp(deadline)
-        elif isinstance(launch, dict) and mode != 'effective':
-            budget = field(launch, task.get('budget_key', 'budget_seconds'))
-            started = timestamp(field(launch, task.get('started_key', 'started_at')))
-            if finite(budget) and started is not None:
-                deadline_ts = started + budget
-    except (ValueError, TypeError):
-        result['alerts'].append('OBSERVATION_ERROR')
-    remaining = deadline_ts - now if deadline_ts else None
+    deadline_ts = budget_view['deadline_ts']
+    remaining = deadline_ts - now if deadline_ts is not None else None
     effective_remaining = max(0, limit-effective) if finite(effective) and finite(limit) else None
     if mode == 'effective':
         remaining = effective_remaining
@@ -661,7 +872,7 @@ def evaluate(task, host, previous=None):
     streams = []
     for spec in task.get('streams', []):
         stream = parse_stream(spec, raw['files'][spec['path']], prev_streams.get(spec['id'], {}),
-                              now, alive, task.get('stale_seconds', 900))
+                              now, alive, task.get('stale_seconds', DEFAULT_STALE_THRESHOLD_SECONDS))
         streams.append(stream)
         result['alerts'].extend(stream['alerts'])
         if mode != 'effective' and alive and remaining is not None and stream['eta_seconds'] is not None and stream['eta_seconds'] > max(0, remaining):
@@ -672,17 +883,18 @@ def evaluate(task, host, previous=None):
     if uses_gpu and host['gpu'].get('error'):
         result['alerts'].append('GPU_UNAVAILABLE')
     free = raw['disk_free_bytes']
-    if free is not None and free < task.get('min_disk_free_gib', 2) * 1024 ** 3:
+    if free is not None and free < task.get('min_disk_free_gib', DEFAULT_MIN_DISK_FREE_GIB) * 1024 ** 3:
         result['alerts'].append('LOW_DISK')
     gpu_ids = set(task.get('gpu_uuids', []))
     own_pids = {str(p['pid']) for p in processes}
     container_ids = set(task.get('gpu_container_ids', []))
     gpu_processes = [dict(p, belongs_to_task=p['pid'] in own_pids or bool(container_ids.intersection(p.get('container_ids', []))))
                      for p in host['gpu_processes'].get('rows', []) if uses_gpu and (not gpu_ids or p['gpu_uuid'] in gpu_ids)]
-    result.update(state=state, declared_state=declared, exit_code=rc, observed_at=utc(now), last_success_at=utc(now),
+    result.update(state=state, state_source=state_source, declared_state=declared, exit_code=rc, observed_at=utc(now), last_success_at=utc(now),
                   boot_id=host.get('boot_id'), processes=processes, streams=streams,
-                  deadline_at=utc(deadline_ts) if deadline_ts else None, budget_remaining_seconds=remaining,
-                  budget_mode=mode, effective_seconds=effective, effective_target_seconds=target,
+                  deadline_at=utc(deadline_ts) if deadline_ts is not None else None, budget_remaining_seconds=remaining,
+                  budget_mode=mode, budget_source=budget_view['source'], wall_limit_seconds=budget_view['wall_limit'],
+                  effective_seconds=effective, effective_target_seconds=target,
                   effective_limit_seconds=limit, effective_remaining_seconds=effective_remaining,
                   effective_target_remaining_seconds=max(0,target-effective) if finite(target) and finite(effective) else None,
                   disk_free_gib=free / 1024 ** 3 if free is not None else None,
@@ -695,15 +907,35 @@ def evaluate(task, host, previous=None):
     return result
 
 
-def snapshot(cfg, previous=None):
+def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
     old = {t['id']: t for t in (previous or {}).get('tasks', [])}
-    grouped = {name: [t for t in cfg['tasks'] if t['host'] == name] for name in cfg['hosts']}
+    grouped = {name: tasks for name in cfg['hosts']
+               if (tasks := [t for t in cfg['tasks'] if t['host'] == name])}
     hosts = {}
-    with ThreadPoolExecutor(max_workers=min(8, len(grouped))) as pool:
-        pending = {pool.submit(probe_host, cfg['hosts'][name], tasks, cfg): name
-                   for name, tasks in grouped.items() if tasks}
-        for future in as_completed(pending):
-            hosts[pending[future]] = future.result()
+    if grouped:
+        round_timeout = cfg.get('probe_round_timeout_seconds',
+                                cfg['timeout_seconds'] * cfg.get('connection_attempts', 1)
+                                + cfg.get('retry_delay_seconds', 0) * (cfg.get('connection_attempts', 1) - 1))
+        deadline = time.monotonic() + round_timeout
+        pool = ThreadPoolExecutor(max_workers=min(MAX_PROBE_WORKERS, len(grouped)))
+        pending = {pool.submit(probe_host, cfg['hosts'][name], tasks, cfg, deadline): name
+                   for name, tasks in grouped.items()}
+        try:
+            for future in as_completed(pending, timeout=max(0, deadline - time.monotonic())):
+                try:
+                    hosts[pending[future]] = future.result()
+                except Exception as exc:
+                    hosts[pending[future]] = {'error': f'probe failed: {type(exc).__name__}'}
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future, name in pending.items():
+                if name not in hosts:
+                    future.cancel()
+                    hosts[name] = {'error': 'probe round timeout'}
+            # The context manager waits for every worker even after as_completed
+            # times out. Subprocesses share the deadline; queued work is cancelled.
+            pool.shutdown(wait=False, cancel_futures=True)
     evaluated = [evaluate(t, hosts[t['host']], old.get(t['id'])) for t in cfg['tasks']]
     host_views = {}
     for name, raw in hosts.items():
@@ -745,7 +977,7 @@ def snapshot(cfg, previous=None):
             'hosts': host_views, 'tasks': evaluated, 'agents': agents}
 
 
-def aggregate_agents(tasks):
+def aggregate_agents(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build the official-controller view from one probe snapshot.
 
     This is deliberately a pure projection: lifecycle state still comes from
@@ -776,7 +1008,7 @@ def aggregate_agents(tasks):
     return agents
 
 
-def atomic_json(path, value):
+def atomic_json(path: Path, value: Any) -> None:
     temp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         temp.write_text(dump(value) + '\n')
@@ -785,14 +1017,14 @@ def atomic_json(path, value):
         temp.unlink(missing_ok=True)
 
 
-def load_latest(state):
+def load_latest(state: Path) -> dict[str, Any]:
     try:
         return json.loads((state / 'latest.json').read_text())
     except (FileNotFoundError, ValueError):
         return {}
 
 
-def persist(state, data, previous):
+def persist(state: Path, data: dict[str, Any], previous: dict[str, Any]) -> None:
     state.mkdir(parents=True, exist_ok=True)
     atomic_json(state / 'latest.json', data)
     day = data['collected_at'][:10]
@@ -1054,7 +1286,7 @@ def render(data, color='auto', view='gpu'):
     return render_gpu(data, color)
 
 
-def refresh_auth(cfg, auth_path):
+def refresh_auth(cfg: dict[str, Any], auth_path: Path) -> None:
     """Re-read auth.txt so a live watch follows credential changes without a restart.
 
     Falls back to the credentials already loaded when the file is momentarily
@@ -1067,9 +1299,15 @@ def refresh_auth(cfg, auth_path):
     for name, host in cfg['hosts'].items():
         if host.get('transport', 'ssh') != 'ssh':
             continue
-        if any(host.get(key) != auth[key] for key in ('host', 'user', 'port')):
-            purge_host_key(auth)
-        cfg['hosts'][name] = apply_auth(host, auth)
+        updated = apply_auth(host, auth)
+        if any(host.get(key) != updated[key] for key in ('hostname', 'user', 'port')):
+            purge_host_key(updated)
+        cfg['hosts'][name] = updated
+
+
+def all_tasks_terminal(tasks: list[dict[str, Any]]) -> bool:
+    return all(task['state'] in TERMINAL and not task['processes']
+               and not UNCERTAIN_LIFECYCLE_ALERTS.intersection(task.get('alerts', [])) for task in tasks)
 
 
 def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None, auth_path=None, view='gpu'):
@@ -1101,7 +1339,7 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
                 if max_polls and count >= max_polls:
                     reason = 'POLL_LIMIT'
                     break
-                if until_terminal and all(t['state'] in TERMINAL and not t['processes'] for t in data['tasks']):
+                if until_terminal and all_tasks_terminal(data['tasks']):
                     reason = 'ALL_TASKS_TERMINAL'
                     break
                 wake = min(end, time.monotonic() + interval)
@@ -1157,17 +1395,22 @@ def main():
     a = p.parse_args()
     try:
         auth_path = a.auth.resolve()
-        needs_remote = a.action in ('status', 'watch', 'maintain', 'stop-task')
+        needs_remote = a.action in ('status', 'watch', 'maintain')
         # 凭据文件是唯一的认证来源；只有需要连接远端时才强制要求它存在。
-        auth = load_auth(auth_path) if needs_remote or auth_path.exists() else None
-        cfg = load_config(a.config.resolve(), auth)
-        if needs_remote:
-            prepare_ssh(cfg)
+        cfg = load_config(a.config.resolve())
         if a.task:
             unknown = set(a.task) - {t['id'] for t in cfg['tasks']}
             if unknown:
                 raise ValueError(f'unknown task IDs: {sorted(unknown)}')
             cfg['tasks'] = [t for t in cfg['tasks'] if t['id'] in a.task]
+        active_hosts = {task['host'] for task in cfg['tasks']}
+        if needs_remote and any(host.get('transport', 'ssh') == 'ssh'
+                                for name, host in cfg['hosts'].items() if name in active_hosts):
+            auth = load_auth(auth_path)
+            for name in active_hosts:
+                if cfg['hosts'][name].get('transport', 'ssh') == 'ssh':
+                    cfg['hosts'][name] = apply_auth(cfg['hosts'][name], auth)
+            prepare_ssh({'hosts': {name: cfg['hosts'][name] for name in active_hosts}})
         state = (a.config.resolve().parent / cfg['state_dir']).resolve()
         # A selection gets its own watch lock/history; a full watch cannot lose tasks.
         if a.task:
@@ -1180,9 +1423,9 @@ def main():
         if a.action == 'validate':
             print(dump({'valid': True, 'tasks': [t['id'] for t in cfg['tasks']], 'state_dir': str(state)}))
         elif a.action == 'stop-task':
-            if not a.task or len(a.task) != 1 or not a.reason:
+            if not a.task or len(a.task) != 1 or not a.reason or not a.reason.strip():
                 raise ValueError('stop-task requires exactly one --task and a --reason')
-            return stop_task(cfg, cfg['tasks'][0], a.reason, a.dry_run, state)
+            return stop_task(cfg, cfg['tasks'][0], a.reason, a.dry_run, state, a.config.resolve(), auth_path)
         elif a.action == 'status':
             data = snapshot(cfg, load_latest(state))
             print(dump(data)) if a.json else render(data, a.color, a.view)

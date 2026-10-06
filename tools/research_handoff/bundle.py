@@ -19,6 +19,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST = "CONTROLLER_MANIFEST.json"
+SHARED_PROCESS_SOURCE = ROOT.parent / "process_control/processes.py"
 EXECUTABLES = {"controller.py", "bundle.py", "research_completion.py", "templates/launch_controller.sh"}
 FILES = (
     "controller.py",
@@ -36,6 +37,7 @@ FILES = (
     "core/worker.py",
     "core/rpc.py",
     "core/longrun.py",
+    "core/turn_outcome.py",
     "core/research_time.py",
     "core/runtime_artifacts.py",
     "core/storage_migration.py",
@@ -63,6 +65,8 @@ def render() -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for relative in FILES:
         source = ROOT / relative
+        if relative == "core/processes.py" and SHARED_PROCESS_SOURCE.is_file():
+            source = SHARED_PROCESS_SOURCE
         if not source.is_file() or source.is_symlink():
             raise ValueError(f"missing or symlinked bundle source: {relative}")
         files[relative] = source.read_bytes()
@@ -70,6 +74,20 @@ def render() -> dict[str, bytes]:
         if relative.endswith(".py"):
             compile(payload, relative, "exec")
     return files
+
+
+def source_hashes() -> dict[str, str]:
+    """Pin executed workspace files as well as an embedded standalone release."""
+    files = render()
+    if SHARED_PROCESS_SOURCE.is_file():
+        shim = ROOT / "core/processes.py"
+        shared_init = SHARED_PROCESS_SOURCE.with_name("__init__.py")
+        if any(path.is_symlink() or not path.is_file() for path in (shim, shared_init)):
+            raise ValueError("missing or symlinked process import source")
+        files["core/processes.py"] = shim.read_bytes()
+        files["shared/processes.py"] = SHARED_PROCESS_SOURCE.read_bytes()
+        files["shared/__init__.py"] = shared_init.read_bytes()
+    return {name: _sha256(payload) for name, payload in files.items()}
 
 
 def make_manifest(files: dict[str, bytes]) -> dict[str, Any]:
