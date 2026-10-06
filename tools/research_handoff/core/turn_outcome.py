@@ -10,6 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, FrozenSet, Mapping
 
+try:
+    from .gpu_wait import INFRASTRUCTURE_REASONS
+except ImportError:
+    from gpu_wait import INFRASTRUCTURE_REASONS
+
 
 @dataclass(frozen=True)
 class TurnOutcome:
@@ -79,6 +84,7 @@ def compute_turn_outcome(
     completed = final_reason == "turn_completed"
     retry_pending = (
         final_reason in retryable_reasons
+        and final_reason not in INFRASTRUCTURE_REASONS
         and not stop_requested
         and not hard_reached
         and not target_reached

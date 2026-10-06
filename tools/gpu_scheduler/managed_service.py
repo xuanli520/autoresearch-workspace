@@ -82,7 +82,10 @@ def previous_session(config):
         launch = read_json(launch_path)
         job_exit = launch_path.with_name("exit.json")
         if processes.scope_members(launch["token"]) or not job_exit.exists():
-            # systemd may retry after the independent executor finishes. No signals.
+            # Durable reservations retain the original execution as UNKNOWN.
+            # Reconciliation never signals or relaunches the executor.
+            if (Path(config["root"]) / "requests.jsonl").exists():
+                continue
             raise RuntimeError("previous GPU executor has not finished; waiting for its existing deadline")
         if not read_json(job_exit).get("cleanup_ok"):
             raise ValueError("previous GPU job cleanup failed; inspect it before starting")

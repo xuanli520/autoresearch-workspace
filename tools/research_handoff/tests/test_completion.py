@@ -185,6 +185,17 @@ class CompletionTests(unittest.TestCase):
         ledger = json.loads((self.evidence / 'selected.jobs.json').read_text())
         self.assertEqual(ledger['jobs'], self.jobs)
 
+    def test_restored_job_binds_original_session_and_rejects_changed_origin(self):
+        snapshot = self.job_state('SUCCEEDED')
+        snapshot.update(origin_session_id='session', session_id='new-session')
+        longrun.atomic_json(self.job_dir / 'status.json', snapshot)
+        with mock.patch.object(c, 'get_job', return_value=snapshot):
+            observations = c.job_observations(self.contract, live=True)
+        self.assertEqual(observations[0]['state'], 'SUCCEEDED')
+        self.assertEqual(observations[0]['session_id'], 'session')
+        with mock.patch.object(c, 'get_job', return_value={**snapshot, 'origin_session_id': 'different'}):
+            self.assertEqual(c.job_observations(self.contract, live=True)[0]['state'], 'UNKNOWN')
+
     def test_rejected_selection_writes_nothing_and_can_be_retried(self):
         self.seal()
         parent = copy.deepcopy(self.contract)

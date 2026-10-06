@@ -77,6 +77,36 @@ def projected_start(spec: dict[str, Any], active: list[dict[str, Any]], config: 
     return None
 
 
+def queue_projection(queue: list[dict[str, Any]], active: list[dict[str, Any]],
+                     config: dict[str, Any], snapshot: dict[str, Any] | None,
+                     quarantined: set[str], pid_sets: dict[str, set[int]],
+                     now: float) -> dict[str, float | None]:
+    """Reserve the ordered queue, including future slots, CPU, RAM and GPUs."""
+    remaining = list(active)
+    future = snapshot
+    at = now
+    estimates = {}
+    for job in queue:
+        start = projected_start(job["spec"], remaining, config, future, quarantined, pid_sets, at)
+        estimates[job["id"]] = start
+        if start is None:
+            # An unresolved reservation cannot yield a reliable later start.
+            break
+        released = [item for item in remaining if release_at(item, at) is not None
+                    and release_at(item, at) <= start]
+        future = forecast_snapshot(future, released, pid_sets)
+        remaining = [item for item in remaining if item not in released]
+        gpu, _ = choose_gpu(job["spec"], remaining, config, future, quarantined, pid_sets=pid_sets)
+        if gpu is None:
+            estimates[job["id"]] = None
+            break
+        remaining.append({"id": "projection/" + job["id"], "gpu_uuid": gpu,
+                          "spec": job["spec"], "state": "RUNNING",
+                          "execution_deadline_mono": start + job["spec"]["max_runtime_seconds"]})
+        at = start
+    return estimates
+
+
 def safe_backfill(candidate: dict[str, Any], gpu_uuid: str, blockers: list[dict[str, Any]],
                   active: list[dict[str, Any]], config: dict[str, Any], snapshot: dict[str, Any] | None,
                   quarantined: set[str], pid_sets: dict[str, set[int]], now: float) -> bool:

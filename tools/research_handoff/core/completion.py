@@ -35,7 +35,7 @@ COMPLETION_FAILURES = frozenset({
     "EVALUATION_UNKNOWN", "FINAL_SCORE_INVALID", "CANDIDATE_BINDING_MISMATCH",
     "PROTOCOL_BINDING_MISMATCH", "COMPLETION_RECEIPT_MISSING",
 })
-JOB_TERMINAL = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "EXPIRED"})
+JOB_TERMINAL = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "EXPIRED", "INFEASIBLE"})
 CONTRACT_FIELDS = ("stage", "score_expectation", "metric", "direction", "required_seeds",
                    "deadline", "candidate_manifest", "protocol_hash")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
@@ -557,8 +557,9 @@ def job_observations(contract: dict[str, Any], *, live: bool = False) -> list[di
                     snapshot = {"state": "UNKNOWN"}
             if not isinstance(snapshot, dict):
                 raise ControllerError("invalid scheduler snapshot")
-            if snapshot.get("state") != "UNKNOWN" and any(snapshot.get(k) != job[v] for k, v in
-                    (("id", "job_id"), ("request_id", "request_id"), ("session_id", "session_id"))):
+            if snapshot.get("state") != "UNKNOWN" and (
+                    any(snapshot.get(k) != job[v] for k, v in (("id", "job_id"), ("request_id", "request_id")))
+                    or snapshot.get("origin_session_id", snapshot.get("session_id")) != job["session_id"]):
                 raise ControllerError("scheduler identity differs")
             state = snapshot["state"]
             if state not in JOB_TERMINAL | {"QUEUED", "STARTING", "RUNNING", "CANCELLING", "UNKNOWN"}:
@@ -567,9 +568,11 @@ def job_observations(contract: dict[str, Any], *, live: bool = False) -> list[di
             record.update(state=state, finished_at=snapshot.get("finished_at"), reason=snapshot.get("reason"))
             if state in JOB_TERMINAL:
                 durable = read_json(within(folder, "status.json"))
-                for field in ("id", "request_id", "session_id", "state", "finished_at", "reason"):
+                for field in ("id", "request_id", "state", "finished_at", "reason"):
                     if durable.get(field) != snapshot.get(field):
                         raise ControllerError("scheduler terminal snapshot differs from durable evidence")
+                if durable.get("origin_session_id", durable.get("session_id")) != job["session_id"]:
+                    raise ControllerError("scheduler terminal origin differs from durable evidence")
                 score(snapshot["finished_at"])
                 record["status_file"] = artifact(folder, "status.json")
             if state == "SUCCEEDED":

@@ -63,6 +63,13 @@
 # Explicitly allow the generic operations helper only.
 /ops/*
 !/ops/transfer_remote.py
+!/ops/gpu_scheduler/
+/ops/gpu_scheduler/*
+!/ops/gpu_scheduler/README.md
+!/ops/gpu_scheduler/进展清单.md
+!/ops/gpu_scheduler/config/
+/ops/gpu_scheduler/config/*
+!/ops/gpu_scheduler/config/*.json
 
 # Generic GPU monitor source, README, and example configuration.
 /tools/*

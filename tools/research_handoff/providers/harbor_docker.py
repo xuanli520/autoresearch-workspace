@@ -95,16 +95,32 @@ class ManagedDockerEnvironment(DockerEnvironment):
             main.setdefault('volumes', []).append({
                 'type': 'bind', 'source': str(self._gpu_guard_dir),
                 'target': '/run/autoresearch-gpu-guard', 'read_only': True})
-        self._managed_build_path.write_text(json.dumps({"services": {"main": main}}))
+        services = {"main": main}
+        if os.environ.get("GPU_SCHEDULER_JOB_DIR"):
+            from tools.gpu_scheduler.resource_limits import docker_overrides
+            limits = docker_overrides()
+            if limits:
+                main["cgroup_parent"] = limits["cgroup_parent"]
+                if self._enable_egress_control:
+                    services[self._EGRESS_CONTROL_SERVICE_NAME] = dict(limits)
+        self._managed_build_path.write_text(json.dumps({"services": services}))
         return [*paths, self._managed_build_path]
 
     def _write_resources_compose_file(self):
         path = super()._write_resources_compose_file()
+        document = json.loads(path.read_text())
+        if os.environ.get("GPU_SCHEDULER_JOB_DIR"):
+            from tools.gpu_scheduler.resource_limits import docker_overrides
+            limits = docker_overrides(document["services"]["main"])
+            if limits:
+                main = document["services"]["main"]
+                main.update(limits)
+                resources = main.setdefault("deploy", {}).setdefault("resources", {})
+                resources.setdefault("limits", {}).update(memory=limits["mem_limit"], cpus=limits["cpus"])
         if self.task_env_config.gpus:
             gpu = os.environ.get("CUDA_VISIBLE_DEVICES", "")
             if self.task_env_config.gpus != 1 or not re.fullmatch(r"GPU-[a-fA-F0-9-]+", gpu):
                 raise ValueError("one scheduler-assigned GPU UUID is required")
-            document = json.loads(path.read_text())
             resources = document["services"]["main"].setdefault("deploy", {}).setdefault("resources", {})
             reservations = resources.setdefault("reservations", {})
             if self.gpu_attachment == "cdi":
@@ -115,7 +131,7 @@ class ManagedDockerEnvironment(DockerEnvironment):
             else:
                 reservations["devices"] = [
                     {"driver": "nvidia", "device_ids": [gpu], "capabilities": ["gpu"]}]
-            path.write_text(json.dumps(document, indent=2))
+        path.write_text(json.dumps(document, indent=2))
         return path
 
     def _write_egress_control_services_compose_file(self):

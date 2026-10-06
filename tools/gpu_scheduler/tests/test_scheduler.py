@@ -184,7 +184,7 @@ class QueueAdmissionTests(unittest.TestCase):
                 expected = "telemetry" if scenario == "telemetry" else scenario
                 self.assertIn(expected, queued["reason"])
                 self.assertEqual(read_json(Path(queued["directory"]) / "status.json")["id"], queued["id"])
-                self.assertEqual(len(self.scheduler.jobs), 1)
+                self.assertEqual(len(self.scheduler.jobs), index + 1)
 
 
 class ServiceTests(unittest.TestCase):
@@ -247,7 +247,7 @@ class ServiceTests(unittest.TestCase):
         self.running(third)
         self.assertEqual(self.client.get(second["id"])["state"], "RUNNING")
 
-    def test_module_cli_cancel_alias_is_scoped_and_session_fenced(self):
+    def test_module_cli_cancel_alias_is_scoped_and_survives_session_change(self):
         first, peer = [self.submit(f"cli-cancel-{i}") for i in range(2)]
         self.running(first)
         self.running(peer)
@@ -255,8 +255,7 @@ class ServiceTests(unittest.TestCase):
                    "--root", str(self.root), "--session", "wrong-session",
                    "--job-id", first["id"], "--reason", "review regression"]
         denied = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=5)
-        self.assertEqual(denied.returncode, 2)
-        self.assertEqual(self.client.get(first["id"])["state"], "RUNNING")
+        self.assertEqual(denied.returncode, 0)
         command[command.index("wrong-session")] = self.client.session_id
         cancelled = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=5)
         self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
@@ -288,6 +287,21 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["state"], "SUCCEEDED")
         self.assertGreaterEqual(time.monotonic() - started, .25)
 
+    def test_official_wait_forwards_queue_and_terminal_updates_without_adapter_polling(self):
+        first = self.submit("callback-blocker", memory_mib=100, compute_units=100)
+        self.running(first)
+        queued = self.submit("callback-original", command=[sys.executable, "-B", "-c", "pass"])
+        updates = []
+        def update(job):
+            updates.append(job)
+            if job['state'] == 'QUEUED':
+                self.client.cancel(first['id'], 'release for callback test')
+        result = self.client.wait(queued['id'], timeout=6, on_update=update)
+        self.assertEqual(result['state'], 'SUCCEEDED')
+        self.assertEqual(updates[0]['state'], 'QUEUED')
+        self.assertEqual(updates[-1]['state'], 'SUCCEEDED')
+        self.assertTrue(all(job['id'] == queued['id'] for job in updates))
+
     def test_persistent_service_keeps_queue_and_execution_timeouts(self):
         self.daemon.terminate()
         self.daemon.wait(timeout=10)
@@ -299,14 +313,14 @@ class ServiceTests(unittest.TestCase):
                               memory_mib=100, compute_units=100)
         self.running(running)
         expired = self.client.submit({**spec(self.base, "persistent-queue"),
-                                      "queue_timeout_seconds": .1}, timeout=5)
-        self.assertEqual(expired["reason"], "queue_timeout")
+                                      "deadline_epoch": time.time() + 30.2}, timeout=5)
+        self.assertEqual(expired["state"], "INFEASIBLE")
         result = self.client.wait(running["id"], timeout=5)
         self.assertEqual(result["state"], "TIMED_OUT")
         self.assertTrue(result["exit"]["cleanup_ok"])
         self.assertFalse(self.client.status()["stopping"])
-        with self.assertRaises(SchedulerError):
-            self.client.submit({**spec(self.base, "parent-expired"), "deadline_epoch": time.time() - 1})
+        self.assertEqual(self.client.submit({**spec(self.base, "parent-expired"),
+            "deadline_epoch": time.time() - 1})["state"], "INFEASIBLE")
         good = self.client.submit(spec(self.base, "persistent-next", seconds=.1))
         self.assertEqual(good["state"], "SUCCEEDED")
 
@@ -336,7 +350,7 @@ class ServiceTests(unittest.TestCase):
     def test_invalid_submission_fails_before_queue_creation(self):
         for changes in ({"memory_mib": 101}, {"compute_units": 101}, {"cpu_cores": 9},
                         {"ram_mib": 8193}, {"gpu_uuid": "GPU-absent"},
-                        {"max_runtime_seconds": 121}, {"command": []}):
+                        {"max_runtime_seconds": 43201}, {"command": []}):
             with self.subTest(changes=changes), self.assertRaises(SchedulerError):
                 self.client.submit({**spec(self.base, "invalid"), **changes})
         self.assertEqual(self.client.jobs(), [])
@@ -368,9 +382,9 @@ class ServiceTests(unittest.TestCase):
         first = self.submit("expiry-first", memory_mib=100, compute_units=100)
         self.running(first)
         result = self.client.submit({**spec(self.base, "blocking-expiry"),
-                                     "queue_timeout_seconds": .15}, timeout=5)
-        self.assertEqual(result["state"], "EXPIRED")
-        self.assertEqual(result["reason"], "queue_timeout")
+                                     "deadline_epoch": time.time() + 31}, timeout=5)
+        self.assertEqual(result["state"], "INFEASIBLE")
+        self.assertEqual(result["reason"], "projected_start_after_latest_start")
         self.assertEqual(self.client.get(first["id"])["state"], "RUNNING")
 
     def test_concurrent_blocking_submissions_share_one_job_and_wake_all_waiters(self):
@@ -527,7 +541,8 @@ class ServiceTests(unittest.TestCase):
         def submit_one(index):
             return clients[index % 2].submit_async({**spec(self.base, f"agent-{index}", seconds=.5),
                                                     "owner": f"agent-{index}", "memory_mib": 10,
-                                                    "compute_units": 10, "ram_mib": 256})
+                                                    "compute_units": 10, "ram_mib": 256,
+                                                    "max_runtime_seconds": 1})
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             jobs = list(pool.map(submit_one, range(8)))
@@ -580,9 +595,9 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(len(remote.jobs()), 1)
             self.assertNotIn("literal $HOME", repr(commands))
             self.assertEqual(requests[1]["op"], "submit")
-            self.assertTrue(requests[1]["wait"])
-            self.assertEqual(timeouts[1], 43210)
-            self.assertEqual(requests[2]["op"], "wait")
+            self.assertFalse(requests[1]["wait"])
+            self.assertEqual(timeouts[1], remote.timeout)
+            self.assertEqual(requests[2]["op"], "watch")
             pending = remote.submit_async(spec(self.base, "remote-pending", seconds=2))
             self.assertEqual(requests[-1]["op"], "submit")
             self.assertFalse(requests[-1]["wait"])
@@ -623,25 +638,25 @@ class ServiceTests(unittest.TestCase):
         self.running(large_running)
         waiting = self.submit("large-waiting", memory_mib=80, compute_units=80)
         small = [self.submit(f"small-{i}", command=[sys.executable, "-B", "-c", "pass"],
-                             memory_mib=20, compute_units=20) for i in range(3)]
+                             memory_mib=20, compute_units=20, max_runtime_seconds=1) for i in range(3)]
         for job in small[:2]:
             self.assertEqual(self.client.wait(job["id"], timeout=6, interval=.05)["state"], "SUCCEEDED")
-        eventually(lambda: self.client.get(waiting["id"])["bypasses"] == 2)
-        self.assertEqual(self.client.get(small[2]["id"])["state"], "QUEUED")
+        self.assertEqual(self.client.wait(small[2]["id"], timeout=6)["state"], "SUCCEEDED")
+        self.assertEqual(self.client.get(waiting["id"])["state"], "QUEUED")
         self.client.cancel(large_running["id"])
         self.running(waiting)
 
     def test_queue_timeout_cancel_and_no_wait_side_effect(self):
         first = self.submit("full", memory_mib=100, compute_units=100)
         self.running(first)
-        expired = self.submit("expire", queue_timeout_seconds=.2)
+        expired = self.submit("expire", deadline_epoch=time.time() + 31)
         cancelled = self.submit("cancel")
         self.assertEqual(self.client.cancel(cancelled["id"])["state"], "CANCELLED")
         with self.assertRaises(TimeoutError) as timeout:
             self.client.wait(first["id"], timeout=.1, interval=.03)
         self.assertEqual(timeout.exception.job_id, first["id"])
         self.assertEqual(timeout.exception.job["state"], "RUNNING")
-        self.assertEqual(self.client.wait(expired["id"], timeout=4, interval=.05)["state"], "EXPIRED")
+        self.assertEqual(self.client.wait(expired["id"], timeout=4, interval=.05)["state"], "INFEASIBLE")
         self.assertEqual(self.client.get(first["id"])["state"], "RUNNING")
 
     def test_success_failure_and_graceful_service_stop(self):
@@ -676,29 +691,73 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue((Path(running["directory"]) / "recovery-exit.json").exists())
         self.running(waiting)
 
-    def test_crash_executor_deadline_restart_lock_and_session_fence(self):
-        running = self.submit("orphan", max_runtime_seconds=2)
-        queued = self.submit("lost-queue", memory_mib=100)
+    def test_crash_restarts_immediately_preserves_queue_and_never_reexecutes(self):
+        marker = self.base / "execution-count.txt"
+        running = self.submit("orphan", max_runtime_seconds=4,
+            command=[sys.executable, "-B", "-c", "from pathlib import Path; import time; "
+                     f"p=Path({str(marker)!r}); p.open('a').write('started\\n'); time.sleep(10)"])
+        queued = self.submit("retained-queue", memory_mib=100)
         self.running(running)
+        self.assertEqual(self.client.get(queued["id"])["state"], "QUEUED")
+        queued_before = self.client.get(queued["id"])
         old_client = self.client
+        old_session = self.client.session_id
         self.daemon.kill()
         self.daemon.wait(timeout=3)
         launch = read_json(Path(running["directory"]) / "launch.json")
         self.assertTrue(processes.scope_members(launch["token"]))
-        attempt = subprocess.run([sys.executable, "-B", str(CLI), "serve", "--local-test",
-                                  "--config", str(self.cfg_path)], capture_output=True, text=True, timeout=3)
-        self.assertEqual(attempt.returncode, 2)
-        self.assertIn("orphan executor", attempt.stderr)
+        self.start()
+        self.assertNotEqual(self.client.session_id, old_session)
+        recovered = self.client.get(running["id"])
+        self.assertEqual(recovered["state"], "UNKNOWN")
+        self.assertTrue(recovered["reconciling"])
+        self.assertEqual(recovered["id"], running["id"])
+        self.assertTrue(processes.scope_members(launch["token"]))
+        queued_after = self.client.get(queued["id"])
+        self.assertEqual(queued_after["state"], "QUEUED")
+        for key in ("id", "submitted_at", "deadline_epoch", "bypasses", "directory"):
+            self.assertEqual(queued_after[key], queued_before[key])
         exit_path = Path(running["directory"]) / "exit.json"
         eventually(exit_path.exists, timeout=6)
         self.assertEqual(read_json(exit_path)["reason"], "deadline")
         self.assertEqual(processes.scope_members(launch["token"]), [])
+        self.assertEqual(len(self.client.jobs()), 2)
+        self.assertEqual(old_client.status()["session_id"], self.client.session_id)
+        self.assertEqual(self.client.get(queued["id"])["id"], queued["id"])
+        self.assertEqual(self.client.wait(running["id"], timeout=3)["state"], "TIMED_OUT")
+        self.running(queued)
+        self.assertEqual(marker.read_text().splitlines(), ["started"])
+
+    def test_restart_reconciles_lost_executor_identity_before_dispatch(self):
+        running = self.submit("orphan-worker-loss", memory_mib=100)
+        queued = self.submit("after-orphan-worker-loss")
+        self.running(running)
+        identity = read_json(Path(running["directory"]) / "executor.json")
+        self.daemon.kill()
+        self.daemon.wait(timeout=3)
         self.start()
-        self.assertEqual(self.client.jobs(), [])
-        with self.assertRaisesRegex(SchedulerError, "session changed"):
-            old_client.status()
-        with self.assertRaises(SchedulerError):
-            self.client.get(queued["id"])
+        self.assertEqual(self.client.get(running["id"])["state"], "UNKNOWN")
+        self.assertTrue(processes.signal_identity(identity["pid"], identity["start_ticks"],
+                                                  signal.SIGKILL, identity["boot_id"]))
+        receipt = self.client.wait(running["id"], timeout=6)
+        self.assertEqual(receipt["state"], "FAILED")
+        self.assertEqual(receipt["exit"]["reason"], "executor_lost")
+        self.assertTrue(receipt["exit"]["cleanup_ok"])
+        self.running(queued)
+
+    def test_restarted_service_can_cancel_the_original_executor(self):
+        running = self.submit("cancel-restored", memory_mib=100)
+        self.running(running)
+        identity = read_json(Path(running["directory"]) / "executor.json")
+        self.daemon.kill()
+        self.daemon.wait(timeout=3)
+        self.start()
+        self.assertEqual(self.client.get(running["id"])["state"], "UNKNOWN")
+        self.client.cancel(running["id"], "cancel restored executor")
+        result = self.client.wait(running["id"], timeout=5)
+        self.assertEqual(result["state"], "CANCELLED")
+        self.assertTrue(result["exit"]["cleanup_ok"])
+        self.assertFalse(processes.pid_matches(identity["pid"], identity["start_ticks"], identity["boot_id"]))
 
 
 if __name__ == "__main__":

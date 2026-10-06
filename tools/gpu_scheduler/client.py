@@ -3,17 +3,20 @@ from __future__ import annotations
 
 import json
 import socket
+import time
 from pathlib import Path
 from typing import Any
 
-from .common import MAX_MESSAGE, JobWaitInterrupted, JobWaitTimeout, validate_wait_timeout
+from .common import MAX_MESSAGE, WAITABLE_TERMINAL, JobWaitInterrupted, JobWaitTimeout, validate_wait_timeout
 
 
 _REQUEST_DEFAULT = object()
 
 
 class SchedulerError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class Client:
@@ -52,18 +55,28 @@ class Client:
                                      result["job"])
             if result.get("code") == "WAIT_INTERRUPTED":
                 raise JobWaitInterrupted(result["reason"], job=result["job"])
-            raise SchedulerError(result.get("error", "request failed"))
+            raise SchedulerError(result.get("error", "request failed"), code=result.get("code", "REJECTED"))
         return result["result"]
 
-    def submit(self, spec: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+    def ensure(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Persist an idempotent intent; an existing execution is never replayed."""
+        return self.submit_async(spec)
+
+    def submit(self, spec: dict[str, Any], *, timeout: float | None = None, on_update=None) -> dict[str, Any]:
         """Validate and enqueue, then block until completion or a resumable interruption."""
         timeout = validate_wait_timeout(timeout)
         try:
-            return self._request("submit", spec=spec, wait=True, timeout=timeout,
-                                 request_timeout=self._wait_transport_timeout(timeout))
+            started = time.monotonic()
+            job = self.ensure(spec)
+            return self.wait(job["id"], timeout=None if timeout is None else max(0, timeout - (time.monotonic() - started)),
+                             on_update=on_update)
         except KeyboardInterrupt as exc:
             raise JobWaitInterrupted("client_interrupted", session_id=self.session_id,
                                      request_id=spec.get("request_id")) from exc
+        except JobWaitInterrupted as exc:
+            if exc.request_id is None:
+                exc.request_id = spec.get("request_id")
+            raise
 
     def submit_async(self, spec: dict[str, Any]) -> dict[str, Any]:
         """Enqueue without waiting, for progress tracking or multi-job orchestration."""
@@ -84,13 +97,42 @@ class Client:
     def stop(self) -> dict[str, Any]:
         return self._request("stop")
 
-    def wait(self, job_id: str, *, timeout: float | None = None, interval: float = 1) -> dict[str, Any]:
+    def wait(self, job_id: str, *, timeout: float | None = None, interval: float = 1, on_update=None) -> dict[str, Any]:
         """Block on server events; interval is retained only for caller compatibility."""
         del interval
         timeout = validate_wait_timeout(timeout)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        revision = None
+        job = None
         try:
-            return self._request("wait", id=job_id, timeout=timeout,
-                                 request_timeout=self._wait_transport_timeout(timeout))
+            while True:
+                try:
+                    remaining = None if deadline is None else max(0, deadline - time.monotonic())
+                    job = self._request("watch", id=job_id, revision=revision,
+                                        timeout=10 if remaining is None else min(10, remaining),
+                                        request_timeout=max(15, self.timeout))
+                except SchedulerError as error:
+                    if error.code is not None:
+                        raise
+                    if deadline is not None and time.monotonic() >= deadline:
+                        if job is not None:
+                            raise JobWaitTimeout("client wait timed out; the job was NOT cancelled", job)
+                        raise
+                    # Reconnect only a read of the same accepted job. No mutation.
+                    if on_update is not None and job is not None:
+                        on_update({**job, "state": "UNKNOWN", "reason": "transport_reconciliation", "reconciling": True})
+                    if job is not None and job.get("deadline_epoch") is not None and time.time() >= job["deadline_epoch"] + 10:
+                        raise JobWaitInterrupted("deadline_during_reconciliation", job=job) from error
+                    time.sleep(min(1, max(0, deadline - time.monotonic())) if deadline else 1)
+                    continue
+                revision = job["revision"]
+                self.session_id = job["session_id"]
+                if on_update is not None:
+                    on_update(job)
+                if job["state"] in WAITABLE_TERMINAL and not job.get("reconciling"):
+                    return job
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise JobWaitTimeout("client wait timed out; the job was NOT cancelled", job)
         except KeyboardInterrupt as exc:
             raise JobWaitInterrupted("client_interrupted", session_id=self.session_id,
                                      job_id=job_id) from exc

@@ -22,7 +22,7 @@ from .server import serve
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="单机 GPU 内存队列；资源约束、可配置并发与公平调度")
+    parser = argparse.ArgumentParser(description="单机 GPU 持久队列；资源约束、截止准入与公平调度")
     commands = parser.add_subparsers(dest="command", required=True)
     rpc = commands.add_parser("rpc", help="SSH 桥接：从 stdin 接收一个请求并转发本机 socket")
     rpc.add_argument("--root", required=True)
@@ -39,7 +39,7 @@ def main() -> int:
         connection = command.add_mutually_exclusive_group(required=True)
         connection.add_argument("--root")
         connection.add_argument("--remote", help="本地 SSH 连接配置；连接云端唯一服务")
-        command.add_argument("--session", help="绑定先前响应的 session_id，拒绝跨重启重放")
+        command.add_argument("--session", help="先前 session_id；原 request/job 可跨重启查询，stop 仍校验 session")
         if op in ("submit", "enqueue"):
             command.add_argument("--spec", required=True)
         if op == "get":
@@ -68,7 +68,7 @@ def main() -> int:
             request = json.loads(payload)
             if not isinstance(request, dict):
                 raise ValueError("RPC requires a JSON object")
-            wait = request.get("op") == "wait" or (
+            wait = request.get("op") in {"wait", "watch"} or (
                 request.get("op") == "submit" and request.get("wait", True) is True)
             wait_timeout = validate_wait_timeout(request.get("timeout")) if wait else None
             response_timeout = 43210 if wait and wait_timeout is None else (

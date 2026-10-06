@@ -2,11 +2,13 @@
 
 本工具是 [统一双 Agent 长跑规范](../../双Agent长跑与题目包验收规范.md) 强制采用的 GPU 入口；题目不得另建队列或直接启动训练绕过调度。任务生命周期由 research_handoff 管理，观测/登记由 gpu_monitor 管理；资源预约不等于硬隔离，容器/provider 取消适配须另行完成真实验收。
 
-单机、单个常驻 Python 进程、内存队列，**所有接入 Agent 的全局并发由 `max_running` 配置（1–32，兼容默认 2）**。实际准入还须满足显存、计算份额、CPU、RAM 与遥测检查。支持多份作业共享同一张 GPU，也支持从配置的多张卡中选择一张。每个作业只用一张物理 GPU。多个本地客户端可通过 SSH 共用该服务；8 个长期 Agent 会话不受接入数量限制，GPU 请求统一排队。默认提交调用会阻塞到作业终态；只有需要持续跟踪进度或同时编排多个任务时才使用异步入队接口。无数据库，无自动恢复队列，无自动重试训练。
+单机、单个常驻 Python 进程、数据盘持久请求账本，**所有接入 Agent 的全局并发由 `max_running` 配置（1–32，兼容默认 2）**。实际准入须满足显存、计算份额、CPU、RAM 与遥测检查。支持同卡共享、多 GPU 选卡，每作业使用一张物理 GPU。默认提交阻塞到终态，异步接口用于多任务编排。重启恢复排队意图，永远不自动重跑已经启动的执行。
 
-用户确认的退出策略：正常退出清理本服务的作业；调度器异常退出时，已经启动的独立执行器继续监督原作业，在既定截止内完成或回收。排队请求丢失，日志和退出回执保留。
+正常停止仍定向取消并清理作业。异常退出后，`QUEUED` 保留原 request/job ID、submitted_at、bypasses、绝对截止；`STARTING/RUNNING/CANCELLING` 恢复成 `UNKNOWN` 对账状态，依据原 exit/scope 确认终态，绝不重新执行。独立执行器继续原截止监督，继承的单例锁在执行器退出前阻止第二个调度进程启动。
 
-要求 Linux 5.3+、Python 3.10+、`pidfd`、同用户 `/proc` 可读、目标主机已有 `nvidia-smi`；Python 仅用标准库。只运行可信同用户、前台本机命令及保留进程归属标记的子进程。当前没有 Docker/Harbor/provider 取消适配器，不应直接提交脱离本机进程管理的容器或远端任务。
+`requests.jsonl` 是追加、fsync、哈希链账本，每次状态迁移及插队计数变化落盘。残缺最后一行先归档再恢复有效前缀；完整行损坏拒绝启动。首次启动导入旧 session 记录，重复 request_id 对应不同执行或缺状态时拒绝迁移。跨题部署入口位于 [公共运行资料](../../ops/gpu_scheduler/README.md)。
+
+要求 Linux 5.3+、Python 3.10+、`pidfd`、cgroup v2、system manager transient unit 权限，以及 `nvidia-smi`。Python 仅用标准库。运行可信 host adapter，候选须由 provider 隔离；Docker/provider 必须接入官方容器归属及共享 job slice，不能直接提交无归属的 daemon/远端任务。
 
 ## 1. 配置与启动
 
@@ -39,24 +41,24 @@ python3 -B tools/gpu_scheduler/cli.py serve --config /mnt/data/ops/gpu-config.js
 | `gpus[].compute_units` | 1–100 的计算预约总份额；通常设置为 100 |
 | `cpu_cores / ram_mib` | 全服务 CPU、RAM 声明额度，留出宿主余量 |
 | `poll_seconds` | 调度与遥测间隔，0.05–10 秒；默认 1 秒 |
-| `service_seconds` | 普通服务阶段硬截止，默认/最大 43200 秒；持久服务使用 `persistent: true`，此字段不适用，作业与研究上限不变；重启不接续旧队列 |
+| `service_seconds` | 普通服务阶段硬截止，默认/最大 43200 秒；持久服务无服务级截止，恢复请求不延长原截止 |
 | `persistent` | 显式启用无服务级截止的 GPU 队列；应由受管 systemd 单元以 `Restart=always` 管理，作业仍受自身预算约束 |
 | `max_running` | 全局并发上限 1–32，兼容默认 2；资源不足时仍排队 |
 | `scheduling_policy` | `fifo` 保持原队列策略；`fair_share` 按 owner 当前最大资源占比和轮转次序选择，保护久等请求 |
 | `starvation_seconds` | 排队达到该秒数后优先保护，默认 300 秒；不延长排队/研究截止 |
 | `max_bypass` | 早到请求被越过多少次后获得保护，默认 2；0 严格 FIFO。fair_share 模式保护后仅允许不推迟预测开跑时刻的回填 |
-| `max_jobs` | 单次服务会话最多接收的不同请求，默认 10000；保留历史以维持幂等 |
+| `max_jobs` | 持久账本最多不同请求，默认 10000；历史不自动删除，容量按运行周期配置 |
 | `min_free_disk_mib` | 数据盘空余阈值，低于时拒绝新作业并停止已有作业；属于采样保护，不是磁盘硬 quota |
 | `external_process_policy` | 默认 `exclusive_admission` 对未知计算进程暂停新作业；显式 `shared` 允许按实时余量与预约额度共享，不停止外部进程 |
 | `shared_headroom_mib` | `shared` 准入额外保留的经验余量，默认 2048 MiB、最小 1024 MiB；补偿外部负载增长、采样间隔和碎片风险，须按本机峰值调整，不是驱动计费值或显存硬隔离 |
 
 ### 无需续期的持久服务
 
-GPU 配置设置 `persistent: true`，省略 `service_seconds` 和 `infrastructure_lease`。`status` 返回 `persistent: true`、`deadline_epoch: null`。服务没有续期定时器，各作业仍受原来的排队超时、运行上限（最多 43200 秒）和可选父级截止约束。
+GPU 配置设置 `persistent: true`，省略 `service_seconds` 和 `infrastructure_lease`。`status` 返回 `persistent: true`、`deadline_epoch: null`。服务没有续期定时器，各作业仍受原绝对截止和运行上限（最多43200秒）约束。
 
 通过 `lifecycle.py install-gpu-plan --config <plan.json>` 安装唯一 systemd 单元。plan 包含 `version: 1`、数据盘上的 `root` 和 `gpu_config`、绝对 `python` 路径、`unit_name`、明确 `authorization`、全套调度源码和 GPU 配置的 `source_sha256`。先校验 GPU 配置；plan 的 root、tmp、cache 预先由服务用户创建。单元使用 `RequiresMountsFor`、开机自启、`Restart=always`；仅 systemd 控制元数据写入 `/etc/systemd/system`，全部任务日志和缓存保留在数据盘。
 
-持久服务的维护入口为 `systemctl status/restart/stop <unit_name>.service`；显式 `systemctl stop` 不会触发自动重启。队列 CLI 的 `stop` 仅结束当前 session，systemd 会重新拉起空 session。异常退出后，旧执行器继续受原截止监督，必须取得其 cleanup 回执才能开新队列；清理失败或配置/GPU 身份冲突停止自动恢复并报错。主机重启允许以新 session 启动，旧作业不恢复、不自动重放。旧 session 客户端会被身份校验拒绝，必须先对账再连接新 session。
+持久服务维护通过 systemd。显式 stop 不会自动重启，CLI stop 仍取消本服务作业；异常重启恢复账本，原客户端可继续查询/等待原 job。服务级 stop 保留 session 校验，防止旧请求误停新服务。未知 cleanup 保留资源隔离和 UNKNOWN，等待不等于重跑授权。升级使用新不可变 release，旧 v4 首轮迁移必须先取得空闲窗口。
 
 ## 2. 提交、查询、取消
 
@@ -75,7 +77,7 @@ python3 -B tools/gpu_scheduler/cli.py list --root /mnt/data/autoresearch/gpu-que
 python3 -B tools/gpu_scheduler/cli.py get --root /mnt/data/autoresearch/gpu-queue --request-id task-a/run-001/agent-a/eval-001
 ```
 
-阻塞 `submit` 返回终态的 `id`、`session_id`、状态、退出回执及日志目录；`enqueue` 返回当前状态（通常是 `QUEUED`）。将返回值保存到本题运行记录；后续自动请求携带 `--session <session_id>`，拒绝跨服务重启误重放。
+阻塞 `submit` 返回终态的 `id`、当前 `session_id`、不可变 `origin_session_id`、状态、回执及日志目录；`enqueue` 返回当前状态。后续按原 request/job 查询，评分证据绑定 origin_session_id 对应的原目录。
 
 ```bash
 # 尖括号需替换为真实响应字段；不是可直接执行的 shell 值。
@@ -114,13 +116,12 @@ result = client.submit({
     'cpu_cores': 8,
     'ram_mib': 16384,
     'max_runtime_seconds': 1800,
-    'queue_timeout_seconds': 3600,
     # 如属于已有长程 run，应传入其原始绝对截止：
     # 'deadline_epoch': parent_run_deadline_epoch,
     # 或 'deadline_at': parent_run_hard_deadline_at（必须包含时区，两者择一）,
 })
 # submit 默认已等待到终态；不要再重复启动同一个 request_id。
-assert result['state'] in {'SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'EXPIRED', 'UNKNOWN'}
+assert result['state'] in {'SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'EXPIRED', 'INFEASIBLE', 'UNKNOWN'}
 
 # 只有需要自行编排时才异步入队，再显式等待；这里仍需传完整 spec。
 queued = client.submit_async({
@@ -133,12 +134,11 @@ queued = client.submit_async({
     'cpu_cores': 8,
     'ram_mib': 16384,
     'max_runtime_seconds': 1800,
-    'queue_timeout_seconds': 3600,
 })
 result = client.wait(queued['id'], timeout=4000)
 ```
 
-同一服务会话内 `request_id` + 相同完整 spec 返回原作业；同一 ID 改参数会拒绝。通信结果 UNKNOWN 时先 `client.get(request_id=...)`，不自动重放提交。Client 自动绑定初次连接的 session；跨重启拒绝旧 Client 请求。新 Client 新会话不继承幂等历史；再次提交旧实验前必须核对原回执，防止重复实验。
+跨 session 的 `request_id` + 相同完整声明返回原作业；同 ID 改参数拒绝。`Client.ensure(spec)` 是官方幂等意图入口，适配器不再实现 ensure_job。`wait(on_update=callback)` 通过服务端长轮询事件等待，最长10秒返回一次快照；状态不变时也可观察真实日志。连接中断仅重新读取同一个 job，服务重启不会重新提交。未知提交结果先查询原 request。
 
 可选 `gpu_uuid` 固定卡；不填则选择满足条件且当前利用率较低的卡。可选 `deadline_epoch` 为父任务的 UTC epoch 截止；实际截止同时受本次服务窗口和执行硬上限约束。等待期间若剩余预算不足以容纳完整执行上限，作业进入 `EXPIRED`，不会偷偷缩短正式协议或延长预算。
 
@@ -150,7 +150,7 @@ result = client.wait(queued['id'], timeout=4000)
 
 ```text
 本地客户端 A ── SSH 控制/等待 ─┐
-                             ├─ 云端唯一调度服务 ─ 内存队列 ─ 至多 max_running 个 GPU 作业
+                             ├─ 云端唯一调度服务 ─ 持久账本 ─ 至多 max_running 个 GPU 作业
 本地客户端 B ── SSH 控制/等待 ─┘
               8 个 Agent 按需提交，排队期间不占 GPU
 ```
@@ -174,9 +174,9 @@ jobs = client.jobs()
 # submit 默认阻塞；submit_async、get、cancel、wait、stop 与本机 Client 接口一致。
 ```
 
-`request_id` 应包含 project/run/agent/evaluation 身份，并在同一次提交重试时保持不变。两个客户端不得为不同实验使用同一个 ID；同 ID 不同 spec 会拒绝。所有变更请求不自动重试，连接失败记录 UNKNOWN，先按 request_id 查询。Client 绑定会话及首次连接的主机/账号；云端服务重启或 auth.txt 被改到另一台主机时拒绝继续操作。
+`request_id` 应包含 project/run/agent/evaluation 身份，并在同一次提交重试时保持不变。两个客户端不得为不同实验使用同一个 ID；同 ID 不同 spec 会拒绝。所有变更请求不自动重试，连接失败记录 UNKNOWN，先按 request_id 查询。作业查询和等待跨 session 使用原身份，服务重启不重新排队；RemoteClient 仍绑定首次连接的主机/账号，auth.txt 被改到另一台主机时拒绝继续操作。
 
-阻塞 `submit`/`wait` 在云端保持一个 SSH 请求，由服务端状态事件唤醒，不通过客户端高频轮询；`remote.example.json` 的 `wait_timeout_seconds` 应覆盖允许的作业/服务等待窗口。网络断开只影响本次等待，不影响已经受理的作业；先用 `request_id` 查询，不要自动重提。CLI 自动化建议保存首次响应的 `session_id`，在后续命令显式传入 `--session`。`stop` 会停止双方作业，单项停止使用 `cancel`。
+阻塞 SDK 通过官方 watch 长轮询等待，最多每10秒一次事件/心跳快照，可断线续读；适配器只透传 on_update，不能另写等待循环。网络断开不取消已受理作业，按原 request/job 读取，不能自动重提。`stop` 会停止全部作业并校验当前 session，单项停止用 `cancel`。
 
 本地 SSH 客户端需同时保留 `tools/gpu_monitor/{monitor.py,probe.py,askpass.py}` 并保持 askpass 可执行；云端使用本机 RPC 桥接，无需复制凭据或 gpu_monitor。当前受管 SSH 客户端依赖 Linux/OpenSSH，不提供跨平台桌面应用。
 
@@ -186,7 +186,11 @@ jobs = client.jobs()
 
 例如一张卡设置 44000 MiB、100 计算份额，两个作业分别请求 20000 MiB、50 份额，可以同时运行；第三个作业等待。若其中一个请求 100 份额，另一作业就要等它释放。CPU/RAM 声明总量也须满足配置。
 
-作业校验分为两层：格式、路径、命令、非法 GPU、请求资源超过所有配置 GPU、预算不可能满足、数据盘或权限问题属于**静态校验失败**，立即返回错误且不入队；当前 GPU 槽位、可用显存、计算份额、CPU/RAM 或可信遥测暂时不足属于**运行时资源不足**，校验通过后创建 `QUEUED` 作业并记录排队原因。排队仍受 `queue_timeout_seconds` 和父级截止时间约束，超时返回 `EXPIRED`，不会把合法任务误报为校验失败。
+格式、路径、命令、非法 GPU、声明超过配置容量、数据盘或权限错误立即拒绝。合法请求按 `latest_start = deadline_epoch - max_runtime_seconds` 准入：已有作业强制运行上限及前方排队预约预测超出 latest_start，立即返回持久 `INFEASIBLE` 和预测值；遥测缺失或未知外部使用不凭空判定不可行。排队期间持续复核，真正剩余预算不足才 `EXPIRED`。队首立即预约，回填必须不推迟其预测启动。新请求声明绝对 `deadline_at` 或 `deadline_epoch`，省略时由服务固定不超过12h的窗口；旧 `queue_timeout_seconds` 仅兼容解析，不参与截止。
+
+生产执行使用 system manager 的 job slice/scope，执行前核验 cgroup v2 `memory.max/high/swap.max`、`cpu.max`；Docker main/sidecars 通过可信 provider 加入同一父 slice，注册时核验真实 cgroup。`ram_mib` 是准入预约，`memory_max_mib` 是独立总内存硬限，`memory_high_mib` 是总内存节流阈值，CPU 使用 CPUQuota。内存硬限包含 page cache；anon 只有采样峰值，`memory.peak` 是内核总峰值。GPU 显存预约与 CU 仍不是硬隔离，设备整体利用率不冒充逐作业 CU 峰值。
+
+至少 `profile_min_samples`（默认3）个成功且测量完整、无 OOM 的同 owner/job_class 作业，后续提交按 anon+shmem+kernel 采样峰值加25%与256MiB余量校准 RAM；GPU实测峰值加10%与256MiB余量。校准只在受理前减少预约，原声明单独存储用于幂等，执行总内存硬限保留。显式 job_class 必须在方法/数据规模/协议变化时换版本；generic 旧作业只共享完整 command 相同的画像。样本不足采用保守声明。建议值与是否应用通过 suggested_resources 留证，不预先声称5–6并发。
 
 分配检查同时考虑实时已用显存和每个运行作业尚未实际分配的预约显存，防止延迟分配的任务被提前借走显存。发现未知 GPU 计算进程、遥测过期/缺失、显存读数不可用、容量配置超过实际容量时，暂停向对应卡分配；不会杀死未知进程。遥测不与外部启动程序原子联动，仍应把授权任务统一接入本服务。
 
@@ -200,7 +204,7 @@ jobs = client.jobs()
 
 等待超过 `starvation_seconds` 或被后续请求越过 `max_bypass` 次的作业进入优先保护，受保护作业之间按到达时间排序。资源尚未释放时，后续任务仍可回填，但必须按已执行的硬运行上限和清理余量计算，证明不会推迟受保护请求的预测开跑时间；资源互不影响的其他 GPU 也可继续使用。没有可信释放预测（外部任务、UNKNOWN、清理未确认）时，只放行仍为受保护请求保留完整预约空间的任务，不借走未知资源。未知外部负载、虚报资源或物理容量不足都不能保证开跑时刻；无抢占，不取消其他任务。
 
-`get/list` 对排队请求增加 `queue.wait_seconds`、`protected`、`latest_start_epoch`、`projected_start_epoch`、`deadline_risk`。预测仅计算当前运行作业的硬上限，未包含前方排队任务和未来外部负载，因此是诊断值，不能当作承诺；没有可信预测时为 null。排队超时和父级截止仍如实产生 EXPIRED，不静默延长。
+`get/list` 提供 `queue.wait_seconds`、`protected`、`latest_start_epoch`、`projected_start_epoch`、`deadline_risk`。预测包含运行作业硬上限、清理余量及前方排队预约；未来外部负载可能变化，没有可信预测时为 null。预测不满足截止产生 INFEASIBLE，截止剩余不足产生 EXPIRED，均不延长原预算。
 
 增加并发必须同时核验主机资源。建议共享部署先设 `max_running: 4`，按实测设置 CPU/RAM/GPU 总额；4 只是上限。例如 32 GiB 主机给调度器 24 GiB RAM 后，8 GiB 的请求最多 3 份，剩余槽可供较小请求。仅改并发数而保持计算总份额50、每作业25和RAM总额16GiB、每作业8GiB，仍只能运行2份。
 
@@ -223,7 +227,7 @@ QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
 - 调度器与执行器同时被强杀、进程清除归属标记、跨 UID 或经外部 daemon 启动的作业超出本机合作式保护范围。不能把本工具当作恶意代码沙箱。服务 socket 不应直接暴露给公开 solver；由可信题目适配器代理。所有同用户客户端可查看/取消所有作业，没有租户权限隔离。
 - 清理一般需要少量时间；发出超时信号不等于内核立即回收。服务退出先等待已经发出的执行器启动与异常回收确定结果，保留继承锁；随后对正常执行器最多观察 8 秒，残留执行器继续持锁，直到原截止及清理完成。
 
-每次启动创建独立 `session_id`，不读旧文件重建队列。`status.json` 是历史证据，调度器死亡后其中的 QUEUED/RUNNING 可能已过时；原执行器的真实 `exit.json` 更晚写入。旧排队请求必须由调用方在核对后重新提交。
+每次启动有新的 session_id，并从持久账本恢复排队。status.json 是快照，执行终态依据真实 exit.json 和 scope 对账；UNKNOWN 对账中不重跑。历史评分与轨迹始终绑定 origin_session_id，不把新 session 当新实验。
 
 ```text
 <root>/

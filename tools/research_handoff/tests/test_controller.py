@@ -24,9 +24,11 @@ SCRATCH = ROOT/'incidents/controller-hardening/scratch'
 SCRATCH.mkdir(parents=True, exist_ok=True)
 PREAMBLE = """import os,json,time
 G=int(os.environ['AUTORESEARCH_CONTEXT_GENERATION'])
+with open(os.environ['AUTORESEARCH_CONTEXT_FILE']) as context_stream:
+ C=json.load(context_stream).get('conversation_id') or 'chat-'+str(G)
 def emit(kind, **fields):
  print(json.dumps(dict(fields,autoresearch=kind,generation=G)),flush=True)
-emit('context.usage',used_tokens=10,conversation_id='chat-'+str(G))
+emit('context.usage',used_tokens=10,conversation_id=C)
 emit('heartbeat')
 """
 
@@ -132,6 +134,67 @@ emit('turn.completed',credit=True)
         first=json.loads((self.run/'turns/000001/exit.json').read_text())
         self.assertEqual(first['returncode'],7)
         self.assertFalse(first['credited'])
+
+    def test_gpu_queue_wait_stays_in_same_round_and_excludes_credit(self):
+        code = PREAMBLE + """emit('gpu.state',request_id='same-request',job_id='same-job',state='QUEUED')
+time.sleep(.65)
+emit('gpu.state',request_id='same-request',job_id='same-job',state='SESSION_CHANGED')
+time.sleep(.1)
+emit('gpu.state',request_id='same-request',job_id='same-job',state='RUNNING')
+emit('heartbeat')
+time.sleep(.12)
+emit('gpu.state',request_id='same-request',job_id='same-job',state='SUCCEEDED')
+emit('turn.completed',credit=True)
+"""
+        self.init(code, budget={'window_seconds':.1,'hard_limit_seconds':3},
+                  turn={'seconds':.3}, heartbeat={'stale_after_seconds':.2})
+        result = self.invoke('run', '--run-id', 'test')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.read()
+        self.assertEqual(state['turn']['number'], 1)
+        self.assertEqual(state['retry']['used'], 0)
+        self.assertGreater(state['budget']['runtime_seconds'], .7)
+        self.assertLess(state['budget']['active_seconds'], .4)
+        self.assertGreater(state['turn']['gpu_wait']['excluded_seconds'], .7)
+
+    def test_gpu_queue_wait_preserves_wall_hard_deadline(self):
+        code = PREAMBLE + """emit('gpu.state',request_id='same-request',state='QUEUED')
+time.sleep(10)
+"""
+        self.init(code, budget={'window_seconds':.1,'hard_limit_seconds':.45},
+                  turn={'seconds':.2}, heartbeat={'stale_after_seconds':.1})
+        result = self.invoke('run', '--run-id', 'test')
+        self.assertEqual(result.returncode, 3, result.stderr)
+        state = self.read()
+        self.assertEqual(state['turn']['number'], 1)
+        self.assertEqual(state['stop_reason'], 'hard_limit')
+        self.assertEqual(state['retry']['used'], 0)
+        self.assertLess(state['budget']['active_seconds'], .2)
+
+    def test_gpu_infeasible_exit_is_infrastructure_without_retry(self):
+        code = PREAMBLE + """emit('gpu.state',request_id='same-request',state='INFEASIBLE')
+raise SystemExit(7)
+"""
+        self.init(code)
+        result = self.invoke('run', '--run-id', 'test', '--no-guard')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.read()
+        self.assertEqual(state['status'], 'PAUSED')
+        self.assertEqual(state['turn']['number'], 1)
+        self.assertEqual(state['turn']['reason'], 'gpu_infeasible')
+        self.assertEqual(state['turn']['failure_class'], 'infrastructure')
+        self.assertEqual(state['retry']['used'], 0)
+
+    def test_gpu_infeasible_can_continue_cpu_work_in_the_same_round(self):
+        code = PREAMBLE + """emit('gpu.state',request_id='same-request',state='INFEASIBLE')
+time.sleep(.15)
+emit('turn.completed',credit=True)
+"""
+        self.init(code, budget={'window_seconds':.1})
+        result = self.invoke('run', '--run-id', 'test', '--no-guard')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.read()['status'], 'COMPLETED')
+        self.assertEqual(self.read()['turn']['number'], 1)
 
     def test_agent_reported_failure_retries_into_a_successful_turn(self):
         marker=self.base/'agent-failed-once'
@@ -1051,15 +1114,69 @@ time.sleep(.2);emit('turn.completed',credit=True)
         self.assertEqual(self.invoke('recover','--run-id','test').returncode,0)
         self.assertEqual((self.run/'exit.json').read_bytes(),before)
 
-    def test_context_generation_rejects_old_conversation_after_reopen(self):
+    def test_context_generation_reuses_conversation_unless_explicitly_replaced(self):
         self.init()
         self.assertEqual(self.invoke('context','report','--run-id','test','--generation','0',
                          '--conversation-id','old','--used-tokens','100').returncode,0)
         summary=self.base/'summary.md';summary.write_text('new conversation')
         self.assertEqual(self.invoke('context','reopen','--run-id','test','--generation','0',
                          '--summary-file',summary).returncode,0)
-        self.assertNotEqual(self.invoke('context','report','--run-id','test','--generation','1',
+        state = self.read()
+        self.assertEqual(state['context']['conversation_id'], 'old')
+        self.assertEqual(self.invoke('context','report','--run-id','test','--generation','1',
                             '--conversation-id','old','--used-tokens','1').returncode,0)
+        self.assertEqual(self.invoke('context','reopen','--run-id','test','--generation','1',
+                         '--conversation-id','new','--summary-file',summary).returncode,0)
+        self.assertNotEqual(self.invoke('context','report','--run-id','test','--generation','2',
+                            '--conversation-id','old','--used-tokens','1').returncode,0)
+        self.assertEqual(self.invoke('context','report','--run-id','test','--generation','2',
+                            '--conversation-id','new','--used-tokens','1').returncode,0)
+
+    def test_repeated_method_summary_emits_bounded_no_progress_signal(self):
+        self.init()
+        run = controller.LongRunController(self.run, with_guard=False)
+        for turn in (1, 2, 3):
+            run.state['turn']['number'] = turn
+            run.record_method_summary({'method_summary': 'same method'})
+        run.state['turn']['number'] = 4
+        run.record_method_summary({'method_summary': 'changed method'})
+        run.save()
+        progress = self.read()['progress']
+        self.assertGreaterEqual(progress['method_summary_observations'], 3)
+        self.assertEqual(progress['consecutive_same_method_summary'], 1)
+        self.assertFalse(progress['no_progress'])
+        self.assertEqual(progress['no_progress_alerts'], 1)
+        events = [json.loads(line) for line in (self.run / 'events.jsonl').read_text().splitlines()]
+        alerts = [item for item in events if item['event'] == 'agent.no_progress']
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]['consecutive'], 3)
+
+    def test_repeated_context_summary_emits_no_progress_signal(self):
+        self.init()
+        summary = self.base / 'summary.md'
+        summary.write_text('Retained the original method')
+        for generation in (0, 1, 2):
+            self.assertEqual(self.invoke('context', 'reopen', '--run-id', 'test',
+                             '--generation', str(generation), '--summary-file', summary).returncode, 0)
+        state = self.read()
+        self.assertEqual(state['progress']['context_summary_observations'], 3)
+        self.assertEqual(state['progress']['consecutive_same_context_summary'], 3)
+        self.assertTrue(state['progress']['no_progress'])
+        events = [json.loads(line) for line in (self.run / 'events.jsonl').read_text().splitlines()]
+        alerts = [item for item in events if item['event'] == 'agent.no_progress' and item.get('source') == 'context_summary']
+        self.assertEqual(len(alerts), 1)
+
+    def test_persisted_exit_records_stop_target_boundary(self):
+        self.init(budget={'window_seconds': 36000, 'hard_limit_seconds': 36001})
+        state = self.read()
+        state.update(status='STOPPED', stop_reason='operator_stop', resume_required=True)
+        state['budget']['active_seconds'] = 35999.0
+        longrun.save_state(self.run, state)
+        controller.persist_exit(self.run, state)
+        result = json.loads((self.run / 'exit.json').read_text())
+        self.assertFalse(result['target_reached'])
+        self.assertFalse(result['target_reached_at_stop'])
+        self.assertTrue(result['resume_required'])
 
     def test_background_resume_uses_new_guard_without_resetting_deadline(self):
         self.init(PREAMBLE+"time.sleep(.2);emit('turn.completed',credit=True)",budget={'window_seconds':.5})

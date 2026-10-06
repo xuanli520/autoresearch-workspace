@@ -8,5 +8,8 @@
   "cpu_cores": 8,
   "ram_mib": 16384,
   "max_runtime_seconds": 1800,
-  "queue_timeout_seconds": 3600
+  "deadline_at": "2026-10-07T04:00:00+08:00",
+  "job_class": "train-protocol-v1",
+  "memory_max_mib": 16384,
+  "memory_high_mib": 14745
 }

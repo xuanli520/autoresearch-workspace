@@ -129,6 +129,27 @@ Docker/containerd 应使用现有开机启用、`Restart=always` 的系统服务
 
 ## Agent 接入协议
 
+### GPU 作业等待协议
+
+GPU 提交、等待、重连和事件透传由官方 `gpu_scheduler` SDK 负责。任务适配器不得实现
+`ensure_job`、固定 queue timeout 或私有轮询器。适配器把 SDK 返回的同一个
+`request_id`/`job_id` 快照传给 `agent_protocol.gpu_state(job)`；helper 会产生
+`gpu.state` 事件，事件至少包含 `state`、`request_id`、`job_id`、`session_id`，并可包含
+`reason`、`scheduler_root`、`queue`、`projected_start`、`latest_start`、`sequence` 和
+`reconciling`。事件不得生成新的 request。
+
+控制器在当前轮次内将 `QUEUED`、`STARTING`、对账中的 `UNKNOWN` 和
+`SESSION_CHANGED` 置为 `WAITING_GPU`。等待区间保留在该轮的 `gpu-wait.json`，不计
+有效研究时间、不消耗 Agent retry，也不产生新的轮次；恢复必须继续查询原 request。
+worker、controller 和 guard 均按扣除等待后的单轮执行时间判断截止，原 run 墙钟硬截止
+仍生效。等待结束的 `INFEASIBLE`/`EXPIRED` 回到当前 Agent 调用，Agent 可继续 CPU 工作或
+调整实验；适配器若因这些状态退出，控制器将其归为 `failure_class: infrastructure` 并
+暂停。对账失败的 `UNKNOWN` 也暂停，不按 `agent_exit_nonzero` 自动重试。适配器可显式
+报告 `turn.failed`，其 `reason` 为 `gpu_infeasible`、`gpu_expired`、`gpu_unknown`、
+`gpu_reconciling` 或 `gpu_session_changed`，同时声明 `failure_class: infrastructure`。
+调度器服务端的状态推送应每 10 秒内至少更新一次；客户端断线时先查询原 request，不能
+以 transport timeout 推断作业失败。
+
 复制或导入 [agent_protocol.py](templates/agent_protocol.py)。每轮读取 `AUTORESEARCH_CONTEXT_FILE`；其中含 generation、conversation_id、上一代完整 handoff、预算和本轮目录。
 
 ```python
@@ -136,7 +157,7 @@ from agent_protocol import context, heartbeat, context_usage, turn_complete
 
 ctx = context()
 conversation = ctx.get("conversation_id") or create_new_conversation(ctx.get("handoff"))
-# 同 generation 后续轮必须恢复同一 conversation；重开时必须使用新 ID。
+# 同 generation 后续轮必须恢复同一 conversation；未显式指定新 ID 时，压缩/重开后继续沿用已知会话。
 context_usage(used_tokens=actual_total_tokens, conversation_id=conversation)
 heartbeat()
 # 执行任务，实际进展循环中持续 heartbeat，并在每次模型返回后报告总上下文占用。
@@ -171,7 +192,7 @@ python3 -B controller.py --remote connection.json context reopen \
   --run-id trial-01 --generation 4 --conversation-id new-chat-05 --summary-file handoff.md
 ```
 
-本地摘要通过 SSH 请求传到云端，不要求两台机器共享路径。compact 在未请求压缩时需 `--force`；reopen 用于主动结束旧会话。两者都创建不覆盖的 `snapshot-XXXX.json`，保存原 generation、会话、摘要 SHA-256、预算和轮次索引；原 stdout/stderr 保留，适配器自己的完整 transcript 也应写入 turn 目录。generation 是控制器代际，不等同于供应商的 conversation ID；下一代禁止复用上一代 ID。
+本地摘要通过 SSH 请求传到云端，不要求两台机器共享路径。compact 在未请求压缩时需 `--force`；reopen 用于主动结束旧会话。两者都创建不覆盖的 `snapshot-XXXX.json`，保存原 generation、会话、摘要 SHA-256、预算和轮次索引；原 stdout/stderr 保留，适配器自己的完整 transcript 也应写入 turn 目录。generation 是控制器代际，不等同于供应商的 conversation ID；未传 `--conversation-id` 时，下一代沿用上一代已知会话，只有显式传入新 ID 才切换供应商会话。同一 generation 内仍禁止切换会话 ID。
 
 旧 generation 的迟到操作会被拒绝。运行中的状态锁拒绝外部压缩/重开；摘要损坏或 hash 不符拒绝启动。重开不清除 STOP、失败状态或 resume 要求；若原状态为 STOPPED/FAILED/PAUSED，仍须显式 `start --resume`。COMPLETED/EXPIRED 不可重开预算。
 

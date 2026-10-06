@@ -76,5 +76,5 @@ class RemoteClient(Client):
             if isinstance(reply, dict) and reply.get("code") == "WAIT_INTERRUPTED":
                 raise JobWaitInterrupted(reply["reason"], job=reply["job"])
             raise SchedulerError(reply.get("error", "remote request failed") if isinstance(reply, dict)
-                                 else "invalid SSH response")
+                                 else "invalid SSH response", code=reply.get("code", "REJECTED") if isinstance(reply, dict) else None)
         return reply["result"]

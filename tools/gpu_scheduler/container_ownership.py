@@ -151,9 +151,12 @@ def register_container(container_id, docker_host, project):
     pid = inspected["State"]["Pid"]
     ticks = processes.process_start_ticks(pid)
     boot = processes.boot_id()
+    groups = _container_cgroups(pid, exact_id)
     if (not inspected["State"].get("Running") or not processes.pid_matches(pid, ticks, boot)
-            or not _container_cgroups(pid, exact_id)):
+            or not groups):
         raise ValueError("Docker container has no verified live process scope")
+    from .resource_limits import attest_container
+    resource_limits = attest_container(inspected, groups)
     receipts = directory / "containers"
     receipts.mkdir(mode=0o700, exist_ok=True)
     if not _trusted(receipts, directory=True):
@@ -163,7 +166,8 @@ def register_container(container_id, docker_host, project):
         raise ValueError("container receipt cannot be a symlink")
     atomic_json(target, {"version": 1, "job_id": launch["id"], "token": launch["token"],
                          "container_id": exact_id, "project": project, "docker_host": docker_host,
-                         "init_pid": pid, "init_start_ticks": ticks, "boot_id": boot})
+                         "init_pid": pid, "init_start_ticks": ticks, "boot_id": boot,
+                         "resource_limits": resource_limits})
     return {"registered": True, "job_id": launch["id"], "container_id": exact_id}
 
 

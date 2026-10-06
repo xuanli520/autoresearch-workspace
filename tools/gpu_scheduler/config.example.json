@@ -10,6 +10,9 @@
     }
   ],
   "cpu_cores": 16,
+  "execution_backend": "systemd",
+  "resource_sample_seconds": 1,
+  "profile_min_samples": 3,
   "ram_mib": 65536,
   "poll_seconds": 1,
   "service_seconds": 43200,

@@ -21,6 +21,18 @@ def heartbeat(**fields: Any) -> None:
     emit('heartbeat', **fields)
 
 
+def gpu_state(job: dict[str, Any], **fields: Any) -> None:
+    """Forward an official scheduler snapshot; never submit or poll a job here."""
+    names = ('request_id', 'job_id', 'state', 'session_id', 'reason', 'scheduler_root',
+             'queue', 'sequence', 'projected_start', 'latest_start', 'reconciling')
+    snapshot = {key: job[key] for key in names if key in job}
+    if 'job_id' not in snapshot and 'id' in job:
+        snapshot['job_id'] = job['id']
+    if 'sequence' not in snapshot and 'revision' in job:
+        snapshot['sequence'] = job['revision']
+    emit('gpu.state', **{**snapshot, **fields})
+
+
 def context_usage(used_tokens: int, *, conversation_id: str, **fields: Any) -> None:
     emit('context.usage', used_tokens=used_tokens, conversation_id=conversation_id, **fields)
 

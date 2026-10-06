@@ -110,7 +110,7 @@ class FairnessTests(unittest.TestCase):
         scheduler = Scheduler(self.cfg, -1)
         names = ["a-1", "a-2", "a-3", "a-4", "b-1", "c-1", "d-1"]
         for name in names:
-            scheduler.submit({**self.job(name, name[0])["spec"], "queue_timeout_seconds": 1})
+            scheduler.submit(self.job(name, name[0])["spec"])
         launched = []
 
         def launch(job, gpu):
@@ -124,8 +124,8 @@ class FairnessTests(unittest.TestCase):
         self.assertEqual(len(launched), 4)
         queued = next(j for j in scheduler.jobs.values() if j["state"] == "QUEUED")
         info = scheduler.view(queued)["queue"]
-        self.assertTrue(info["deadline_risk"])
-        self.assertGreater(info["projected_start_epoch"], info["latest_start_epoch"])
+        self.assertFalse(info["deadline_risk"])
+        self.assertLess(info["projected_start_epoch"], info["latest_start_epoch"])
 
     def test_sustained_short_jobs_do_not_postpone_protected_large_job(self):
         scheduler = Scheduler(self.cfg, -1)
@@ -159,11 +159,11 @@ class FairnessTests(unittest.TestCase):
         scheduler = Scheduler(self.cfg, -1)
         now = time.monotonic()
         queued = scheduler.get(scheduler.submit({**self.job("expiring")["spec"],
-                                                "queue_timeout_seconds": 1})["id"])
+                                                "deadline_epoch": time.time() + 30.1})["id"])
         with patch("time.monotonic", return_value=now + 2):
             scheduler.tick(self.snapshot)
         self.assertEqual(queued["state"], "EXPIRED")
-        self.assertEqual(queued["reason"], "queue_timeout")
+        self.assertEqual(queued["reason"], "insufficient_remaining_budget")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ except ImportError:  # standalone scheduler release
 
 PROCESS_SOURCE = Path(processes.__file__).resolve()
 
-TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "EXPIRED"}
+TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "EXPIRED", "INFEASIBLE"}
 WAITABLE_TERMINAL = TERMINAL | {"UNKNOWN"}
 MAX_MESSAGE = 1024 * 1024
 
@@ -158,7 +158,8 @@ def validate_config(raw: dict[str, Any], *, local_test: bool = False) -> dict[st
     fields(raw, {"version", "root", "data_mount", "gpus", "cpu_cores", "ram_mib"},
            {"poll_seconds", "service_seconds", "persistent", "max_running", "scheduling_policy",
             "starvation_seconds", "max_bypass", "max_jobs", "min_free_disk_mib",
-            "external_process_policy", "shared_headroom_mib", "infrastructure_lease", "data_mounts"})
+            "external_process_policy", "shared_headroom_mib", "infrastructure_lease", "data_mounts",
+            "execution_backend", "systemd_user", "resource_sample_seconds", "profile_min_samples"})
     if type(raw["version"]) is not int or raw["version"] != 1:
         raise ValueError("version must be 1")
     cfg = dict(raw, root=absolute(raw["root"], "root"), local_test=local_test)
@@ -187,6 +188,17 @@ def validate_config(raw: dict[str, Any], *, local_test: bool = False) -> dict[st
         number(lease["deadline_epoch"], "infrastructure_lease.deadline_epoch", 1)
         maximum = 172800
     cfg["persistent"] = persistent
+    cfg["execution_backend"] = raw.get("execution_backend", "process" if local_test else "systemd")
+    if cfg["execution_backend"] not in {"process", "systemd"}:
+        raise ValueError("execution_backend must be process or systemd")
+    if not local_test and cfg["execution_backend"] != "systemd":
+        raise ValueError("production execution requires systemd resource enforcement")
+    cfg["systemd_user"] = raw.get("systemd_user", False)
+    if type(cfg["systemd_user"]) is not bool:
+        raise ValueError("systemd_user must be a boolean")
+    cfg["resource_sample_seconds"] = number(raw.get("resource_sample_seconds", 1),
+                                              "resource_sample_seconds", .05, 10)
+    cfg["profile_min_samples"] = integer(raw.get("profile_min_samples", 3), "profile_min_samples", 1, 100)
     cfg["service_seconds"] = (None if persistent else
                                number(raw.get("service_seconds", 43200), "service_seconds", .1, maximum))
     cfg["max_bypass"] = integer(raw.get("max_bypass", 2), "max_bypass", 0, 100)
@@ -240,7 +252,8 @@ def deadline_timestamp(value: str) -> float:
 def validate_job(raw: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     fields(raw, {"request_id", "owner", "command", "cwd", "memory_mib", "compute_units",
                  "max_runtime_seconds"},
-           {"cpu_cores", "ram_mib", "queue_timeout_seconds", "deadline_epoch", "deadline_at", "gpu_uuid"})
+           {"cpu_cores", "ram_mib", "queue_timeout_seconds", "deadline_epoch", "deadline_at", "gpu_uuid",
+            "job_class", "memory_max_mib", "memory_high_mib"})
     spec = dict(raw)
     if "deadline_at" in spec:
         if "deadline_epoch" in spec:
@@ -248,6 +261,7 @@ def validate_job(raw: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         spec["deadline_epoch"] = deadline_timestamp(spec.pop("deadline_at"))
     for key in ("request_id", "owner"):
         label(spec[key], key)
+    spec["job_class"] = label(spec.get("job_class", "generic"), "job_class")
     cmd = spec["command"]
     if not isinstance(cmd, list) or not cmd or any(not isinstance(x, str) or "\0" in x for x in cmd):
         raise ValueError("command must be an argv list")
@@ -264,8 +278,15 @@ def validate_job(raw: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     integer(spec["memory_mib"], "memory_mib")
     integer(spec["compute_units"], "compute_units", 1, 100)
     number(spec["max_runtime_seconds"], "max_runtime_seconds", .1, 43200)
-    spec["queue_timeout_seconds"] = number(spec.get("queue_timeout_seconds", 3600),
-                                            "queue_timeout_seconds", .1, 43200)
+    # Legacy declarations remain readable for immutable request reconciliation.
+    # Only the original absolute deadline limits queue admission.
+    if "queue_timeout_seconds" in spec:
+        number(spec["queue_timeout_seconds"], "queue_timeout_seconds", .1, 43200)
+    spec["memory_max_mib"] = integer(spec.get("memory_max_mib", spec["ram_mib"]), "memory_max_mib")
+    spec["memory_high_mib"] = integer(spec.get("memory_high_mib", max(1, int(spec["memory_max_mib"] * .9))),
+                                     "memory_high_mib")
+    if spec["memory_high_mib"] > spec["memory_max_mib"]:
+        raise ValueError("memory_high_mib must not exceed memory_max_mib")
     if "deadline_epoch" in spec:
         number(spec["deadline_epoch"], "deadline_epoch", 1)
     eligible = [g for g in config["gpus"] if spec.get("gpu_uuid", g["uuid"]) == g["uuid"]]

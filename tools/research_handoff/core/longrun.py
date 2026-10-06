@@ -23,11 +23,14 @@ from typing import Any, Iterator
 
 try:
     from .processes import boot_id, pid_matches
+    from .gpu_wait import gpu_wait_seconds
 except ImportError:
     from processes import boot_id, pid_matches
+    from gpu_wait import gpu_wait_seconds
 
 
 SCHEMA_VERSION = 2
+NO_PROGRESS_DUPLICATE_THRESHOLD = 3
 CONTROLLER_NAME = "autoresearch-longrun"
 RUN_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
 COMPLETION_TERMINAL_STATES = frozenset({
@@ -333,6 +336,19 @@ def new_state(config: dict[str, Any], run: str, run_dir: Path) -> dict[str, Any]
         "resume_required": False,
         "completion": {"phase": "NOT_STARTED", "contract": "completion.contract.json", "receipt": None},
         "error": None,
+        "target_reached_at_stop": None,
+        "progress": {
+            "last_method_summary_sha256": None,
+            "last_method_summary_turn": None,
+            "method_summary_observations": 0,
+            "consecutive_same_method_summary": 0,
+            "last_context_summary_sha256": None,
+            "last_context_summary_generation": None,
+            "context_summary_observations": 0,
+            "consecutive_same_context_summary": 0,
+            "no_progress": False,
+            "no_progress_alerts": 0,
+        },
         "budget": {
             "mode": config["budget"]["mode"],
             "window_seconds": config["budget"]["window_seconds"],
@@ -435,6 +451,34 @@ def append_event(run_dir: Path, event: str, **fields: Any) -> dict[str, Any]:
     return record
 
 
+def record_progress_summary(run_dir: Path, state: dict[str, Any], summary: Any, *, source: str) -> None:
+    """Flag repeated summaries across turns or generations without changing credit."""
+    if not isinstance(summary, str) or not summary.strip():
+        return
+    unit_name = 'turn' if source == 'method_summary' else 'generation'
+    unit = state['turn']['number'] if unit_name == 'turn' else state['context']['generation']
+    progress = state.setdefault('progress', {})
+    unit_key = f'last_{source}_{unit_name}'
+    if progress.get(unit_key) == unit:
+        return  # Repeated events from one turn are one observation.
+    digest_key = f'last_{source}_sha256'
+    count_key = f'consecutive_same_{source}'
+    digest = hashlib.sha256(summary.strip().encode('utf-8')).hexdigest()
+    consecutive = int(progress.get(count_key, 0)) + 1 if progress.get(digest_key) == digest else 1
+    observations_key = f'{source}_observations'
+    progress.update({digest_key: digest, unit_key: unit, count_key: consecutive,
+                     observations_key: int(progress.get(observations_key, 0)) + 1})
+    progress['no_progress'] = any(int(progress.get(f'consecutive_same_{name}', 0)) >=
+                                  NO_PROGRESS_DUPLICATE_THRESHOLD
+                                  for name in ('method_summary', 'context_summary'))
+    if consecutive == NO_PROGRESS_DUPLICATE_THRESHOLD:
+        progress['no_progress_alerts'] = int(progress.get('no_progress_alerts', 0)) + 1
+        append_event(run_dir, 'agent.no_progress', turn=state['turn']['number'],
+                     generation=state['context']['generation'], source=source,
+                     summary_sha256=digest, consecutive=consecutive,
+                     threshold=NO_PROGRESS_DUPLICATE_THRESHOLD)
+
+
 def active_elapsed(state: dict[str, Any], now_epoch: float | None = None) -> float:
     b = state["budget"]
     pending = 0.0
@@ -445,6 +489,9 @@ def active_elapsed(state: dict[str, Any], now_epoch: float | None = None) -> flo
             pending = max(0, time.monotonic() - b["active_monotonic"])
         else:
             pending = max(0, (time.time() if now_epoch is None else now_epoch) - epoch(b["active_started_at"]))
+        observed_monotonic = (time.monotonic() if now_epoch is None else
+                              b.get('active_monotonic', 0) + pending)
+        pending = max(0, pending - gpu_wait_seconds(state.get('turn', {}), observed_monotonic))
     return float(b["active_seconds"]) + pending
 
 
@@ -552,7 +599,7 @@ def begin_run(state: dict[str, Any], now: str | None = None) -> None:
         deadline = min(epoch(now) + b["hard_limit_seconds"], epoch(state["declared_deadline"]))
         b["hard_deadline_at"] = _datetime.datetime.fromtimestamp(deadline, _datetime.timezone.utc).isoformat()
     state.update(status="FINALIZING" if state.get("completion", {}).get("phase") == "FINALIZING" else "RUNNING",
-                 stop_reason=None, error=None, attempt=state["attempt"] + 1)
+                 stop_reason=None, error=None, target_reached_at_stop=None, attempt=state["attempt"] + 1)
 
 
 def finish_active_interval(state: dict[str, Any], ended_at: str | None = None, *, credit: bool = True,
@@ -560,13 +607,20 @@ def finish_active_interval(state: dict[str, Any], ended_at: str | None = None, *
     b = state["budget"]
     if b.get("active_started_at") is None:
         return 0.0
+    now = time.monotonic()
     elapsed = max(0, active_elapsed(state, epoch(ended_at) if ended_at else None) - b["active_seconds"])
+    observed_end = now
+    if duration is not None and b.get('active_monotonic') is not None:
+        observed_end = min(now, b['active_monotonic'] + finite_number(duration, 'duration'))
+    excluded = gpu_wait_seconds(state.get('turn', {}), observed_end)
+    runtime = elapsed + excluded if b.get('boot_id') == boot_id() else 0.0
     if duration is not None:
-        elapsed = min(elapsed, finite_number(duration, "duration"))
+        runtime = min(runtime, finite_number(duration, "duration"))
+        elapsed = min(elapsed, max(0, runtime - excluded))
     confirmed = elapsed if credited_duration is None else finite_number(credited_duration, "credited_duration")
     if not 0 <= confirmed <= elapsed:
         raise ControllerError("reported credit must be between zero and observed runtime")
-    b["runtime_seconds"] += elapsed
+    b["runtime_seconds"] += runtime
     if credit:
         b["active_seconds"] += confirmed
     b["active_started_at"] = b["active_monotonic"] = None
@@ -608,7 +662,7 @@ def _rotate_context(run_dir: Path, summary: str, *, reason: str, conversation_id
         if conversation_id is not None and (not isinstance(conversation_id, str) or not conversation_id.strip()):
             raise ControllerError("conversation_id must be non-empty")
         if conversation_id is not None and conversation_id == ctx.get("conversation_id"):
-            raise ControllerError("a new generation must use a new conversation_id")
+            raise ControllerError("an explicit replacement conversation_id must differ from the current ID")
         generation = ctx["generation"] + 1
         # Skip an uncommitted snapshot left by a crash; never overwrite history.
         while (run_dir / "context" / f"snapshot-{generation:04d}.json").exists():
@@ -622,8 +676,14 @@ def _rotate_context(run_dir: Path, summary: str, *, reason: str, conversation_id
                     "last_turn": state["turn"]["number"], "logs": "turns/"}
         atomic_json(run_dir / relative, snapshot)
         atomic_json(run_dir / "context/latest.json", snapshot)
-        ctx.update(previous_conversation_id=ctx.get('conversation_id'),
-                   generation=generation, conversation_id=conversation_id, used_tokens=0,
+        previous_conversation_id = ctx.get('conversation_id')
+        # A context generation is a controller boundary, not necessarily a
+        # provider conversation boundary. Preserve a known provider session
+        # unless the caller explicitly supplies a replacement ID.
+        next_conversation_id = (previous_conversation_id if conversation_id is None
+                                else conversation_id)
+        ctx.update(previous_conversation_id=previous_conversation_id,
+                   generation=generation, conversation_id=next_conversation_id, used_tokens=0,
                    input_tokens=0, output_tokens=0, state="OPEN", limit_exceeded=False,
                    guard_triggered_at=None, last_snapshot=relative,
                    last_report_at=None, last_reopen_at=utc_now(), guard_boot_id=None,
@@ -631,6 +691,7 @@ def _rotate_context(run_dir: Path, summary: str, *, reason: str, conversation_id
                    completion_grace_deadline_monotonic=None, completion_grace_deadline_at=None)
         if state["status"] in ("WAITING_COMPACTION", "CONTEXT_COMPACTION_REQUIRED", "READY"):
             state.update(status="READY", stop_reason=None)
+        record_progress_summary(run_dir, state, summary, source='context_summary')
         save_state(run_dir, state)
         append_event(run_dir, "context.compacted" if compact else "context.reopened",
                      generation=generation, source_generation=expected_generation, snapshot=relative,
@@ -663,8 +724,6 @@ def apply_context_usage(state: dict[str, Any], used_tokens: int, *, generation: 
         raise ControllerError("tokens decreased without explicit compaction/reopen")
     if not isinstance(conversation_id, str) or not conversation_id.strip():
         raise ControllerError("context report requires conversation_id")
-    if conversation_id == ctx.get('previous_conversation_id'):
-        raise ControllerError("new generation reused the previous conversation_id")
     if ctx.get("conversation_id") not in (None, conversation_id):
         raise ControllerError("conversation_id changed without explicit reopen")
     ctx.update(used_tokens=used_tokens, conversation_id=conversation_id, last_report_at=utc_now())

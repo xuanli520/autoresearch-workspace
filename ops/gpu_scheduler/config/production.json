@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "root": "/mnt/data/autoresearch/gpu-queue",
+  "data_mount": "/mnt/data",
+  "data_mounts": [
+    "/mnt/data/autoresearch/work/auto0804",
+    "/mnt/data/autoresearch/gpu-queue"
+  ],
+  "gpus": [
+    {
+      "uuid": "GPU-e48d1ca7-9e84-64a4-c430-d860e32455e1",
+      "memory_mib": 30000,
+      "compute_units": 100
+    }
+  ],
+  "cpu_cores": 16,
+  "ram_mib": 30720,
+  "poll_seconds": 1,
+  "persistent": true,
+  "max_running": 8,
+  "scheduling_policy": "fair_share",
+  "starvation_seconds": 300,
+  "max_bypass": 2,
+  "max_jobs": 10000,
+  "min_free_disk_mib": 10240,
+  "external_process_policy": "exclusive_admission",
+  "shared_headroom_mib": 0,
+  "execution_backend": "systemd",
+  "resource_sample_seconds": 1,
+  "profile_min_samples": 3
+}

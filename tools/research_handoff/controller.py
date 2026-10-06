@@ -28,8 +28,10 @@ sys.path.insert(0, str(HERE / 'core'))
 from longrun import (ControllerError, DEFAULTS, TERMINAL_STATES, COMPLETION_TERMINAL_STATES, append_event, apply_context_usage, atomic_json,
     begin_run, budget_view, check_storage, compact_context, epoch, file_lock, finish_active_interval,
     context_guard_deadline, load_config, load_state, new_state, read_json, record_context_usage, reopen_context, safe_summary,
-    run_config, save_state, start_active_interval, state_path, utc_now, validate_config)
+    record_progress_summary, run_config, save_state, start_active_interval, state_path, utc_now, validate_config)
 from turn_outcome import compute_turn_outcome
+from gpu_wait import (INFRASTRUCTURE_REASONS, close_gpu_wait, gpu_infrastructure_reason, gpu_wait_seconds,
+                      observe_gpu_state)
 from processes import boot_id, pid_matches, process_start_ticks, scope_members, signal_identity, terminate_scope
 from cleanup import cleanup_task
 from credit import partial_report, validate_evidence, validate_intervals
@@ -76,8 +78,16 @@ def stop_reason(run_dir: Path) -> str | None:
 
 def persist_exit(run_dir: Path, state: dict[str, Any]) -> int:
     code = EXIT_CODES.get(state['status'], 0)
+    view = budget_view(state)
+    if state.get('stop_reason') == 'operator_stop' and state.get('target_reached_at_stop') is None:
+        # The final active interval is normally closed before this receipt is
+        # written.  Preserve the observed boundary even when an operator stop
+        # races a controller exit or recovery path.
+        state['target_reached_at_stop'] = bool(view['target_reached'])
     result = {'at': utc_now(), 'attempt': state['attempt'], 'status': state['status'],
-              'exit_code': code, 'stop_reason': state['stop_reason'], 'budget': budget_view(state),
+              'exit_code': code, 'stop_reason': state['stop_reason'], 'resume_required': state['resume_required'],
+              'target_reached_at_stop': state.get('target_reached_at_stop'),
+              'target_reached': view['target_reached'], 'budget': view,
               'completion': state.get('completion')}
     atomic_json(run_dir / 'attempts' / f"{state['attempt']:06d}" / 'exit.json', result)
     atomic_json(run_dir / 'exit.json', result)
@@ -520,6 +530,16 @@ class LongRunController:
     def event(self, event: str, **fields: Any) -> None:
         append_event(self.run_dir, event, **fields)
 
+    def record_method_summary(self, value: dict[str, Any]) -> None:
+        """Persist a bounded duplicate-summary signal without changing credit.
+
+        A repeated handoff can be a legitimate unchanged method, so this is a
+        diagnostic only.  The state and event log make the signal available to
+        monitors and later QA without inventing a turn failure.
+        """
+        record_progress_summary(self.run_dir, self.state, value.get('method_summary'),
+                                source='method_summary')
+
     def check_startable(self) -> None:
         state = self.state
         if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
@@ -672,6 +692,21 @@ class LongRunController:
                 raise ControllerError('event belongs to a stale or missing context generation')
             if kind == 'heartbeat':
                 self.state['heartbeat'].update(last_event_at=utc_now(), last_monotonic=time.monotonic())
+            if kind == 'gpu.state':
+                turn = self.state['turn']
+                if observe_gpu_state(turn, value, time.monotonic()):
+                    waiting = turn['status'] == 'WAITING_GPU'
+                    self.state['status'] = 'WAITING_GPU' if waiting else 'RUNNING'
+                    self.state['heartbeat'].update(last_event_at=utc_now(), last_monotonic=time.monotonic())
+                    atomic_json(Path(turn['dir']) / 'gpu-wait.json', {
+                        'version': 1, 'run_id': self.state['run_id'], 'turn': turn['number'],
+                        'token': turn['token'], 'waiting': waiting,
+                        'started_monotonic': turn['gpu_wait']['started_monotonic'],
+                        'excluded_seconds': turn['gpu_wait']['excluded_seconds']})
+                    self.event('turn.gpu_state', turn=turn['number'], request=value,
+                               waiting=waiting, excluded_seconds=gpu_wait_seconds(turn, time.monotonic()))
+                    if value['state'] == 'UNKNOWN' and value.get('reconciling') is not True:
+                        self.pending_reason = 'gpu_unknown'
             if kind == 'context.usage' or kind == 'heartbeat' and 'used_tokens' in value:
                 apply_context_usage(self.state, value.get('used_tokens'), generation=value.get('generation'),
                     conversation_id=value.get('conversation_id'), input_tokens=value.get('input_tokens'),
@@ -694,6 +729,7 @@ class LongRunController:
                             or not isinstance(value.get('credit_evidence'), str) or not value['credit_evidence'].strip()):
                         raise ControllerError('reported credit requires finite nonnegative seconds and credit_evidence')
                 self.result = value
+                self.record_method_summary(value)
             if kind == 'turn.credit':
                 seconds = value.get('credited_seconds')
                 if (not self.config['budget']['allow_partial_credit']
@@ -705,7 +741,14 @@ class LongRunController:
                 retryable = value.get('retryable', True)
                 if type(retryable) is not bool:
                     raise ControllerError('turn.failed retryable must be boolean')
-                if not retryable:
+                infrastructure = value.get('reason') in INFRASTRUCTURE_REASONS
+                if infrastructure:
+                    if value.get('failure_class') != 'infrastructure':
+                        raise ControllerError('GPU failure requires infrastructure failure_class')
+                    self.result = value
+                    self.state['failure'] = value
+                    self.pending_reason = value['reason']
+                elif not retryable:
                     if value.get('reason') != 'deterministic_evidence_failure':
                         raise ControllerError('nonretryable failure requires an explicit evidence failure reason')
                     path = Path(value.get('failure_evidence', '')).resolve(strict=True)
@@ -856,9 +899,12 @@ class LongRunController:
                            used_tokens=ctx['used_tokens'], max_tokens=ctx['max_tokens'],
                            summary_present=self.summary is not None,
                            completion_present=self.result.get('credit') is True)
-            if reason is None and now >= turn['deadline_monotonic']:
+            waiting_gpu = turn.get('status') == 'WAITING_GPU'
+            turn['deadline_monotonic'] = (self.state['budget']['active_monotonic']
+                                          + turn['execution_seconds'] + gpu_wait_seconds(turn, now))
+            if reason is None and not waiting_gpu and now >= turn['deadline_monotonic']:
                 reason = turn['deadline_reason']
-            if reason is None and cfg['heartbeat']['required'] and now-self.state['heartbeat']['last_monotonic'] >= cfg['heartbeat']['stale_after_seconds']:
+            if reason is None and not waiting_gpu and cfg['heartbeat']['required'] and now-self.state['heartbeat']['last_monotonic'] >= cfg['heartbeat']['stale_after_seconds']:
                 reason = 'heartbeat_stale'
             if reason is None and self.with_guard and self.guard.poll() is not None:
                 reason = 'guard_lost'
@@ -904,6 +950,8 @@ class LongRunController:
         observed_reason = reason or self.pending_reason
         if reason == 'context_window' and self.pending_reason is not None:
             observed_reason = self.pending_reason
+        if observed_reason is None and code != 0:
+            observed_reason = gpu_infrastructure_reason(turn)
         protocol = compute_turn_outcome(observed_reason, worker, code, **facts)
         if protocol.context_completion_recovered:
             self.event('context.completion_recovered', turn=turn['number'], generation=turn['generation'],
@@ -936,7 +984,10 @@ class LongRunController:
                     self.partial_credit = {}
                     self.event('agent.partial_credit_rejected', error=partial_error)
         duration = worker.get('runtime_seconds', 0)
-        observed = min(duration, max(0, time.monotonic() - self.state['budget']['active_monotonic']))
+        observed_end = min(time.monotonic(), self.state['budget']['active_monotonic'] + duration)
+        close_gpu_wait(turn, observed_end)
+        observed = max(0, observed_end - self.state['budget']['active_monotonic']
+                       - gpu_wait_seconds(turn, observed_end))
         final = compute_turn_outcome(observed_reason, worker, code, **facts,
             cleanup_ok=cleanup_ok, allow_partial_credit=self.config['budget']['allow_partial_credit'],
             partial_report=self.partial_credit, observed_seconds=observed)
@@ -945,11 +996,25 @@ class LongRunController:
             self.event('agent.credit_rejected', reported_seconds=report.get('credited_seconds'), observed_seconds=observed)
         elapsed = finish_active_interval(self.state, credit=final.credit, duration=duration,
                                          credited_duration=final.reported_seconds)
+        # Recompute after closing the interval.  The pre-close view can still
+        # be one tick short while the final worker interval supplies the
+        # remaining confirmed credit.
+        post_close_view = budget_view(self.state)
+        if observed_reason == 'operator_stop':
+            self.state['target_reached_at_stop'] = bool(post_close_view['target_reached'])
+            self.event('target.observed_at_stop', turn=turn['number'],
+                       active_seconds=post_close_view['active_seconds'],
+                       window_seconds=post_close_view['window_seconds'],
+                       target_reached=post_close_view['target_reached'],
+                       hard_reached=post_close_view['hard_reached'])
         reason = final.reason
         turn.update(status='COMPLETED' if final.completed else (
             'FAILED' if reason == 'deterministic_evidence_failure' else 'STOPPED'), ended_at=utc_now(), returncode=code,
                     reason=reason, elapsed_seconds=elapsed, credited=final.credit,
-                    credited_seconds=(final.reported_seconds if final.reported_seconds is not None else elapsed) if final.credit else 0, result=self.result)
+                    credited_seconds=(final.reported_seconds if final.reported_seconds is not None else elapsed) if final.credit else 0,
+                    target_reached=post_close_view['target_reached'], result=self.result)
+        if reason in INFRASTRUCTURE_REASONS:
+            turn['failure_class'] = 'infrastructure'
         if final.partial_credit:
             turn['partial_credit'] = self.partial_credit
         if partial_error:
@@ -993,6 +1058,13 @@ class LongRunController:
             view = budget_view(self.state)
             reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None)
             if reason:
+                if (reason == 'operator_stop' and view['target_reached']
+                        and not view['hard_reached']):
+                    # The stop raced with the final credited interval.  Keep
+                    # the stop request in the event log, but let the verified
+                    # target proceed through the normal completion gate.
+                    self.finalize()
+                    return
                 self.state.update(status='STOPPED', stop_reason=reason, resume_required=True)
                 return
             if self.state.get('completion', {}).get('phase') == 'FINALIZING':
@@ -1009,10 +1081,14 @@ class LongRunController:
             self.offset, self.fragment, self.dropping_line = 0, b'', False
             self.start_turn()
             reason = self.monitor()
-            if reason == 'hard_limit':
-                self.state.update(status='EXPIRED', stop_reason=reason)
+            if reason == 'hard_limit' or budget_view(self.state)['hard_reached']:
+                self.state.update(status='EXPIRED', stop_reason='hard_limit')
                 return
             if reason == 'operator_stop':
+                view = budget_view(self.state)
+                if view['target_reached'] and not view['hard_reached']:
+                    self.finalize()
+                    return
                 self.state.update(status='STOPPED', stop_reason=reason, resume_required=True)
                 return
             if reason == 'target_reached':
@@ -1041,7 +1117,8 @@ class LongRunController:
                     if self.wait_retry_backoff():
                         continue
                     return
-                self.state.update(status='FAILED', stop_reason=reason, resume_required=True)
+                self.state.update(status='PAUSED' if reason in INFRASTRUCTURE_REASONS else 'FAILED',
+                                  stop_reason=reason, resume_required=True)
                 return
 
     def finalize(self) -> None:
@@ -1056,7 +1133,8 @@ class LongRunController:
                 last_pulse = now
         while True:
             reason = stop_reason(self.run_dir) or ('operator_stop' if self.signalled else None)
-            if reason and reason != 'hard_limit' and not budget_view(self.state)['hard_reached']:
+            view = budget_view(self.state)
+            if reason and reason != 'hard_limit' and not view['hard_reached'] and not view['target_reached']:
                 status = 'EVALUATION_PENDING' if self.config['score_expectation'] == 'required' else 'STOPPED'
                 self.state.update(status=status, stop_reason=reason)
                 self.state['completion'].update(phase=status, decided_at=utc_now())
@@ -1184,6 +1262,7 @@ def operator_stop(run_dir: Path, reason: str, *, signal_controller: bool = True)
             state = load_state(run_dir)
             if state['status'] not in COMPLETION_TERMINAL_STATES:
                 state.update(status='STOPPED', stop_reason='operator_stop', resume_required=True)
+                state['target_reached_at_stop'] = bool(budget_view(state)['target_reached'])
                 save_state(run_dir, state)
                 persist_exit(run_dir, state)
     return safe_summary(load_state(run_dir))
@@ -1205,10 +1284,11 @@ def guard_loop(run_dir: Path, attempt: int) -> int:
             reason = 'controller_stale'
         elif budget_view(state)['hard_reached']:
             reason = 'hard_limit'
-        elif state['turn'].get('status') == 'RUNNING':
-            if now >= state['turn']['deadline_monotonic'] + poll*2:
+        elif state['turn'].get('status') in ('RUNNING', 'WAITING_GPU'):
+            waiting_gpu = state['turn']['status'] == 'WAITING_GPU'
+            if not waiting_gpu and now >= state['turn']['deadline_monotonic'] + poll*2:
                 reason = state['turn']['deadline_reason']
-            elif config['heartbeat']['required'] and now-state['heartbeat']['last_monotonic'] >= config['heartbeat']['stale_after_seconds']+poll*2:
+            elif not waiting_gpu and config['heartbeat']['required'] and now-state['heartbeat']['last_monotonic'] >= config['heartbeat']['stale_after_seconds']+poll*2:
                 reason = 'heartbeat_stale'
         if reason:
             atomic_json(run_dir / STOP_FILE, {'at': utc_now(), 'reason': reason, 'code': reason, 'source': 'guard'})

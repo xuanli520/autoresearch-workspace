@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import subprocess
@@ -11,6 +12,20 @@ from pathlib import Path
 
 from longrun import atomic_json, read_json, utc_now
 from processes import pid_matches, terminate_scope
+
+
+def gpu_wait_duration(turn_dir: Path, token: str, now: float) -> float:
+    record = read_json(turn_dir / 'gpu-wait.json', {})
+    if not record:
+        return 0.0
+    seconds = record.get('excluded_seconds')
+    started = record.get('started_monotonic')
+    if (record.get('version') != 1 or record.get('token') != token
+            or type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds < 0
+            or (started is not None and (type(started) not in (int, float)
+                                        or not math.isfinite(started) or started > now))):
+        raise ValueError('invalid controller GPU wait record')
+    return seconds + (max(0, now - started) if started is not None else 0)
 
 
 def main() -> int:
@@ -60,7 +75,9 @@ def main() -> int:
                 reason = 'controller_lost'
                 break
             # Both clocks: a backward wall adjustment cannot extend the turn.
-            if time.monotonic() >= deadline or time.time() >= launch['hard_deadline_epoch']:
+            now = time.monotonic()
+            deadline = started + remaining + gpu_wait_duration(turn_dir, token, now)
+            if now >= deadline or time.time() >= launch['hard_deadline_epoch']:
                 reason = 'hard_limit' if time.time() >= launch['hard_deadline_epoch'] else 'turn_timeout'
                 break
             time.sleep(.03)

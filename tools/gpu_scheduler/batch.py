@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .client import Client, SchedulerError
-from .common import JobWaitInterrupted, JobWaitTimeout, atomic_json
+from .common import JobWaitInterrupted, JobWaitTimeout, WAITABLE_TERMINAL, atomic_json
 from .remote import RemoteClient
 
-TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "EXPIRED", "TIMED_OUT", "UNKNOWN"}
+TERMINAL = WAITABLE_TERMINAL
 
 
 def execute_one(client: Client, spec: dict[str, Any], existing: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -25,7 +25,7 @@ def execute_one(client: Client, spec: dict[str, Any], existing: dict[str, dict[s
         try:
             if job is None:
                 job = client.submit(spec, timeout=45)
-            elif job["state"] in TERMINAL:
+            elif job["state"] in TERMINAL and not job.get("reconciling"):
                 return client.get(job["id"])
             else:
                 job = client.wait(job["id"], timeout=45)
@@ -34,7 +34,7 @@ def execute_one(client: Client, spec: dict[str, Any], existing: dict[str, dict[s
         except SchedulerError:
             # A transport failure never authorizes replaying a submit.
             job = recover_request(client, spec)
-        if job["state"] in TERMINAL:
+        if job["state"] in TERMINAL and not job.get("reconciling"):
             return job
         if time.time() >= spec.get("deadline_epoch", float("inf")):
             raise RuntimeError("batch deadline reached; query existing job before continuing")

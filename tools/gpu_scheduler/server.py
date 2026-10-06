@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .common import (MAX_MESSAGE, JobWaitInterrupted, JobWaitTimeout, atomic_json,
+from .common import (MAX_MESSAGE, WAITABLE_TERMINAL, JobWaitInterrupted, JobWaitTimeout, atomic_json,
                      check_storage, fields, validate_config, validate_wait_timeout)
 from .resources import probe, simulated_probe
 from .scheduler import Scheduler
@@ -30,14 +30,15 @@ async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
     if len(os.fsencode(socket_path)) >= 108:
         raise ValueError("root is too long for a Unix socket path")
     # Abstract socket: kernel-owned singleton, independent of root/socket names.
-    # Executors inherit this FD so scheduler crashes cannot permit double booking.
+    # Only the scheduler owns this FD. Durable STARTING intents reserve orphan
+    # executors' resources across a service restart without blocking the service.
     lock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     lock_name = f"\0autoresearch-gpu-scheduler{'-test' if local_test else ''}-{os.getuid()}"
     try:
         lock.bind(lock_name)
     except OSError:
         lock.close()
-        raise ValueError("a scheduler or orphan executor is still active for this host user") from None
+        raise ValueError("a scheduler is still active for this host user") from None
     scheduler = None
     server = None
     socket_created = False
@@ -60,11 +61,11 @@ async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
 
         async def dispatch(request: dict[str, Any]) -> Any:
             fields(request, {"op"}, {"session_id", "spec", "id", "request_id", "reason",
-                                      "wait", "timeout"})
+                                      "wait", "timeout", "revision"})
             op = request["op"]
             if op == "hello":
                 return scheduler.status()
-            if request.get("session_id") != scheduler.id:
+            if op == "stop" and request.get("session_id") != scheduler.id:
                 raise ValueError("session changed; inspect old receipts before submitting to a new session")
             if op == "submit":
                 wait = request.get("wait", True)
@@ -75,6 +76,20 @@ async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
                 return await scheduler.wait(job["id"], timeout=timeout) if wait else job
             if op == "wait":
                 return await scheduler.wait(request.get("id"), timeout=request.get("timeout"))
+            if op == "watch":
+                job = scheduler.get(request.get("id"), request.get("request_id"))
+                if scheduler.closing and job["state"] not in WAITABLE_TERMINAL:
+                    raise JobWaitInterrupted(scheduler.shutdown_reason, job=scheduler.view(job))
+                if job["revision"] == request.get("revision") and (job["state"] not in WAITABLE_TERMINAL or job.get("reconciling")):
+                    event = scheduler._job_events[job["id"]]
+                    try:
+                        timeout = validate_wait_timeout(request.get("timeout", 10))
+                        await asyncio.wait_for(event.wait(), min(10, timeout if timeout is not None else 10))
+                    except asyncio.TimeoutError:
+                        pass
+                if scheduler.closing and job["state"] not in WAITABLE_TERMINAL:
+                    raise JobWaitInterrupted(scheduler.shutdown_reason, job=scheduler.view(job))
+                return scheduler.view(job)
             if op == "status":
                 return scheduler.status()
             if op == "list":
@@ -108,7 +123,7 @@ async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
                 request = json.loads(line)
                 if not isinstance(request, dict):
                     raise ValueError("request must be a JSON object")
-                waiting = request.get("op") == "wait" or (
+                waiting = request.get("op") in {"wait", "watch"} or (
                     request.get("op") == "submit" and request.get("wait", True) is True)
                 if waiting:
                     if len(waiters) >= MAX_WAITERS:
@@ -128,7 +143,7 @@ async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
                 reply = {"ok": False, "code": "WAIT_INTERRUPTED", "error": str(exc),
                          "reason": exc.reason, "job": exc.job}
             except (ValueError, TypeError, KeyError, OSError, asyncio.TimeoutError) as exc:
-                reply = {"ok": False, "error": str(exc)}
+                reply = {"ok": False, "code": "REJECTED", "error": str(exc)}
             finally:
                 for pending_task in pending:
                     pending_task.cancel()
@@ -177,7 +192,8 @@ async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
             scheduler.begin_shutdown()
             await scheduler.settle_background()
             cleanup_deadline = time.monotonic() + 8
-            while any(j["process"] is not None and j["process"].poll() is None for j in scheduler.active()):
+            while any(j.get("reconciling") or (j["process"] is not None and j["process"].poll() is None)
+                      for j in scheduler.active()):
                 if time.monotonic() >= cleanup_deadline:
                     break
                 try:

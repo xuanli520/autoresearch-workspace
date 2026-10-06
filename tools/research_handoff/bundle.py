@@ -38,6 +38,7 @@ FILES = (
     "core/rpc.py",
     "core/longrun.py",
     "core/turn_outcome.py",
+    "core/gpu_wait.py",
     "core/research_time.py",
     "core/runtime_artifacts.py",
     "core/storage_migration.py",
