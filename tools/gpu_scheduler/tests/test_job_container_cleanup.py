@@ -81,6 +81,24 @@ class JobContainerCleanupTests(unittest.TestCase):
             self.assertTrue(cleanup_job(self.root)['cleanup_ok'])
             run.assert_not_called()
 
+    def test_recovery_uses_current_pinned_storage_without_changing_launch(self):
+        original = (self.root / 'launch.json').read_bytes()
+        config = {'local_test': True, 'data_mount': '/data', 'data_mounts': ['/data/queue']}
+        with patch('tools.gpu_scheduler.container_ownership.check_storage') as validate:
+            with patch('tools.gpu_scheduler.container_ownership.subprocess.run') as run:
+                run.return_value.stdout = ''
+                receipt = cleanup_job(self.root, storage_config=config)
+        validate.assert_called_once_with(config, self.root)
+        self.assertEqual(receipt['recovery_data_mounts'], ['/data', '/data/queue'])
+        self.assertEqual((self.root / 'launch.json').read_bytes(), original)
+
+    def test_unapproved_recovery_mount_still_blocks_cleanup(self):
+        with patch('tools.gpu_scheduler.container_ownership.check_storage', side_effect=ValueError('unexpected device')):
+            with patch('tools.gpu_scheduler.container_ownership.subprocess.run') as run:
+                with self.assertRaisesRegex(ValueError, 'unexpected device'):
+                    cleanup_job(self.root, storage_config={'data_mount': '/invalid'})
+                run.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

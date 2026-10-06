@@ -67,7 +67,7 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 | 字段 / 行为 | 含义 |
 |---|---|
 | `budget.window_seconds` | active 目标或 wall 窗口 |
-| `budget.hard_limit_seconds` | 从首次 start 起固定墙钟上限；工作区正式运行默认不超过 43,200 秒，不启用 `allow_extended_hard_limit`。明确用户例外授权可显式扩展，工具最大 172,800 秒 |
+| `budget.hard_limit_seconds` | 从首次 start 起固定墙钟上限；工作区正式运行默认不超过 43,200 秒，不启用 `allow_extended_hard_limit`。明确用户例外授权可显式扩展，工具最大 259,200 秒 |
 | `turn.seconds` | 每轮最长执行时间，实际取本轮、目标窗口与剩余硬预算的适用最小值 |
 | `credit_policy: running` | 按观测到的 worker 执行区间记活动时间；故障未知区间不记 |
 | `credit_policy: successful_turn` | 退出 0、上下文报告有效、收到 `turn.completed` 且 `credit: true`、清理成功后才记活动时间 |
@@ -84,7 +84,7 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 
 显式启用 `budget.allow_partial_credit: true`（仅限 `reported`）后，失败或超时轮可另记研究信用，轮次失败原因和分数保持真实。可信宿主适配器的 cleanup hook 在回收资源后写 `turn_dir/partial-credit.json`：`version:1`、`run_id`、`turn`、`intervals:[[UTC_epoch_start,UTC_epoch_end]]`、`credited_seconds`、`evidence:[{path,sha256}]`。控制器核对本轮身份、区间边界、不重叠、总秒数及可信宿主原件哈希；报告不能超过 worker runtime。可用 `turn.credit` 提前提供该报告路径/哈希，但清理完成后仍重新验证。原生会话审计可复用 `core/research_time.py`，由题目回调核对真实 GPU 反馈；未结束工具调用、排队、安装和故障等排除区间必须留证，信用不代表完整评分闭环。
 
-已停止且确认 controller/guard/worker 均回收的 run，可通过 `amend` 切换不可变发布、配置和历史信用审计。命令需要当前 `--expected-config-sha256`、`--expected-turn` 及非空授权理由；身份、起点、目标和上下文不变，旧配置、状态、原始 exit 不覆盖，修订收据保存在 `amendments/NNNNNN/`。历史审计只补原零信用且未调整过的轮次，拒绝重计。截止修改须有明确用户授权；默认上限仍为 12h，显式例外可启用 `allow_extended_hard_limit`，最高 48h。截止延期（包括原预算尚未到期时）须传入 `--extend-expired-budget`，仅允许已完全回收、目标未完成的 run 延长至未来且晚于旧截止；该操作不增加历史信用，保留首次起点、目标、旧状态/exit 和修订收据。EXPIRED 修订后为 PAUSED，仍须显式 `start --resume`。已达成目标的 COMPLETED 不可延期。
+已停止且确认 controller/guard/worker 均回收的 run，可通过 `amend` 切换不可变发布、配置和历史信用审计。命令需要当前 `--expected-config-sha256`、`--expected-turn` 及非空授权理由；身份、起点、目标和上下文不变，旧配置、状态、原始 exit 不覆盖，修订收据保存在 `amendments/NNNNNN/`。历史审计只补原零信用且未调整过的轮次，拒绝重计。截止修改须有明确用户授权；默认上限仍为 12h，显式例外可启用 `allow_extended_hard_limit`，最高 72h。72h 仅为显式授权后的工具上界，不授权追加研究；2026-10-07 将旧 run 延期到当天 24:00 时，跨两天的首次起点须保留。截止延期（包括原预算尚未到期时）须传入 `--extend-expired-budget`，仅允许已完全回收、目标未完成的 run 延长至未来且晚于旧截止；该操作不增加历史信用，保留首次起点、目标、旧状态/exit 和修订收据。EXPIRED 修订后为 PAUSED，仍须显式 `start --resume`。已达成目标的 COMPLETED 不可延期。
 
 存储迁移须有明确授权，保持所有run/root绝对路径，用独立数据卷或bind mount承接新设备，并在原设备保留完整旧副本。`amend --storage-migration-source <旧副本根>` 对新 `storage.data_mount` 下的run和研究root逐文件校验内容、权限、归属及符号链接，并核验原设备和上轮cleanup；失败不修改状态。此操作保存旧/新设备与目录清单hash，不允许同时改截止或添加历史信用。路径、科学合同、上下文和有效预算仍保持原值；迁移后显式doctor/start --resume。
 
@@ -131,6 +131,8 @@ Docker/containerd 应使用现有开机启用、`Restart=always` 的系统服务
 
 ### GPU 作业等待协议
 
+本节是 durable 版合同；先核实际 scheduler/客户端/控制器/适配器发布，再读 [GPU 正确使用指南](../gpu_scheduler/USAGE.md) 和 [公共进展](../../ops/gpu_scheduler/进展清单.md)。已上传的 v5 未安装/切换时，旧运行不能仅换客户端采用新协议。
+
 GPU 提交、等待、重连和事件透传由官方 `gpu_scheduler` SDK 负责。任务适配器不得实现
 `ensure_job`、固定 queue timeout 或私有轮询器。适配器把 SDK 返回的同一个
 `request_id`/`job_id` 快照传给 `agent_protocol.gpu_state(job)`；helper 会产生
@@ -147,8 +149,10 @@ worker、controller 和 guard 均按扣除等待后的单轮执行时间判断�
 暂停。对账失败的 `UNKNOWN` 也暂停，不按 `agent_exit_nonzero` 自动重试。适配器可显式
 报告 `turn.failed`，其 `reason` 为 `gpu_infeasible`、`gpu_expired`、`gpu_unknown`、
 `gpu_reconciling` 或 `gpu_session_changed`，同时声明 `failure_class: infrastructure`。
-调度器服务端的状态推送应每 10 秒内至少更新一次；客户端断线时先查询原 request，不能
+正常连接下官方 watch 最长 10 秒返回一次状态/快照；这不是网络断线时的实时性保证。客户端断线时先查询原 request，不能
 以 transport timeout 推断作业失败。
+
+标准接入为 `Client.submit(spec, on_update=lambda job: agent_protocol.gpu_state(job))`，调用前完成真实 context/心跳协议，spec 必须含原父级 deadline 和完整 max_runtime。helper 将 id/revision 映射为 job_id/sequence，预测值留在 queue；不能手造“已运行”事件结束真实排队。UNKNOWN 仅 reconciling=true 时暂停等待计时，其他 UNKNOWN 交基础设施接管。改变实验必须符合原协议/预算并登记新意图，原终态请求不可改 spec 重新排队；控制器不会自动改变规模或自动重建已经结束的 worker。
 
 复制或导入 [agent_protocol.py](templates/agent_protocol.py)。每轮读取 `AUTORESEARCH_CONTEXT_FILE`；其中含 generation、conversation_id、上一代完整 handoff、预算和本轮目录。
 

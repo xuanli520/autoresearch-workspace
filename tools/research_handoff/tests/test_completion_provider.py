@@ -85,6 +85,26 @@ class CompletionProviderTests(unittest.IsolatedAsyncioTestCase):
                 {'driver': 'nvidia', 'device_ids': [gpu], 'capabilities': ['gpu']}])
             self.assertNotIn('devices', main)
 
+    def test_scheduler_limits_use_compose_deploy_string_types(self):
+        environment = self.provider()
+        environment.gpu_attachment = 'cdi'
+        environment.task_env_config = types.SimpleNamespace(gpus=1)
+        limits = {'cgroup_parent': 'research-job.slice', 'mem_limit': 8589934592,
+                  'memswap_limit': 8589934592, 'cpus': 2.0}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'resources.json'
+            path.write_text('{"services":{"main":{}}}')
+            environment.resources_path = path
+            with mock.patch.dict('os.environ', {'CUDA_VISIBLE_DEVICES': 'GPU-' + 'a' * 32,
+                                               'GPU_SCHEDULER_JOB_DIR': directory}), \
+                    mock.patch('tools.gpu_scheduler.resource_limits.docker_overrides', return_value=limits):
+                environment._write_resources_compose_file()
+            main = json.loads(path.read_text())['services']['main']
+            self.assertEqual(main['mem_limit'], 8589934592)
+            self.assertEqual(main['deploy']['resources']['limits'],
+                             {'memory': '8589934592', 'cpus': '2.0'})
+            self.assertEqual(main['cgroup_parent'], 'research-job.slice')
+
     async def test_solver_cannot_mount_verifier_directory_or_writable_reward(self):
         environment = self.provider()
         self.assertEqual(await environment.start(False), 'started')

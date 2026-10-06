@@ -1,6 +1,6 @@
 # 双 Agent 长跑与完整题目包校验、运行、监护规范
 
-更新：2026-10-02。本文是工作区双 Agent 长跑的唯一通用执行规范，覆盖题包预检、受管部署、双流启动、监护、异常接管、证据回收和最终交付。科学协议见 [全流程指引](AutoResearch出题全流程指引.md)，文件治理见 [脚本与目录治理](notes/长程Agent脚本与目录治理.md)，压缩包验收见 [最终交付闭环](notes/最终打包与交付闭环.md)。旧部署手册改为跳转入口，历史复盘只保留事实，不再作为新运行指南。
+更新：2026-10-06。本文是工作区双 Agent 长跑的唯一通用执行规范，覆盖题包预检、受管部署、双流启动、监护、异常接管、证据回收和最终交付。科学协议见 [全流程指引](AutoResearch出题全流程指引.md)，文件治理见 [脚本与目录治理](notes/长程Agent脚本与目录治理.md)，压缩包验收见 [最终交付闭环](notes/最终打包与交付闭环.md)。GPU 操作须先读 [正确使用指南](tools/gpu_scheduler/USAGE.md)，核对 [公共部署进展](ops/gpu_scheduler/进展清单.md)；未部署的新协议不能仅靠客户端生效。旧部署手册改为跳转入口，历史复盘只保留事实，不再作为新运行指南。
 
 沿用本题进展清单中的有效授权、预算和停止条件，不重复审批。编写规范、安装工具或准备配置不构成启动正式研究、付费、上传或提交授权。
 
@@ -11,7 +11,7 @@
 | 职责 | 受管入口 | 边界 |
 |---|---|---|
 | Agent 启停、续轮、上下文交接、硬截止、独立 guard | [research_handoff](tools/research_handoff/README.md)：`controller.py` | 每组独立 run-id、配置、状态和退出证据；本地 CLI 控制执行主机常驻进程 |
-| GPU 准入、排队、等待、取消与执行器回收 | [gpu_scheduler](tools/gpu_scheduler/README.md)：CLI、`Client` / `RemoteClient` | GPU 训练、评分和复验统一入队，默认阻塞 `submit` |
+| GPU 准入、持久排队、等待、取消与执行器对账 | [gpu_scheduler](tools/gpu_scheduler/README.md)：CLI、`Client` / `RemoteClient` | GPU 训练/评分/复验统一入队，默认阻塞 `submit`；已执行不重跑，状态透传 `gpu.state` |
 | 主机资源、活动登记、只读巡检与归档 | [gpu_monitor](tools/gpu_monitor/README.md)：`monitor.py` / `registry.py` | 只读聚合已登记的官方 run/job；不启动、不恢复、不重试研究；run 和 job 仍由各自官方工具查询 |
 | 模型研究、Harbor 与可信评分 | 实际可用的模型/Harness、Harbor 和题目薄适配器 | 只连接模型、合法候选、评分、事件、计时和资源取消，不复制控制状态机 |
 | 内容和材料 QA | [总体 QA](materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md)、[Baseline QA](materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md) | 使用时先读 Skill，按真实接口只读检查；静态通过不代替动态运行 |
@@ -30,13 +30,13 @@
 | 版本 | task/release/protocol、公开题包/Starter/Prompt、数据和模型哈希、三个工具发布哈希、适配器版本 |
 | 双流 | 各自 run-id、provider/model ID、推理档位、上下文容量、受限身份、独立候选/会话/输出 |
 | 资源 | 主机/数据盘设备、GPU UUID、调度 session/root、CPU/RAM/线程/磁盘、专用运行时与评分并发 |
-| 时间 | 每流有效目标、墙钟硬截止、请求/评分/单轮/排队/清理时限、GPU 服务剩余寿命 |
+| 时间 | 每流有效目标、原墙钟硬截止、模型请求/完整 GPU 执行/单轮/清理上限；durable 排队按 deadline 准入；有时限 GPU 服务的剩余寿命 |
 | 接管 | 实际启动/查询/停止/恢复命令、认证引用、状态/exit/日志、job/container 归属与 cleanup |
 | 证据 | 原始事件、逐轮源码/评分、时间区间、模型重载、健康记录、回收位置与哈希清单 |
 
 两组默认分别为 Codex + GPT-5.6 Sol、Codex + Seed 2.1 Turbo，按当前项目要求核验实际 provider 映射，不静默换模型。Seed 是模型名，不是训练随机 seed。两组使用相同公开起点、任务哈希、协议、Prompt 和资源口径，不能继承读过 Reference 的专家上下文。
 
-每流默认至少 10h 有效研究，每个长任务/阶段墙钟硬上限不超过 12h。正式配置 `budget.hard_limit_seconds <= 43200`，不启用 `allow_extended_hard_limit`；单轮不超过工具上限 5400 秒或父级剩余预算。不得用换 run-id 重置原阶段预算。GPU 服务提前启动会消耗其寿命，须核对剩余时间覆盖研究及清理，不能为此重启共享服务。
+每流默认至少 10h 有效研究，每个长任务/阶段墙钟硬上限不超过 12h。正式配置 `budget.hard_limit_seconds <= 43200`，不启用 `allow_extended_hard_limit`；单轮执行不超过工具上限 5400 秒或父级剩余预算。GPU 排队/对账不计单轮执行时间，但不延长 run 原墙钟硬截止；完整评分须同时满足轮内与 GPU 执行合同，不能入队后才发现时限冲突。不得用换 run-id 重置原阶段预算。持久 GPU 服务无服务级截止，各 job 仍受原截止；有时限服务须核对剩余寿命，不为此重启共享服务。
 
 ## 3. 完整题目包预检顺序
 
@@ -60,19 +60,21 @@ H01–H04 必查，有运行材料核对 H05–H06。要求 H06 时，同一 Tri
 
 核对实际挂载设备、GPU UUID/进程及 CPU/RAM/磁盘余量。任务数据、模型、日志、发布、临时目录和缓存写已核验数据盘；同时检查 Docker data-root/exec-root、containerd root/state/snapshotter、socket、daemon 日志、可写层、Harbor jobs、TMPDIR 和 pip/HF/Torch/XDG/npm 缓存。仅改 Docker data-root 不够。公共服务仍写系统盘时使用数据盘独立运行时，不重启公共服务。
 
-同主机各流使用同一受管 GPU 服务，当前合计最多两个 GPU 作业，每作业一张物理 GPU。会话数、模型请求数、CPU 评分数和 GPU 作业数分别配置；多题不得另开队列绕过上限。只读公开资产可共享，候选、会话、写缓存、计时及停止范围须隔离。
+同主机各流使用同一受管 GPU 服务，全局并发以实际已部署配置的 `max_running` 和资源准入为准（工具范围 1-32，兼容默认 2），每作业一张物理 GPU。不将“两条研究流”或目标并发数当作全局硬上限或吞吐保证。会话数、模型请求数、CPU 评分数和 GPU 作业数分别配置；多题不得另开队列绕过上限。只读公开资产可共享，候选、会话、写缓存、计时及停止范围须隔离。
 
 共享准入依据实测峰值、余量、计算/CPU 负载和公平预算；核验 `external_process_policy`，允许共享时显式采用受管 `shared` 策略。其他 PID 出现本身不要求停训；资源风险、明确干扰、用户停止或硬截止只处理自己的范围。
 
-**调度器的显存、CPU/RAM 和计算份额是预约和准入条件，不是候选不可绕过的硬隔离。** 题面如声明显存硬上限，须由不可修改的宿主/provider 边界执行，在目标设备留越限证据。allocator、CUDA_VISIBLE_DEVICES、Docker RAM 限额或监控采样不能冒充显存硬限额；目标平台无法执行时先修订资源合同并重验。
+资源预约与执行硬限分别验收：GPU 显存/CU 是准入预约，RAM 用 `ram_mib` 预约、`memory_max_mib` 总内存硬限、`memory_high_mib` 总内存节流，CPU 用 CPUQuota；durable 生产经 systemd/cgroup v2 实际核验，Docker 主容器/sidecar 共用作业 slice。cache 计入 memory.max，实测 anon 来自采样；GPU 显存仍无硬隔离。题面如声明显存硬上限，须由不可修改的宿主/provider 边界执行并留越限证据；allocator、CUDA_VISIBLE_DEVICES、Docker RAM 限额或监控采样不能冒充显存硬限额。旧版本/未接入的 provider 不凭文档宣称已执行新 CPU/RAM 合同。
 
 GPU 客户端可操作同服务其他作业，不是 solver 权限边界；socket、宿主 SSH、Docker socket、上游密钥和管理员权限仅留可信侧。solver 经限定的题目工具，由可信适配器校验候选、路径及资源后提交。
 
-当前 GPU 执行器没有通用 Docker/Harbor/provider 取消适配，不能直接提交会脱离管理的容器或远程启动命令。须接入已有受管取消能力，或在通用工具中补齐并验收；任务控制器 cleanup hook 本身不等于 GPU 作业已回收。GPU 释放确认前不得归还槽位或启动下一作业。
+Docker/Harbor 必须通过已验收的官方 provider、容器归属注册及同 job slice 约束接入；任意外部 daemon/远端 provider 没有自动通用取消保证。目标环境真实清理未验收时不能直接提交会脱离管理的命令。任务控制器 cleanup hook 本身不等于 GPU 作业已回收，GPU 释放确认前不得归还其预约；确认不足则 UNKNOWN 并隔离对应卡。
 
 ## 5. 受管部署与双流启动
 
 实际参数按工具 README、示例和 CLI 核验。下列命令从工作区根运行，`<...>` 必须替换为真实配置或 ID，不是可原样执行的脚本。
+
+公共 GPU 服务 plan/release/config 放 `ops/gpu_scheduler/`；先只读核验运行版本，不复制单题事故 plan 为公共新入口。安装/切换按该阶段授权与空闲窗口或明确迁移合同执行；生成或上传 release 不启动服务。旧 v4 正常停止会取消队列并结束作业，不能将普通 stop 当作无损迁移。
 
 ```text
 # GPU 主机：校验；复用已有服务，仅服务不存在且获授权时启动 serve
@@ -94,7 +96,7 @@ python3 -B tools/research_handoff/controller.py --remote <connection.json> statu
 
 `deploy` 仅部署控制器，数据、适配器、模型工具和运行时另行准备；已有校验发布直接复用。本地执行按 README 使用 `--state-dir`；正式运行保留 guard 和数据盘要求，不用 `--no-guard` 或 GPU `--local-test` 冒充正式验收。
 
-每次评分先记录稳定 `request_id`（task/run/group/evaluation）、候选哈希与协议，再用 `submit`；传入父级原 `deadline_epoch`、排队及执行上限，保存 `session_id`、job ID 和回执。阻塞到终态或关键中断；外层工具先返回会话编号时继续等待同一调用。确需同时编排或观察才用 `submit_async` / `enqueue` 加 `wait/get`，不能用手写循环反复重提。
+每次评分先冻结稳定 `request_id`（task/run/group/evaluation/候选版本）、原 spec、候选/协议哈希，再用 `submit`。durable 请求传父级原 `deadline_at`/`deadline_epoch` 和完整 `max_runtime_seconds`，不设置 queue_timeout；保存当前 session、不可变 `origin_session_id`、job ID、原目录和回执。`on_update` 透传 `gpu.state`，排队/对账留原轮 WAITING_GPU，不计等待信用、不耗 retry；墙钟截止不变。外层工具先返回会话编号时继续同一调用。多任务编排/进度跟踪才用 `submit_async` / `enqueue` 加官方 `wait`，不得自写 ensure_job/轮询/重提循环。
 
 控制器 `ACCEPTED` 只证明接管，GPU `SUCCEEDED` 只证明进程退出和清理，不等于评分或研究通过。启动后核对两流各自真实方法闭环、完整评分、guard、原截止和健康记录，再交接后台信息；失败如实报告。
 
@@ -125,15 +127,19 @@ python3 -B tools/gpu_monitor/monitor.py stop-monitor --config <tasks.json>
 | 研究 | 当前轮、最后模型/工具/评分、排队原因、有效区间、剩余目标与原截止 |
 | 请求 | 实际模型、请求 ID、完整终结、延迟、错误、退避、费用/调用量 |
 
-这是核验要求，不宣称 monitor 已自动覆盖全部字段；缺项由可信适配器补采，未采到写未知。心跳须反映真实模型/工具/评分进展；阻塞 SDK 不会代发控制器心跳，不能用假心跳掩盖卡死。
+这是核验要求，不宣称 monitor 已自动覆盖全部字段；缺项由可信适配器补采，未采到写未知。心跳须反映真实模型/工具/评分进展；SDK 不代发研究心跳。durable 等待时以真实 gpu.state 记录 WAITING_GPU，控制器按等待合同监督并保留墙钟截止；RUNNING 仍需真实进度，不能用假心跳掩盖卡死。
 
 **重试按现有能力声明：** 任务控制器对可恢复单轮失败默认退避重试，不设次数上限，但受原目标和墙钟截止约束；目前公开 `policy.retry_backoff_seconds`，不得编造 `max_retries` 等字段。正式授权须覆盖此策略，并核验请求总窗口、费用和无进展边界；本题要求更严次数/错误分类而尚未实现时，先补受管能力再启动。终态恢复和新实验不能由 monitor 自动执行。
 
 模型请求重试和控制器续轮分别留证，避免多层隐式重试相乘。认证、模型或协议错误应定位配置，持续失败不算研究。每次失败 attempt 独立保留；重试前核对 GPU/外部资源已回收，不重放结果未知的已执行操作。
 
+GPU 排队不属于普通 Agent 失败重试。`INFEASIBLE`/`EXPIRED` 回到当前 Agent 决策，不重开轮次或重复原请求；可继续 CPU 工作，改变实验必须符合原协议/预算并登记新意图。未解决 UNKNOWN、session/对账故障单列 `failure_class: infrastructure`；适配器退出后控制器暂停，不能声称已自动恢复 worker 或改实验规模。
+
 | 事件 | 处理 |
 |---|---|
-| SSH 断线、等待超时、UNKNOWN | 查同一 run/request/session/job；未知不等于失败、取消或完成，不重提变更请求 |
+| SSH 断线、等待超时 | 查原 run/request/job；只结束本次等待，不等于取消/失败，不重提变更请求 |
+| QUEUED/STARTING、UNKNOWN 对账中或 session 变更 | 官方 SDK 续读同一作业，透传 gpu.state，留在原轮 WAITING_GPU；不计等待信用、不耗 retry |
+| INFEASIBLE/EXPIRED、未解决 UNKNOWN | 留预测/退出证据，当前 Agent 做基础设施决策或暂停；原终态请求不重排，不重置原截止 |
 | 单流停止/故障 | 官方 `controller stop` 定向停止该流；依登记 job `cancel`，不停止同伴或共享服务 |
 | controller 丢失 | 查 guard/attempt/exit 和真实进程；确认旧控制器死亡、资源处理完成后，按有效授权 `recover` / `start --resume` |
 | 上下文将满 | 报真实 token，保留本流摘要/transcript，由官方 compact/reopen 管理 generation，不重置信用或截止 |
@@ -147,7 +153,7 @@ python3 -B tools/gpu_scheduler/cli.py cancel --remote <gpu-remote.json> --sessio
 python3 -B tools/research_handoff/controller.py --remote <connection.json> doctor --run-id <run-id>
 ```
 
-GPU 服务为内存队列，重启不恢复旧队列。须对账旧 session、执行器、exit 和残留资源；新服务“查无作业”不能证明旧任务退出。恢复保留原截止，不隐式换模型或追加预算。
+durable GPU 服务使用数据盘持久账本，异常重启原位恢复 QUEUED 的 request/job、submitted_at、bypasses 和截止；已启动执行恢复 UNKNOWN 按原执行器/scope/container/exit 对账，绝不重跑。评分始终绑定 origin_session_id。旧 v4 仍为旧队列合同，重启不能套用新恢复保证；先核实际版本并保全旧证据。任何版本“查无作业”都不能证明旧执行已退出；不删账本/换 root 绕过故障，不隐式换模型或追加预算。
 
 ## 7. 双轨迹、有效时间与 best_method
 
@@ -165,7 +171,7 @@ QA16 按每组区间去重求和，排除排队、安装、构建故障、长阻
 
 官方状态和退出证据须确认两流、GPU job、外部容器及子进程结束，cleanup 成功且资源释放。只关自己的资源，单题结束不停止共享 GPU 服务。按清单增量回收日志、源码、评分、模型、计时/健康、配置及哈希；校验后归档活动登记。UNKNOWN 或残留进程不能当完成。
 
-运行原件、工具发布、私有配置和事故档案留在题目私有目录，不塞公开镜像或随意增加最终成员。从已质检原件生成新副本，按平台白名单严格保留 `workspace/`、`expert_evidence/`、`optimization_evidence/` 及要求内容；旧包和失败证据保留。
+题目运行原件、私有配置和事故档案留在题目私有目录；跨题 GPU 服务发布/plan/源配置及运维证据留在公共 `ops/gpu_scheduler/`，不随清理单题目录删除。不塞公开镜像或随意增加最终成员。从已质检原件生成新副本，按平台白名单严格保留 `workspace/`、`expert_evidence/`、`optimization_evidence/` 及要求内容；旧包和失败证据保留。
 
 - [ ] G01–G03、全 seed 正式成对、模型重载和评分锚点有证据。
 - [ ] 官方三工具版本与运行记录可查，无自建替代控制链；资源限额和取消能力按真实合同验收。

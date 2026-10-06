@@ -25,6 +25,8 @@
 
 首次 `start` 会把实际有效硬截止写入 `completion.contract.json`。此冻结合同、候选、协议、数据、evaluator 和 controller release 都会绑定到结果；之后修改任一绑定会进入 `PROTOCOL_BINDING_MISMATCH` 或 `CANDIDATE_BINDING_MISMATCH`。
 
+原 run 经明确授权通过官方 `amend` 延期后，可信 `adopt_evaluation` 可选用截止早于或等于当前父合同截止的已完整认证评分；科学字段和可信边界仍须一致，晚于父合同的评分截止拒绝。原评分合同、receipt、request/job/origin 与原截止不改写，选用后的隔离证据记录来源合同及 receipt 哈希。这不授权延期，也不使迟到或未完成评分有效。
+
 ## 状态和凭证
 
 正常流为 `RUNNING -> FINALIZING -> COMPLETED`。完成门失败会写明确终态：`INCOMPLETE_FINAL_SCORE`、`EVALUATION_PENDING`、`EVALUATION_FAILED`、`EVALUATION_UNKNOWN`、`FINAL_SCORE_INVALID`、`CANDIDATE_BINDING_MISMATCH`、`PROTOCOL_BINDING_MISMATCH`、`COMPLETION_RECEIPT_MISSING` 或 `EXPIRED`。只有 receipt、job、seed、reload、hash 和隔离检查全部通过才会进入 `COMPLETED`。

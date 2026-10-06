@@ -60,12 +60,14 @@ def register_project(project, docker_host):
     return {"registered": True, "job_id": launch["id"], "project": project}
 
 
-def cleanup_job(directory, *, timeout=20):
+def cleanup_job(directory, *, timeout=20, storage_config=None):
     """Reclaim registered projects before an executor releases its GPU slot."""
     from .docker_cleanup import cleanup
     directory = Path(directory)
     launch = read_json(directory / "launch.json")
-    check_storage(launch["config"], directory)
+    # Recovery may follow an explicitly approved data-disk migration. Validate
+    # against the current pinned mounts without rewriting the historical launch.
+    check_storage(launch["config"] if storage_config is None else storage_config, directory)
     projects = {}
     for name in ("container-projects", "containers"):
         receipts = directory / name
@@ -105,6 +107,8 @@ def cleanup_job(directory, *, timeout=20):
                                       text=True, timeout=remaining, check=True).stdout
             removed.extend(cleanup(selected, docker, base / (str(index) + ".receipt.json"))["removed"])
     result = {"cleanup_ok": True, "projects": sorted(projects), "removed": removed, "at_epoch": time.time()}
+    if storage_config is not None:
+        result['recovery_data_mounts'] = [storage_config['data_mount'], *storage_config.get('data_mounts', [])]
     atomic_json(directory / "container-cleanup.json", result)
     return result
 

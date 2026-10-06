@@ -167,7 +167,9 @@ df -h
 
 “当前利用率为 0”不等于获得独占权。优先使用平台调度器、预约或团队约定。SSH、显卡编号和输出路径按实际资源配置，不能复制其他题目的私有连接信息。
 
-若使用工作区 `tools/gpu_scheduler`，本地控制 Agent 默认调用阻塞式 `submit`，等待作业完成或关键中断后再继续研究步骤；当前资源不足但 spec 校验通过时由调度器排队，不应把入队回执当作训练完成。只有需要持续跟踪进度或并行编排多个任务时，才调用 `submit_async`/`enqueue`，随后用 `wait`/`get` 跟踪同一 `job_id`/`request_id`。静态校验失败不入队，排队超时和父级 deadline 按真实状态记录。
+工作区 `tools/gpu_scheduler` 的正确调用按 [使用指南](tools/gpu_scheduler/USAGE.md) 执行，先核实际部署、客户端和控制器版本。本地控制 Agent 默认阻塞式 `submit`；只有持续进度跟踪或多任务编排需要异步时才用 `submit_async`/`enqueue` 加官方 `wait`。durable 服务接收父级原 `deadline_at`/`deadline_epoch` 与完整 `max_runtime_seconds`，用最晚启动时刻判断准入；新请求不设置 `queue_timeout_seconds`。`INFEASIBLE`/`EXPIRED` 是基础设施结果，不能当 Agent 失败反复开轮。通过 `on_update` 透传 `gpu.state`，排队/对账留在原轮 `WAITING_GPU`，不计有效时间、不耗 retry，原墙钟截止不变。重启恢复原排队意图，已启动执行只对账、不重跑；未知结果先查原 request/job，评分绑定 `origin_session_id`。
+
+资源预约和执行硬限分开：GPU 显存/CU 是保守准入预约，RAM 预约可按同类成功样本校准，CPU/RAM 用经核验的 systemd/cgroup 限制。`memory.max` 包含 cache，`memory.high` 节流总内存；GPU 显存仍不具备硬隔离。新能力须目标环境验收，不能把本地测试、上传 release 或容量配置当作已经部署、并发提高或题面硬约束成立的证据。
 
 ### 5.3 在共享机器上友好并行
 

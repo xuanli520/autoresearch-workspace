@@ -60,6 +60,29 @@ class ResourceLimitTests(unittest.TestCase):
             self.assertEqual(result["ram_file_peak_bytes"], 900)
             self.assertEqual(result["ram_total_peak_bytes"], 1500)
 
+    def test_only_exact_harbor_egress_sidecar_may_hold_network_capabilities(self):
+        launch = {"spec": {"cpu_cores": 1, "memory_max_mib": 100, "memory_high_mib": 90}}
+        receipt = {"slice": "gpujob.slice", "cgroup": "/sys/fs/cgroup/fake"}
+        container = {"HostConfig": {"CgroupParent": "gpujob.slice", "Memory": 100,
+                                   "MemorySwap": 100, "NanoCpus": 1000000000,
+                                   "Privileged": False, "CapAdd": ["NET_ADMIN", "NET_RAW"]},
+                     "Config": {"Labels": {"com.docker.compose.service":
+                                            "harbor-docker-egress-control-sidecar"}}}
+        with patch.object(resource_limits, "current_boundary", return_value=(launch, receipt)), \
+                patch.object(resource_limits, "verify_cgroup"):
+            proof = resource_limits.attest_container(container, [("", "/fake/docker-test.scope")])
+            self.assertTrue(proof["enforced"])
+            container["HostConfig"]["CapAdd"] = ["CAP_NET_ADMIN", "CAP_NET_RAW"]
+            proof = resource_limits.attest_container(container, [("", "/fake/docker-test.scope")])
+            self.assertTrue(proof["enforced"])
+            container["Config"]["Labels"]["com.docker.compose.service"] = "main"
+            with self.assertRaises(resource_limits.ResourceLimitError):
+                resource_limits.attest_container(container, [("", "/fake/docker-test.scope")])
+            container["Config"]["Labels"]["com.docker.compose.service"] = "harbor-docker-egress-control-sidecar"
+            container["HostConfig"]["CapAdd"].append("SYS_ADMIN")
+            with self.assertRaises(resource_limits.ResourceLimitError):
+                resource_limits.attest_container(container, [("", "/fake/docker-test.scope")])
+
     def test_docker_limits_preserve_stricter_task_contract(self):
         launch = {"spec": {"memory_max_mib": 1024, "cpu_cores": 2}}
         receipt = {"slice": "owned.slice"}

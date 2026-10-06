@@ -116,7 +116,7 @@ class ManagedDockerEnvironment(DockerEnvironment):
                 main = document["services"]["main"]
                 main.update(limits)
                 resources = main.setdefault("deploy", {}).setdefault("resources", {})
-                resources.setdefault("limits", {}).update(memory=limits["mem_limit"], cpus=limits["cpus"])
+                resources.setdefault("limits", {}).update(memory=str(limits["mem_limit"]), cpus=str(limits["cpus"]))
         if self.task_env_config.gpus:
             gpu = os.environ.get("CUDA_VISIBLE_DEVICES", "")
             if self.task_env_config.gpus != 1 or not re.fullmatch(r"GPU-[a-fA-F0-9-]+", gpu):

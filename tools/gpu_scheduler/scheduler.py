@@ -399,7 +399,7 @@ class Scheduler:
                     receipt["cleanup_ok"] = False
             try:
                 from .container_ownership import cleanup_job
-                receipt["container_cleanup"] = cleanup_job(directory)
+                receipt["container_cleanup"] = cleanup_job(directory, storage_config=self.config)
             except Exception as exc:
                 receipt["container_cleanup"] = {"cleanup_ok": False, "error": type(exc).__name__ + ": " + str(exc)}
                 receipt["cleanup_ok"] = False

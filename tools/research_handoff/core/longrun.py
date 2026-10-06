@@ -52,7 +52,7 @@ class ControllerDefaults:
     max_agent_line_bytes: int = 128 * 1024
     budget_window_seconds: int = 39_600
     budget_hard_limit_seconds: int = 43_200
-    extended_hard_limit_seconds: int = 172_800
+    extended_hard_limit_seconds: int = 259_200
     summary_seconds: int = 60
     max_summary_bytes: int = 65_536
 

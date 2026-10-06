@@ -77,6 +77,22 @@ class DurableQueueTests(unittest.TestCase):
             restored.tick(simulated_probe(self.cfg))
             launch.assert_not_called()
 
+    def test_orphan_recovery_uses_current_storage_contract_and_never_relaunches(self):
+        scheduler = Scheduler(self.cfg, -1)
+        job = scheduler.get(scheduler.submit(self.spec('migrated-orphan'))['id'])
+        with patch.object(scheduler, '_spawn_worker', return_value=None):
+            scheduler.launch(job, 'GPU-a')
+        restored = Scheduler(self.cfg, -1)
+        recovered = restored.get(job['id'])
+        with patch('tools.gpu_scheduler.scheduler.processes.terminate_scope', return_value=True):
+            with patch('tools.gpu_scheduler.scheduler.processes.scope_members', return_value=[]):
+                with patch('tools.gpu_scheduler.container_ownership.cleanup_job', return_value={'cleanup_ok': True}) as cleanup:
+                    restored._finish_receipt(recovered, restored._recover_receipt(recovered))
+        cleanup.assert_called_once_with(Path(recovered['directory']), storage_config=restored.config)
+        self.assertEqual(recovered['state'], 'FAILED')
+        self.assertEqual(recovered['reason'], 'executor_lost')
+        self.assertEqual(recovered['origin_session_id'], scheduler.id)
+
     def test_starting_is_durable_before_launch_receipt_write(self):
         scheduler = Scheduler(self.cfg, -1)
         job = scheduler.get(scheduler.submit(self.spec("durable-starting"))["id"])

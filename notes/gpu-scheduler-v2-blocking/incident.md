@@ -1,5 +1,7 @@
 # GPU 调度器阻塞提交与资源排队变更
 
+> 历史版本快照（2026-10-01）：下文记录当时的实现、参数和验证范围，不作为 durable 版本的操作指南。当前接入请阅读 [正确使用指南](../../tools/gpu_scheduler/USAGE.md) 与 [更新记录](../../tools/gpu_scheduler/CHANGELOG.md)，并核对 [实际部署进展](../../ops/gpu_scheduler/进展清单.md)；旧版排队超时、并发和 session 合同不能直接套用新版。
+
 日期：2026-10-01。范围是 `tools/gpu_scheduler` API、CLI、测试和相关使用规范；本轮不部署云端、不启动真实 GPU 训练、不热覆盖既有 release，不修改公共服务。
 
 ## 已确认的合同

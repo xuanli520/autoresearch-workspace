@@ -12,6 +12,8 @@
 
 涉及题包校验、双 Agent 长跑、监护或接管时，必须执行 [统一长跑与题包验收规范](双Agent长跑与题目包验收规范.md)；原部署手册仅保留跳转；涉及脚本/目录维护时阅读 [脚本与目录治理](notes/长程Agent脚本与目录治理.md)；冻结与交付时阅读 [最终打包与交付闭环](notes/最终打包与交付闭环.md)。这些是通用执行手册，不替代本题最新授权与真实运行记录。
 
+涉及 GPU 提交、等待、对账或接入变更时，必须阅读 [GPU 调度器正确使用指南](tools/gpu_scheduler/USAGE.md) 与 [接口 README](tools/gpu_scheduler/README.md)，并从 [公共 ops 进展清单](ops/gpu_scheduler/进展清单.md) 核对实际部署/客户端/控制器版本及授权。已上传 release 不等于已部署；不得只换客户端向旧服务调用新协议，也不得因文档更新安装或切换服务。
+
 ## 2. 交付目标
 
 把论文或研究问题改造成可持续迭代、自动评分、公平可解、真实可复现的科研任务。
@@ -26,7 +28,10 @@
 - 沿用已有授权；常规读取、文档维护和可逆修改不重复请求确认。关键输入缺失时才询问。
 - 正式双 Agent 长跑必须使用工作区受管工具：`tools/research_handoff` 管理 Agent 启停、续轮、上下文和硬截止，`tools/gpu_scheduler` 管理全部 GPU 训练/评分/复验，`tools/gpu_monitor` 管理巡检和活动登记。不得自建替代控制器、队列或守护/轮询脚本；题目只保留薄适配器和经校验配置，通用缺口修复工具并验收后再启用。
 - 长时间 Agent 任务统一登记官方 `research_handoff` `run_id` 与 `gpu_scheduler` `job_id`/`request_id`，使用 `python3 tools/gpu_monitor/monitor.py watch --view agents --interval 60 --max-hours 12` 持续轮询全量登记。该命令只读聚合状态；停止任务时仍由对应官方控制器执行，并在交接或停止说明中告知用户这条轮询命令。`marker`、进程组及其他兼容停止语义已删除，遇到旧字段必须修订登记，不能另造适配器。
-- 本地控制 Agent 使用 `tools/gpu_scheduler` 优先调用阻塞式 `submit`，等待 GPU 作业完成或关键中断后再继续；只有需要持续跟踪进度或同时编排多个任务时才调用 `submit_async`/`enqueue`。校验失败不入队，校验成功但当前资源不足则排队；排队受原超时/预算约束，等待中断不等于作业已取消，未知结果先查询同一 request/job，不自动重提。
+- 本地控制 Agent 使用 `tools/gpu_scheduler` 优先调用阻塞式 `submit`，等待 GPU 作业完成或关键中断后再继续；只有需要持续跟踪进度或同时编排多个任务时才调用 `submit_async`/`enqueue`。durable 版本的新请求显式声明父级原 `deadline_at`/`deadline_epoch` 和完整 `max_runtime_seconds`，不设置客户端 `queue_timeout_seconds`；不可行返回 `INFEASIBLE`，可行但当前资源不足由调度器等待。等待超时/中断不等于取消，未知结果查询原 request/job，不自动重提或换 ID。
+- GPU 请求账本恢复的是排队意图，不是重跑执行。保留原 `request_id`、job ID、spec、submitted_at、bypasses 和截止；已启动执行转 `UNKNOWN` 对账，评分证据绑定 `origin_session_id` 与原目录。同 ID 改 spec 拒绝，终态不能重复排队；新实验须明确版本与原预算，不用换 session/run/request 绕过故障或截止。
+- durable 控制器接入必须用官方 SDK `on_update` 透传 `gpu.state`，将排队/对账记为原轮内 `WAITING_GPU`，不计等待信用、不耗 Agent retry，原 run 墙钟硬截止仍生效。`INFEASIBLE`、`EXPIRED`、未解决 UNKNOWN 属基础设施原因，不当作 `agent_exit_nonzero` 反复重开轮次；适配器不得自写 ensure_job、轮询或重提循环。
+- 资源声明须区分 GPU 显存/CU 预约、RAM 准入预约与 cgroup 总内存硬限、CPUQuota。生产 systemd/cgroup 及 Docker main/sidecar 同 job slice 必须目标环境验收；cache 计入 memory.max，memory.high 节流总内存，GPU 显存/CU 不具备硬隔离。画像按 owner/job_class 版本校准新预约，方法、数据规模或协议变化必须更换 job_class；不凭建议值承诺并发数量。
 - 共享 GPU 使用前查看实时占用，优先选择授权范围内负载较低的资源；记录用途、上限和退出条件，结束后释放自己的资源。
 - 共享 GPU 可在不影响他人任务的前提下继续运行自己的训练；不能仅因出现其他 GPU 进程就自动停止或要求独占。结合可用显存、实测峰值、计算/CPU负载和调度约定判断，优先限制自己的并发和资源并记录共享情况。真正出现 OOM/资源耗尽风险、明确干扰、用户停止或预算到期时才按合同处理自己的任务，不干预他人。
 - 题目运行统一使用已核验的数据盘；禁止把题目数据、模型、日志、临时文件、下载/构建缓存或容器可写层写到远端系统盘。启动前核对实际挂载设备，并同时检查 Docker data-root、containerd root/snapshotter、TMPDIR 与缓存目录；仅修改 Docker data-root 不算完成迁移。若现有公共容器服务仍写系统盘，使用数据盘上的独立任务运行时，不重启或改动公共服务。系统程序可只读复用，任务新增写入必须留在数据盘。
@@ -35,6 +40,7 @@
 - 不因一次负结果自动换方向；先检查实现、预算和评估协议，保留失败证据。
 - 当前不自动启用多个子 Agent，除非用户或适用指令明确要求。
 - 优先复用受管工具与题目薄适配器，机器/模型/路径/超时差异写入经校验配置；不得为单次操作随意重写控制脚本、硬编码环境或热覆盖正在运行的源码。
+- 跨题 GPU 服务的 plan、release、源配置、迁移/发布记录放公共 `ops/gpu_scheduler/`，不以单题事故目录作为新的公共依赖。已发布版本、旧 plan 和唯一运行证据不可热改或删除；正常停止会取消作业，升级须先核对授权与空闲窗口或明确迁移合同。
 - 临时测试和debug文件集中在本题指定事故目录，创建时说明用途与清理条件；完成后清理可再生中间物，归档必要命令、失败和修复证据。最终提交副本按白名单生成，原始档案、旧包和唯一证据不得因清理被删除。
 
 ## 4. 质量门

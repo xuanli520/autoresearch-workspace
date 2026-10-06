@@ -1,6 +1,6 @@
 # 长程 Agent 脚本复用、配置与目录治理
 
-更新：2026-10-02。本文配合 [统一长跑与题包验收规范](../双Agent长跑与题目包验收规范.md) 和 [交付闭环](最终打包与交付闭环.md) 使用；历史复盘不作为新运行入口。
+更新：2026-10-06。本文配合 [统一长跑与题包验收规范](../双Agent长跑与题目包验收规范.md) 和 [交付闭环](最终打包与交付闭环.md) 使用；历史复盘不作为新运行入口。GPU 接入必读 [正确使用指南](../tools/gpu_scheduler/USAGE.md)，部署事实以 [公共进展](../ops/gpu_scheduler/进展清单.md) 为准。
 
 **原则：通用逻辑只维护一份，题目差异由薄适配器与配置表达；每次运行保存其真实版本，临时排障集中放置，完成后只保留有解释价值的证据。** 不为整理目录重写可用脚本，不把“临时”作为绕过版本、参数、测试和清理规则的理由。
 
@@ -13,6 +13,7 @@
 | 对象 | 放置位置与职责 | 不应包含 |
 |---|---|---|
 | 通用组件 | `tools/<component>/`，控制状态机、基础传输、监控、归档等跨题机制 | 题号、固定主机/GPU、模型秘密、评分常数 |
+| 跨题 GPU 服务运维 | `ops/gpu_scheduler/`，公共源配置、进展、不可变 release/plan 和发布/迁移证据 | 依赖单题事故目录、凭据、Reference/Hidden、题目数据或评分资产 |
 | 题目适配器 | `<题目>/ops/`或已有私有运行目录，提供启动、评分解析、合法候选与进程归属映射 | 复制整份通用控制器后逐题修改 |
 | 一次性排障代码 | `<题目>/ops/incidents/<时间-ID>/scratch/` | 留在项目根、公共工具、冻结题包或正式入口 |
 | 非敏感配置 | 题目私有`ops/config/`，运行时冻结一份到run | 密钥、口令、推理中的动态状态 |
@@ -38,6 +39,8 @@
 
 发布流程：源文件检查 → 受影响测试 → 生成新bundle → manifest与目标端逐文件核验 → 预检 → 按授权启动。记录组件版本、Schema、文件SHA-256、测试范围、来源和回滚路径。目标已存在且哈希不同，拒绝覆盖；不要靠重跑部署脚本“碰运气修好”。
 
+GPU 联合 release 使用 `python3 -B -m tools.gpu_scheduler.release --output/--check/--publish` 的真实参数（见 [公共 ops](../ops/gpu_scheduler/README.md)）。生成/上传与安装/切换分别记录，`--publish` 只传固定白名单并校验，不启动服务。文档修订不得写回已上传 release 或修改其 manifest；后续改动必须新发布 ID 和相应验证。旧 v4 正常停止会取消排队并终止作业，不能仅为迁移目录或同步指南停止共享服务。
+
 当前bundle命令（生成组件，不启动研究）：
 
 ```bash
@@ -51,7 +54,9 @@ python3 tools/research_handoff/bundle.py --check <同一staging目录>
 
 ### 2.3 测试覆盖真正的合同
 
-GPU 作业统一复用 [gpu_scheduler](../tools/gpu_scheduler/README.md) 的经校验配置与 API，不为单次实验重写排队或等待脚本。本地控制 Agent 默认采用阻塞式 `submit`；只有需要持续跟踪进度或同时编排多个任务时才使用 `submit_async`/`enqueue`。校验成功但当前资源不足的任务入队，排队上限与父级截止不因重连重置；等待中断后先查原 request/job，不自动重放。控制 Agent 的工具封装也须把调用保持为 pending，单纯启动 CLI 子进程或拿到会话编号不等于 GPU 作业完成。
+GPU 作业统一复用 [gpu_scheduler](../tools/gpu_scheduler/README.md) 的经校验配置与 API，不为单次实验重写排队或等待脚本。本地控制 Agent 默认阻塞式 `submit`；多任务编排/进度跟踪才用 `submit_async`/`enqueue`。durable 接入冻结原 request/spec/父级 deadline 和完整 max_runtime，去掉新请求的 queue_timeout，透传 `on_update` 为 `gpu.state`。调度器恢复排队意图，执行只对账；控制器按原轮 `WAITING_GPU` 排除等待且不耗 retry。INFEASIBLE/EXPIRED/未解决 UNKNOWN 单独归基础设施，不用私有 ensure_job/轮询/重提循环修复。外层工具须保持调用 pending，CLI 会话编号不等于完成。
+
+受影响验收重点包括：相同 request 跨 session 幂等、队列位置/bypasses/截止恢复、STARTING 先落账本和一次执行、对账/清理未确认继续占预约、INFEASIBLE 预测、backfill 不推迟队首、轮内等待及原硬截止、origin_session_id 评分对账、journal 损坏处理、真实 cgroup CPU/RAM 与 Docker aggregate 限额。资源画像 job_class 按方法/数据/协议版本维护，不能误共享异构样本；GPU VRAM/CU 不宣称硬隔离。纯文档更新只检查链接、命令/字段和语义，不重跑训练或云端故障注入。
 
 控制器变更重点验：重复启动排他、单组停止、超时子树清理、guard独立兜底、进程身份复用、预算余额、断线恢复、计时去重、半行JSONL和原子写、上下文交接、失败保留。评分/资源变更则补相应真实Harbor/设备测试。
 

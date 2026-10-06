@@ -185,6 +185,38 @@ class CompletionTests(unittest.TestCase):
         ledger = json.loads((self.evidence / 'selected.jobs.json').read_text())
         self.assertEqual(ledger['jobs'], self.jobs)
 
+    def test_selection_accepts_certified_earlier_deadline_without_mutating_source(self):
+        self.seal()
+        parent = copy.deepcopy(self.contract)
+        parent['run_id'] = 'parent'
+        parent['deadline'] = iso(120)
+        parent['candidate_manifest'] = 'selected.candidate.json'
+        parent['completion'].update(jobs_manifest='selected.jobs.json', result='selected.score.json',
+                                    receipt='selected.receipt.json', isolation='selected.isolation.json')
+        original_contract = copy.deepcopy(self.contract)
+        original_receipt = (self.evidence / 'completion.receipt.json').read_bytes()
+        with mock.patch.object(c, 'get_job', return_value=json.loads((self.job_dir / 'status.json').read_text())):
+            receipt = c.adopt_evaluation(parent, self.contract)
+        self.assertEqual(receipt['status'], 'COMPLETED')
+        self.assertEqual(receipt['original_deadline'], parent['deadline'])
+        self.assertEqual(self.contract, original_contract)
+        self.assertEqual((self.evidence / 'completion.receipt.json').read_bytes(), original_receipt)
+        isolation = json.loads((self.evidence / 'selected.isolation.json').read_text())
+        self.assertEqual(isolation['source_contract_hash'], c.digest(self.contract))
+        self.assertEqual(isolation['source_receipt_hash'], c.digest(json.loads(original_receipt)))
+
+    def test_selection_rejects_later_source_deadline_before_writing_evidence(self):
+        self.seal()
+        parent = copy.deepcopy(self.contract)
+        parent['run_id'] = 'parent'
+        parent['deadline'] = iso(30)
+        parent['candidate_manifest'] = 'selected.candidate.json'
+        parent['completion'].update(jobs_manifest='selected.jobs.json', result='selected.score.json',
+                                    receipt='selected.receipt.json', isolation='selected.isolation.json')
+        with self.assertRaisesRegex(longrun.ControllerError, 'deadline exceeds'):
+            c.adopt_evaluation(parent, self.contract)
+        self.assertFalse(any(self.evidence.glob('selected.*')))
+
     def test_restored_job_binds_original_session_and_rejects_changed_origin(self):
         snapshot = self.job_state('SUCCEEDED')
         snapshot.update(origin_session_id='session', session_id='new-session')

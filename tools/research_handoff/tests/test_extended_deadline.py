@@ -31,17 +31,23 @@ class ExtendedDeadlineTests(unittest.TestCase):
         }))
         self.assertEqual(validated["budget"]["hard_limit_seconds"], 54001)
 
-    def test_extended_deadline_is_bounded_to_two_days(self):
+    def test_extended_deadline_is_bounded_to_three_days(self):
         validated = validate_config(config({
             "window_seconds": 40000,
             "hard_limit_seconds": 90000,
             "allow_extended_hard_limit": True,
         }))
         self.assertEqual(validated["budget"]["hard_limit_seconds"], 90000)
+        validated = validate_config(config({
+            "window_seconds": 40000,
+            "hard_limit_seconds": 201000,
+            "allow_extended_hard_limit": True,
+        }))
+        self.assertEqual(validated["budget"]["hard_limit_seconds"], 201000)
         with self.assertRaises(ControllerError):
             validate_config(config({
                 "window_seconds": 40000,
-                "hard_limit_seconds": 172801,
+                "hard_limit_seconds": 259201,
                 "allow_extended_hard_limit": True,
             }))
 

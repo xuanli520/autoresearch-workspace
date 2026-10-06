@@ -218,10 +218,15 @@ def attest_container(inspected, groups):
     cpu = host.get("NanoCpus", 0) / 1000000000
     if not cpu and host.get("CpuPeriod", 0) > 0:
         cpu = host.get("CpuQuota", 0) / host["CpuPeriod"]
+    service = (inspected.get("Config", {}).get("Labels") or {}).get("com.docker.compose.service")
+    capabilities = [value.removeprefix("CAP_") for value in (host.get("CapAdd") or [])]
+    trusted_egress = (service == "harbor-docker-egress-control-sidecar"
+                     and set(capabilities) == {"NET_ADMIN", "NET_RAW"}
+                     and len(capabilities) == 2)
     if (host.get("CgroupParent") != receipt["slice"] or type(maximum) is not int or
             not 0 < maximum <= spec["memory_max_mib"] * MIB or
             host.get("MemorySwap") != maximum or not 0 < cpu <= spec["cpu_cores"] or
-            host.get("Privileged") or (host.get("CapAdd") or [])):
+            host.get("Privileged") or (capabilities and not trusted_egress)):
         raise ResourceLimitError("Docker resource limits or privileges violate the job contract")
     relative = "/" + str(Path(receipt["cgroup"]).relative_to(CGROUP_ROOT))
     if not any(controller == "" and path.startswith(relative + "/") for controller, path in groups):

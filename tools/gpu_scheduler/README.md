@@ -1,10 +1,12 @@
 # GPU 调度工具：阻塞提交与资源队列
 
-本工具是 [统一双 Agent 长跑规范](../../双Agent长跑与题目包验收规范.md) 强制采用的 GPU 入口；题目不得另建队列或直接启动训练绕过调度。任务生命周期由 research_handoff 管理，观测/登记由 gpu_monitor 管理；资源预约不等于硬隔离，容器/provider 取消适配须另行完成真实验收。
+本工具是 [统一双 Agent 长跑规范](../../双Agent长跑与题目包验收规范.md) 强制采用的 GPU 入口；题目不得另建队列或直接启动训练绕过调度。任务生命周期由 research_handoff 管理，观测/登记由 gpu_monitor 管理；GPU 显存/CU 预约与生产 CPU/RAM cgroup 强制合同分别声明，容器/provider 限额与取消须完成目标环境真实验收。
+
+日常操作必读 [正确使用指南](USAGE.md)，重大变更见 [更新记录](CHANGELOG.md)。本 README 描述 durable 源码合同；`v5-20261006-durable-r3` 已按用户授权部署并完成云端 systemd/cgroup 验收，实际部署状态以 [公共进展](../../ops/gpu_scheduler/进展清单.md) 为准。旧服务使用原配套接口，不能只换客户端；本次文档修订不修改已发布 release。
 
 单机、单个常驻 Python 进程、数据盘持久请求账本，**所有接入 Agent 的全局并发由 `max_running` 配置（1–32，兼容默认 2）**。实际准入须满足显存、计算份额、CPU、RAM 与遥测检查。支持同卡共享、多 GPU 选卡，每作业使用一张物理 GPU。默认提交阻塞到终态，异步接口用于多任务编排。重启恢复排队意图，永远不自动重跑已经启动的执行。
 
-正常停止仍定向取消并清理作业。异常退出后，`QUEUED` 保留原 request/job ID、submitted_at、bypasses、绝对截止；`STARTING/RUNNING/CANCELLING` 恢复成 `UNKNOWN` 对账状态，依据原 exit/scope 确认终态，绝不重新执行。独立执行器继续原截止监督，继承的单例锁在执行器退出前阻止第二个调度进程启动。
+正常停止仍定向取消并清理作业。异常退出后，`QUEUED` 保留原 request/job ID、submitted_at、bypasses、绝对截止；`STARTING/RUNNING/CANCELLING` 恢复成 `UNKNOWN` 对账状态，依据原 exit/scope/容器/执行器身份确认终态，绝不重新执行。服务单例由调度进程持有，执行器保留 job 级锁和身份并继续原截止监督；新服务可立即恢复，未对账完成的 GPU 保持隔离和预约。
 
 `requests.jsonl` 是追加、fsync、哈希链账本，每次状态迁移及插队计数变化落盘。残缺最后一行先归档再恢复有效前缀；完整行损坏拒绝启动。首次启动导入旧 session 记录，重复 request_id 对应不同执行或缺状态时拒绝迁移。跨题部署入口位于 [公共运行资料](../../ops/gpu_scheduler/README.md)。
 
@@ -40,6 +42,10 @@ python3 -B tools/gpu_scheduler/cli.py serve --config /mnt/data/ops/gpu-config.js
 | `gpus[].memory_mib` | 该卡可分配显存，建议低于实际容量并预留余量 |
 | `gpus[].compute_units` | 1–100 的计算预约总份额；通常设置为 100 |
 | `cpu_cores / ram_mib` | 全服务 CPU、RAM 声明额度，留出宿主余量 |
+| `execution_backend` | 生产必须 `systemd`，核验 cgroup v2 限额；`process` 仅 local_test 诊断 |
+| `systemd_user` | 仅本地 user-systemd 测试，生产不能以此替代 system manager 权限 |
+| `resource_sample_seconds` | 资源峰值采样间隔，默认 1 秒；采样不能代替 GPU 显存硬限 |
+| `profile_min_samples` | 同画像成功完整样本数门槛，默认 3；样本不足保守声明 |
 | `poll_seconds` | 调度与遥测间隔，0.05–10 秒；默认 1 秒 |
 | `service_seconds` | 普通服务阶段硬截止，默认/最大 43200 秒；持久服务无服务级截止，恢复请求不延长原截止 |
 | `persistent` | 显式启用无服务级截止的 GPU 队列；应由受管 systemd 单元以 `Restart=always` 管理，作业仍受自身预算约束 |
@@ -58,13 +64,13 @@ GPU 配置设置 `persistent: true`，省略 `service_seconds` 和 `infrastructu
 
 通过 `lifecycle.py install-gpu-plan --config <plan.json>` 安装唯一 systemd 单元。plan 包含 `version: 1`、数据盘上的 `root` 和 `gpu_config`、绝对 `python` 路径、`unit_name`、明确 `authorization`、全套调度源码和 GPU 配置的 `source_sha256`。先校验 GPU 配置；plan 的 root、tmp、cache 预先由服务用户创建。单元使用 `RequiresMountsFor`、开机自启、`Restart=always`；仅 systemd 控制元数据写入 `/etc/systemd/system`，全部任务日志和缓存保留在数据盘。
 
-持久服务维护通过 systemd。显式 stop 不会自动重启，CLI stop 仍取消本服务作业；异常重启恢复账本，原客户端可继续查询/等待原 job。服务级 stop 保留 session 校验，防止旧请求误停新服务。未知 cleanup 保留资源隔离和 UNKNOWN，等待不等于重跑授权。升级使用新不可变 release，旧 v4 首轮迁移必须先取得空闲窗口。
+持久服务维护通过 systemd。`systemctl stop` 显式停止单元，不触发 Restart；CLI `stop` 请求服务退出并取消作业，但在 `Restart=always` 托管下可能被重新启动，不能用它代替停止 systemd 单元。异常重启恢复账本，原客户端继续查询/等待原 job。服务级 stop 保留 session 校验，防止旧请求误停新服务。未知 cleanup 保留资源隔离和 UNKNOWN，等待不等于重跑授权。升级使用新不可变 release，旧 v4 首轮迁移须按授权核对空闲窗口或明确迁移合同，不能普通 stop 后假定无损恢复。
 
 ## 2. 提交、查询、取消
 
 复制 [job.example.json](job.example.json)，填写实际 argv、工作目录和资源需求。程序默认不经 shell。命令和作业配置会留证，不能把密钥写入 argv 或配置。
 
-本地控制 Agent **优先使用阻塞式 `submit`**：校验通过后立即入队，资源不足时保持 `QUEUED`，调用不会让 Agent 提前进入下一步，直到作业成功、失败、取消、超时、排队过期或进入 `UNKNOWN`；等待超时、用户中断或服务退出等关键中断则返回可恢复异常。只有需要持续跟踪进度或同时编排多个任务时，才使用显式异步 `enqueue`/`submit_async`，之后再调用 `wait`。
+本地控制 Agent **优先使用阻塞式 `submit`**：校验通过后持久受理，可行但资源不足时保持 `QUEUED`，不可行则返回 `INFEASIBLE`。调用等待成功、失败、取消、超时、排队过期或不在对账的 `UNKNOWN`；`UNKNOWN` 且 `reconciling=true` 仍继续等待。客户端等待超时、用户中断或服务退出等关键中断返回可恢复异常。只有需要持续跟踪进度或同时编排多个任务时才用 `enqueue`/`submit_async`，之后调用官方 `wait`。
 
 ```bash
 # 默认阻塞到终态；排队、训练和清理均包含在这次调用中。
@@ -90,9 +96,9 @@ python3 -B tools/gpu_scheduler/cli.py stop --root /mnt/data/autoresearch/gpu-que
 
 `cancel` 只停止指定作业，`stop` 取消排队并停止本服务全部运行作业；对 `serve` 进程发送 Ctrl-C/SIGTERM 也执行服务级清理。`CANCELLING` 和等待中断不表示清理完成，须检查真实 `exit.cleanup_ok`；服务停止时正在运行的作业可先通知等待者，再由独立执行器完成回收。
 
-`wait`/`cancel` 的 `--job-id` 与 `--id` 等价；也支持 `python3 -B -m tools.gpu_scheduler.cli cancel ...`。本地 Unix socket 和 SSH `rpc` 均提供同一 `cancel` 操作，无 HTTP 依赖。监控器保持只读，停止仍使用本工具已有连接配置和原 `session_id`。
+`wait`/`cancel` 的 `--job-id` 与 `--id` 等价；也支持 `python3 -B -m tools.gpu_scheduler.cli cancel ...`。本地 Unix socket 和 SSH `rpc` 提供同一 `cancel`，无 HTTP 依赖。durable 作业操作按原 request/job 跨 session 查询/取消；服务级 stop 必须当前 session。监控器保持只读，定向取消使用实际配套 CLI 和该运行已有连接配置。
 
-CLI 退出码：0 表示请求成功；阻塞 `submit`/`wait` 收到非成功终态或 `UNKNOWN` 返回 1；可恢复的等待超时或关键中断返回 3，stderr 含 JSON 身份/状态；配置、通信和服务错误返回 2。通信失败的 outcome 为 `UNKNOWN`，先查询原请求，不自动重放。进程真实退出码在 `exit.returncode`，`SUCCEEDED` 仅指进程正常退出及清理成功，不证明评分或科研目标完成。
+CLI 退出码：0 表示请求成功；阻塞 `submit`/`wait` 收到非成功终态或不在对账的 `UNKNOWN` 返回 1，对账中的 UNKNOWN 继续等待；可恢复的等待超时或关键中断返回 3，stderr 含 JSON 身份/状态；配置、通信和服务错误返回 2。通信失败的 outcome 为 `UNKNOWN`，先查询原请求，不自动重放。进程真实退出码在 `exit.returncode`，`SUCCEEDED` 仅指进程正常退出及清理成功，不证明评分或科研目标完成。
 
 `submit`/`wait` 的 `--timeout` 只限制本次等待，允许 0–43200 秒，不改变作业的排队/执行上限或父级截止。默认不设置客户端等待超时，但作业仍受原始预算约束。普通排队原因、STARTING/RUNNING 和进度更新不唤醒 Agent 进入下一步；这些更新留在 `status.json`/`events.jsonl` 中，关键中断和终态才结束调用。
 
@@ -100,7 +106,7 @@ CLI 退出码：0 表示请求成功；阻塞 `submit`/`wait` 收到非成功终
 
 ## 3. Python 接入
 
-从工作区根导入（部署时把该根放在 Python 模块搜索路径）：
+从实际配套发布根导入（部署时将该根放在 Python 模块搜索路径）。下例 `parent_run_hard_deadline_at` 必须来自原 run 的冻结硬截止，不按提交时间重算；正式接入与事件透传片段见 [使用指南](USAGE.md)：
 
 ```python
 from tools.gpu_scheduler import Client
@@ -116,9 +122,10 @@ result = client.submit({
     'cpu_cores': 8,
     'ram_mib': 16384,
     'max_runtime_seconds': 1800,
-    # 如属于已有长程 run，应传入其原始绝对截止：
-    # 'deadline_epoch': parent_run_deadline_epoch,
-    # 或 'deadline_at': parent_run_hard_deadline_at（必须包含时区，两者择一）,
+    'deadline_at': parent_run_hard_deadline_at,
+    'job_class': 'formal-eval-protocol-v1',
+    'memory_max_mib': 16384,
+    'memory_high_mib': 14745,
 })
 # submit 默认已等待到终态；不要再重复启动同一个 request_id。
 assert result['state'] in {'SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'EXPIRED', 'INFEASIBLE', 'UNKNOWN'}
@@ -134,6 +141,8 @@ queued = client.submit_async({
     'cpu_cores': 8,
     'ram_mib': 16384,
     'max_runtime_seconds': 1800,
+    'deadline_at': parent_run_hard_deadline_at,
+    'job_class': 'formal-eval-protocol-v1',
 })
 result = client.wait(queued['id'], timeout=4000)
 ```
@@ -142,7 +151,7 @@ result = client.wait(queued['id'], timeout=4000)
 
 可选 `gpu_uuid` 固定卡；不填则选择满足条件且当前利用率较低的卡。可选 `deadline_epoch` 为父任务的 UTC epoch 截止；实际截止同时受本次服务窗口和执行硬上限约束。等待期间若剩余预算不足以容纳完整执行上限，作业进入 `EXPIRED`，不会偷偷缩短正式协议或延长预算。
 
-接入现有 `research_handoff` 时，在题目私有适配器里提交训练/评分并等待反馈；Agent 对话本身不持有 GPU。适配器需持续发送真实研究心跳、单独记录排队区间，并在本轮清理 hook 中按保存的 job ID 取消未结束作业。SDK 等待不是研究心跳，GPU 运行时长也不是 QA16 有效研究时间。工具接口可用不表示既有题目已接入；正式启动前须核对适配器的真实提交、计时和清理调用链。
+接入 `research_handoff` 时，薄适配器用 `submit(spec, on_update=...)`/官方 `wait`，将快照透传到 `agent_protocol.gpu_state(job)`；控制器记原轮 WAITING_GPU、排除等待并保留原硬截止。RUNNING 仍需真实研究心跳，本轮清理 hook 按保存的 job ID 取消自己的未结束作业。SDK 等待不是研究心跳，GPU 时间也不是 QA16。接口可用不表示旧题目已接入，须核真实提交、事件/计时和清理调用链；基础设施终态不归普通 Agent 重试。
 
 ### 两个本地客户端通过 SSH 共用调度
 
@@ -155,7 +164,7 @@ result = client.wait(queued['id'], timeout=4000)
               8 个 Agent 按需提交，排队期间不占 GPU
 ```
 
-两端复制 [remote.example.json](remote.example.json)，分别将 `auth_file` 指向本地受管凭据文件（相对路径按配置文件所在目录解析），将 `python / cli / root` 配成相同云端入口。`timeout_seconds` 只用于短控制请求，`wait_timeout_seconds` 覆盖阻塞 `submit`/`wait` 的最长 SSH 等待窗口。配置只放凭据引用，不放口令值；认证复用 gpu_monitor 的 `auth.txt` / askpass 接口。作业 spec 文件在本地读取，经 SSH stdin JSON 传输；其中 argv、cwd 和解释器路径均指云端。
+两端复制 [remote.example.json](remote.example.json)，将 `auth_file` 指向本地受管凭据文件（相对路径按配置文件所在目录解析），将 `python / cli / root` 配成相同云端入口。durable SDK 等待使用每次最多 10 秒的 watch，SSH 单次超时至少 15 秒或配置的 `timeout_seconds`；`wait_timeout_seconds` 保留兼容字段，不作为队列截止或当前 SDK 整段等待预算。配置只放凭据引用，不放口令；认证复用 gpu_monitor 的 auth.txt/askpass。作业 spec 经 stdin JSON 传输，argv/cwd/解释器路径均指云端。
 
 ```bash
 python3 -B tools/gpu_scheduler/cli.py status --remote /local/ops/gpu-remote.json
@@ -176,7 +185,7 @@ jobs = client.jobs()
 
 `request_id` 应包含 project/run/agent/evaluation 身份，并在同一次提交重试时保持不变。两个客户端不得为不同实验使用同一个 ID；同 ID 不同 spec 会拒绝。所有变更请求不自动重试，连接失败记录 UNKNOWN，先按 request_id 查询。作业查询和等待跨 session 使用原身份，服务重启不重新排队；RemoteClient 仍绑定首次连接的主机/账号，auth.txt 被改到另一台主机时拒绝继续操作。
 
-阻塞 SDK 通过官方 watch 长轮询等待，最多每10秒一次事件/心跳快照，可断线续读；适配器只透传 on_update，不能另写等待循环。网络断开不取消已受理作业，按原 request/job 读取，不能自动重提。`stop` 会停止全部作业并校验当前 session，单项停止用 `cancel`。
+阻塞 SDK 通过官方 watch 长轮询等待，正常连接下每次等待最长10秒并返回事件/快照；断线期间不保证事件时效，恢复连接后只续读原作业。适配器只透传 on_update，不能另写等待循环。网络断开不取消已受理作业，按原 request/job 读取，不能自动重提。`stop` 会停止全部作业并校验当前 session，单项停止用 `cancel`。
 
 本地 SSH 客户端需同时保留 `tools/gpu_monitor/{monitor.py,probe.py,askpass.py}` 并保持 askpass 可执行；云端使用本机 RPC 桥接，无需复制凭据或 gpu_monitor。当前受管 SSH 客户端依赖 Linux/OpenSSH，不提供跨平台桌面应用。
 
@@ -198,7 +207,7 @@ jobs = client.jobs()
 
 工作区最新共享口径允许在不影响他人的前提下继续正在运行的训练，不因其他计算进程出现本身停止自己的任务。默认未知进程规则仅限制新作业准入，不是终止已有训练的依据。显式 `external_process_policy: shared` 将外部实时占用、尚未分配的预约显存及 `shared_headroom_mib` 一起核算；未知或过期遥测仍拒绝准入。题目适配器还须落实峰值/负载观察与自身退出条件，不干预外部任务。
 
-**显存 MiB、计算份额、CPU 和 RAM 均为合作式预约额度，不是硬隔离。** `CUDA_VISIBLE_DEVICES` 选择设备，线程变量提供默认线程数；它们不能阻止候选修改行为。没有 MPS/MIG/cgroup 显存强制限额，也不会凭瞬时低利用率撤销已有预约。作业超报/漏报峰值可能导致干扰/OOM，需先测量再配置。不能用本工具直接证明题面的进程显存硬上限已执行。
+**GPU 显存 MiB 和 CU 是预约，不是硬隔离；CPU/RAM 生产硬限由经核验 cgroup 执行。** `CUDA_VISIBLE_DEVICES` 和线程变量本身不强制这些边界。没有 MPS/MIG/cgroup 显存限额，不会凭瞬时低利用率撤销未来显存预约；漏报峰值仍可能干扰/OOM。RAM 预约下调也不保证多个总内存硬限同时触顶时宿主无压力，须保留容量余量并实测。不能用本工具直接证明题面的进程显存硬上限已执行。
 
 `fifo` 保留原有到达顺序和越过次数限制。`fair_share` 在每次分配后重新计算 owner 的显存/计算/CPU/RAM 占比，优先当前最大占比较低者，占比相同时优先最久未获调度者。稳定的 owner 由可信适配器提供，不能每次换 owner 规避公平规则。
 
@@ -208,13 +217,13 @@ jobs = client.jobs()
 
 增加并发必须同时核验主机资源。建议共享部署先设 `max_running: 4`，按实测设置 CPU/RAM/GPU 总额；4 只是上限。例如 32 GiB 主机给调度器 24 GiB RAM 后，8 GiB 的请求最多 3 份，剩余槽可供较小请求。仅改并发数而保持计算总份额50、每作业25和RAM总额16GiB、每作业8GiB，仍只能运行2份。
 
-当前调用方如果将模型请求、容器准备、CPU 分析和训练全部打包为一个70分钟GPU作业，会在无GPU计算时仍占预约。调度器不能仅凭瞬时低利用率释放其未来显存峰值。后续接入应把受管提交缩小到真正训练/评分阶段，并让排队预算覆盖合理等待；15分钟排队上限无法保证等到70分钟的前序任务完成。调整调用粒度和预算须在新配置/适配器上实施，不改写活动作业或旧失败结果。
+模型请求、容器准备、CPU 分析和训练若全部打包为一个长 GPU 作业，会在无 GPU 计算时仍占未来预约。接入应将提交范围缩小到真正训练/评分阶段并保留完整协议；原父级截止与完整 max_runtime 用于可行性预测，不再通过固定 queue_timeout 猜等待时间。调整调用粒度/预算用新配置与适配器，不改活动 spec 或旧失败结果。
 
 ## 5. 退出、异常与边界
 
 ```text
 QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
-   └→ CANCELLED / EXPIRED      └→ CANCELLING → CANCELLED
+   └→ CANCELLED / EXPIRED / INFEASIBLE  └→ CANCELLING → CANCELLED
 执行器/清理异常 → UNKNOWN（仍占额度，对应 GPU 隔离）
 ```
 
@@ -222,10 +231,10 @@ QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
 - 进程身份和定向清理复用 `tools/process_control/processes.py`，按随机归属 token 和 PID 启动身份操作，覆盖保留标记的 setsid 后代；不使用名称匹配或无范围 pkill。
 - 服务在事件循环内先持久化 STARTING 预约和固定截止，再由后台线程启动独立执行器；慢启动期间仍计入全部资源和并发上限，查询与取消可继续处理。取消记录通过 STOP.json 交给执行器，启动延迟不会重置执行截止。
 - 执行器丢失时，进程/容器回收与归属扫描在后台完成，状态提交仍由事件循环单写者处理。确认回收前继续占预约；有余量的其他作业仍可分配，失败则保持 UNKNOWN 并隔离对应卡。
-- 服务被 SIGKILL 后，已启动执行器继续按绝对截止和单调时钟上限回收。执行器持有主机用户级互斥锁，完成前新服务拒绝启动，即使更换运行根也一样。
+- 服务被 SIGKILL 后，已启动执行器继续原绝对截止和单调时钟上限回收。新服务立即从同一账本恢复队列与 UNKNOWN 执行预约；执行器 job 锁防止重复执行，对账完成前隔离对应 GPU。换 root 不能作为恢复办法，必须保留原账本与证据。
 - 服务仍存活而执行器意外退出时，服务尝试定向清理其子进程，单独保存 `recovery-exit.json`；无法确认则 `UNKNOWN` 并隔离该 GPU，不自动重试。
 - 调度器与执行器同时被强杀、进程清除归属标记、跨 UID 或经外部 daemon 启动的作业超出本机合作式保护范围。不能把本工具当作恶意代码沙箱。服务 socket 不应直接暴露给公开 solver；由可信题目适配器代理。所有同用户客户端可查看/取消所有作业，没有租户权限隔离。
-- 清理一般需要少量时间；发出超时信号不等于内核立即回收。服务退出先等待已经发出的执行器启动与异常回收确定结果，保留继承锁；随后对正常执行器最多观察 8 秒，残留执行器继续持锁，直到原截止及清理完成。
+- 清理需要时间，超时信号不等于立即回收。正常服务退出先等待已发起的启动/回收操作，再最多观察 8 秒；仍在执行/未知的预约由账本保留，原执行器继续监督，不能以服务进程退出认定所有资源已释放。
 
 每次启动有新的 session_id，并从持久账本恢复排队。status.json 是快照，执行终态依据真实 exit.json 和 scope 对账；UNKNOWN 对账中不重跑。历史评分与轨迹始终绑定 origin_session_id，不把新 session 当新实验。
 
@@ -233,6 +242,9 @@ QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
 <root>/
   scheduler.sock                  # 本机 API，0600
   service.json                    # 最近启动入口（不作为存活证据）
+  requests.jsonl                  # append-only 请求/状态/画像账本
+  legacy-import.json              # 旧 session 导入回执，不代替真实对账
+  journal-torn-tail-*.bin          # 如出现残缺尾行，保留原字节
   sessions/<session_id>/
     service.json                  # 配置、原截止、源码哈希
     events.jsonl                  # 状态变化与原因
@@ -240,6 +252,8 @@ QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
     jobs/<job_id>/
       spec.json / status.json     # 作业声明和历史状态
       launch.json / started.json  # 真实启动与身份
+      executor.json / executor.lock # 持久执行器身份与 job 排他锁
+      resource-limits.json / resource-usage.json # 实际限额与采样峰值
       stdout.log / stderr.log / executor.log
       STOP.json / exit.json       # 停止请求与实际执行回执
       recovery-exit.json           # 仅执行器意外退出时
@@ -252,15 +266,19 @@ QUEUED → STARTING → RUNNING → SUCCEEDED / FAILED / TIMED_OUT
 python3 -B -W error::ResourceWarning -m unittest discover -s tools/gpu_scheduler/tests -v
 ```
 
-测试通过模拟 GPU 遥测和真实本地 CPU 子进程验证四并发、owner 公平、等待老化、持续短作业下的大作业保护、多GPU回填、持久服务与作业预算隔离，以及阻塞提交、事件唤醒、资源排队、校验拒绝、幂等、取消、超时、断线释放、可恢复中断、后代清理、服务崩溃与旧会话拒绝；临时文件集中于 `notes/gpu-scheduler-v1/scratch/` 并由测试清理。`serve/validate --local-test` 仅用于 CPU 诊断，跳过数据盘校验并模拟 GPU，不能用于真实实验。真实 GPU/SSH 验收脚本需要持续采样和并行故障注入，因此显式使用 `submit_async`，不代表普通控制 Agent 应默认异步提交。
+测试用模拟 GPU 遥测和真实本地 CPU 子进程验证并发/公平/预约回填、deadline/INFEASIBLE、跨 session 幂等和持久队列恢复、运行中立即重启/只执行一次、执行器丢失清理、watch/断线续读、资源画像/限额及控制器 WAITING_GPU/评分来源对账。实际冻结回归数量与证据见 [更新记录](CHANGELOG.md)。临时文件由相关测试清理；`--local-test` 跳过数据盘校验并模拟 GPU，不能用于真实实验。真实 GPU/SSH 故障注入需独立授权和空闲配置，不把历史测试当本次云端验收。
 
 部署保持相对结构：`tools/gpu_scheduler/*.py` 和 `tools/process_control/{__init__,processes}.py`，另带 README 和示例。共享进程实现只维护在 `tools/process_control/`；research_handoff bundle 将同一源码嵌入 `core/processes.py`，保持独立可运行。复制到新的不可变数据盘发布目录，核对文件哈希；运行服务的 `service.json` 自动记录实际代码哈希。不要热覆盖已有执行器的源码。没有自动部署、购买或云 API 调用。
 
 作业的 `deadline_at` 接受带时区的 ISO8601 字符串，校验时统一为 `deadline_epoch`，与父级/服务截止取较早者。例如 `2026-10-07T00:00:00+08:00` 与 `2026-10-06T16:00:00Z` 均为 `1791302400`。无时区或同时指定两种截止均拒绝；相同截止的不同表示规范化后不破坏 request 幂等。历史数值时间戳和已有记录无需迁移。
 
-升级时同步发布客户端与服务端：`submit` 由异步受理改为默认阻塞，是调用行为变更；旧的“提交后逐项监控/并行提交”调用需改为 `submit_async`（CLI `enqueue`）。旧服务不支持新增等待协议，不能只换客户端。既有 run/release 与历史哈希不改，当前作业结束后再按授权采用新发布路径。2026-10-01 变更、测试与发布索引见 [阻塞协议记录](../../notes/gpu-scheduler-v2-blocking/incident.md)。
+升级同步核对服务端、客户端、控制器与薄适配器。v5 新增 watch、持久身份/队列、INFEASIBLE、cgroup 及 WAITING_GPU，旧 v4 不支持全部新合同，不能只换客户端或热覆盖源码。2026-10-01 的 submit 默认阻塞变更及历史迁移见 [阻塞协议记录](../../notes/gpu-scheduler-v2-blocking/incident.md)，本次变更见 [更新记录](CHANGELOG.md)。既有 run/release 与历史哈希不改；只在授权及空闲窗口/明确迁移合同成立后切换。
 
-2026-09-30 已在真实 RTX 4090 上完成短时验收：单作业、两个 CUDA 作业同卡及第三个排队、定向取消、执行超时、服务 SIGKILL 后独立截止/重启互斥、正常停止均通过。共执行 7 个合成作业，142 次遥测观测到最多 2 个 GPU 计算进程、显存采样峰值 1135 MiB；收尾无 GPU 计算进程，显存回到 1 MiB。没有发现需要修改调度核心的云端兼容问题。
+### 历史云端烟测（旧版合同）
+
+下列结果和命令只对应旧版。`cloud_smoke.py` 尚保留 `queue_timeout_seconds` 和旧重启互斥断言，不能用于 v5 durable 验收；新版目标环境验收须按公共 ops 的后续授权与验收范围准备，不直接套用该脚本。
+
+2026-09-30 已在真实 RTX 4090 上完成短时验收：单作业、两个 CUDA 作业同卡及第三个排队、定向取消、执行超时、服务 SIGKILL 后独立截止/重启互斥、正常停止均通过。共执行 7 个合成作业，142 次遥测观测到最多 2 个 GPU 计算进程、显存采样峰值 1135 MiB；收尾无 GPU 计算进程，显存回到 1 MiB。没有发现需要修改当时调度核心的云端兼容问题。
 
 实测脚本 [cloud_smoke.py](tests/cloud_smoke.py) 只在显式执行时运行，不随 unittest 自动启动 GPU。它需要真实数据盘配置、未占用的授权 GPU、现有可用 CUDA PyTorch 解释器及一个新的输出目录：
 

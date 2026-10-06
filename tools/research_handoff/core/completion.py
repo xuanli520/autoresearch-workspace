@@ -439,9 +439,14 @@ def adopt_evaluation(contract: dict[str, Any], source_contract: dict[str, Any]) 
     trust_boundary(contract)
     trust_boundary(source_contract)
     for name in ("task_id", "candidate_root", "stage", "score_expectation", "metric", "direction",
-                 "required_seeds", "protocol_hash", "deadline"):
+                 "required_seeds", "protocol_hash"):
         if contract[name] != source_contract[name]:
             raise ControllerError("selected experiment belongs to a different scientific contract")
+    # The trusted parent may be extended by an authorized amendment. An
+    # experiment certified under an earlier deadline still satisfies that
+    # parent, but its original contract/receipt must remain unchanged.
+    if timestamp(source_contract["deadline"]) > timestamp(contract["deadline"]):
+        raise ControllerError("selected experiment deadline exceeds the research run deadline")
     for name in ("evidence_root", "signing_key", "data_hash", "evaluator_hash", "training", "private_roots"):
         if contract["completion"][name] != source_contract["completion"][name]:
             raise ControllerError("selected experiment has a different trust boundary")
