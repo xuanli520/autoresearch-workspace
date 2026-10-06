@@ -234,6 +234,12 @@ class Scheduler:
                 # Unexpected executor loss: reclaim only this exact token.
                 receipt = {"reason": "executor_lost", "returncode": None,
                            "cleanup_ok": processes.terminate_scope(job["token"], 1)}
+                try:
+                    from .container_ownership import cleanup_job
+                    receipt["container_cleanup"] = cleanup_job(directory)
+                except Exception as exc:
+                    receipt["container_cleanup"] = {"cleanup_ok": False, "error": type(exc).__name__ + ": " + str(exc)}
+                    receipt["cleanup_ok"] = False
                 atomic_json(directory / "recovery-exit.json", {"at": time.time(), **receipt})
             job["exit"] = receipt
             if not receipt.get("cleanup_ok") or processes.scope_members(job["token"]):

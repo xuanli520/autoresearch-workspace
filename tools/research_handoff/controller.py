@@ -359,8 +359,8 @@ def amend_run(run_dir: Path, config: dict, *, expected_sha256: str, expected_tur
         if expired and not extend_expired_budget:
             raise ControllerError('expired budget requires explicit --extend-expired-budget authorization')
         deadline_changed = config['deadline'] != old['deadline']
-        if deadline_changed and not (expired and extend_expired_budget):
-            raise ControllerError('amend preserves the frozen scientific completion contract')
+        if deadline_changed and not extend_expired_budget:
+            raise ControllerError('deadline extension requires explicit authorization')
         for key in ('task_id', 'root', 'workdir', 'context'):
             if config[key] != old[key]:
                 raise ControllerError('amend cannot change task identity, storage or context contract')
@@ -1341,7 +1341,7 @@ def build_parser():
     cmd.add_argument('--expected-config-sha256', required=True); cmd.add_argument('--expected-turn', type=int, required=True)
     cmd.add_argument('--reason', required=True)
     cmd.add_argument('--extend-expired-budget', action='store_true',
-                     help='explicitly authorize a later deadline for an expired, fully stopped run; preserves target and credit')
+                     help='explicitly authorize a later deadline for a fully stopped run (before or after expiry); preserves target and credit')
     cmd.add_argument('--storage-migration-source', type=Path,
                      help='explicitly migrate a fully stopped run, verifying its preserved source on the old data device')
     cmd = sub.add_parser('logs'); cmd.add_argument('--run-id', required=True)

@@ -44,6 +44,29 @@ def validate_wait_timeout(timeout):
     return None if timeout is None else number(timeout, "timeout", 0, 43200)
 
 
+def fit_job_time_limits(max_runtime_seconds, queue_timeout_seconds, remaining_seconds,
+                        *, queue_reserve_seconds=600, grace_seconds=30, min_runtime_seconds=120):
+    """Fit a new request's queue and execution limits inside its parent budget.
+
+    Use only before submitting: accepted/unknown requests must retain their spec.
+    Reserving a queue window also avoids immediate expiry at admission.
+    """
+    runtime = number(max_runtime_seconds, "max_runtime_seconds", .1, 43200)
+    queue = number(queue_timeout_seconds, "queue_timeout_seconds", 1, 43200)
+    remaining = number(remaining_seconds, "remaining_seconds")
+    reserve = min(queue, number(queue_reserve_seconds, "queue_reserve_seconds", 1),
+                  max(1, remaining * .25))
+    grace = number(grace_seconds, "grace_seconds")
+    minimum = number(min_runtime_seconds, "min_runtime_seconds")
+    runtime = min(runtime, math.floor(remaining - reserve - grace))
+    if runtime <= minimum:
+        raise ValueError("remaining parent budget cannot fit GPU setup and execution")
+    queue = min(queue, remaining - runtime - grace)
+    if queue < 1:
+        raise ValueError("remaining parent budget cannot fit a queued GPU iteration")
+    return {"max_runtime_seconds": runtime, "queue_timeout_seconds": queue}
+
+
 def number(value, name, low=0, high=float("inf")):
     if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
         raise ValueError(f"{name} must be finite and in [{low}, {high}]")

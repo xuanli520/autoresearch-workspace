@@ -182,6 +182,10 @@ class ManagedDockerEnvironment(DockerEnvironment):
                                     Path(mount['target']).is_relative_to(verifier))]
             if not self._enable_egress_control:
                 raise ValueError("Agent isolation requires Harbor egress control before startup")
+        if os.environ.get("GPU_SCHEDULER_JOB_DIR"):
+            from tools.gpu_scheduler.container_ownership import register_project
+            register_project(_sanitize_docker_compose_project_name(self.session_id),
+                             self.network_config['docker_host'])
         result = await super().start(force_build)
         if self.gpu_memory_policy:
             import subprocess

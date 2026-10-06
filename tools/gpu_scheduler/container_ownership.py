@@ -6,6 +6,8 @@ import os
 import re
 import stat
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 from .common import atomic_json, check_storage, processes, read_json
@@ -27,6 +29,84 @@ def _container_cgroups(pid, container_id):
     names = {container_id, f"docker-{container_id}.scope"}
     return [(controller, path) for controller, path in _cgroups(pid)
             if names.intersection(Path(path).parts)]
+
+
+def register_project(project, docker_host):
+    """Record trusted ownership before Docker can create any project resources."""
+    job_dir = os.environ.get("GPU_SCHEDULER_JOB_DIR")
+    if not job_dir:
+        return None
+    directory = Path(job_dir)
+    if not directory.is_absolute() or directory.resolve(strict=True) != directory or not _trusted(directory, directory=True):
+        raise ValueError("project registration requires the trusted job directory")
+    launch = read_json(directory / "launch.json")
+    if not _trusted(directory / "launch.json") or (launch["id"] != os.environ.get("GPU_SCHEDULER_JOB_ID")
+            or launch["token"] != os.environ.get("AUTORESEARCH_PROCESS_TOKEN")):
+        raise ValueError("project registration does not match the launching job")
+    if not isinstance(project, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", project):
+        raise ValueError("invalid exact Docker project")
+    if not docker_host.startswith("unix://") or not stat.S_ISSOCK(Path(docker_host[7:]).stat().st_mode):
+        raise ValueError("project registration requires a local Docker socket")
+    check_storage(launch["config"], directory)
+    projects = directory / "container-projects"
+    projects.mkdir(mode=0o700, exist_ok=True)
+    if not _trusted(projects, directory=True):
+        raise ValueError("project receipts require a trusted host directory")
+    target = projects / (project + ".json")
+    if target.is_symlink():
+        raise ValueError("project receipt cannot be a symlink")
+    atomic_json(target, {"version": 1, "job_id": launch["id"], "token": launch["token"],
+                        "project": project, "docker_host": docker_host})
+    return {"registered": True, "job_id": launch["id"], "project": project}
+
+
+def cleanup_job(directory, *, timeout=20):
+    """Reclaim registered projects before an executor releases its GPU slot."""
+    from .docker_cleanup import cleanup
+    directory = Path(directory)
+    launch = read_json(directory / "launch.json")
+    check_storage(launch["config"], directory)
+    projects = {}
+    for name in ("container-projects", "containers"):
+        receipts = directory / name
+        if not receipts.exists():
+            continue
+        if not _trusted(receipts, directory=True):
+            raise ValueError("container cleanup receipts are not trusted")
+        for path in receipts.glob("*.json"):
+            if not _trusted(path) or path.stat().st_size > 16384:
+                raise ValueError("invalid container cleanup receipt")
+            row = read_json(path)
+            if (row.get("version") != 1 or row.get("job_id") != launch["id"]
+                    or row.get("token") != launch["token"]):
+                raise ValueError("container cleanup receipt identity mismatch")
+            project, endpoint = row.get("project"), row.get("docker_host")
+            if (not isinstance(project, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", project)
+                    or not isinstance(endpoint, str) or not endpoint.startswith("unix://")):
+                raise ValueError("invalid registered Docker project or endpoint")
+            if project in projects and projects[project] != endpoint:
+                raise ValueError("project endpoint binding changed")
+            projects[project] = endpoint
+    deadline = time.monotonic() + timeout
+    removed = []
+    with tempfile.TemporaryDirectory(prefix="container-cleanup-", dir=directory) as temporary:
+        base = Path(temporary)
+        for index, endpoint in enumerate(sorted(set(projects.values()))):
+            selected = base / str(index)
+            selected.mkdir(mode=0o700)
+            for project, host in projects.items():
+                if host == endpoint:
+                    atomic_json(selected / (project + ".json"), {"project": project})
+            def docker(*argv):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("registered container cleanup deadline")
+                return subprocess.run(["docker", "--host", endpoint, *argv], capture_output=True,
+                                      text=True, timeout=remaining, check=True).stdout
+            removed.extend(cleanup(selected, docker, base / (str(index) + ".receipt.json"))["removed"])
+    result = {"cleanup_ok": True, "projects": sorted(projects), "removed": removed, "at_epoch": time.time()}
+    atomic_json(directory / "container-cleanup.json", result)
+    return result
 
 
 def register_container(container_id, docker_host, project):

@@ -98,8 +98,16 @@ def run(directory, lock_fd):
                 returncode = child.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 cleanup_ok = False
+        try:
+            from .container_ownership import cleanup_job
+            container_cleanup = cleanup_job(directory)
+            cleanup_ok = cleanup_ok and container_cleanup["cleanup_ok"]
+        except Exception as exc:
+            container_cleanup = {"cleanup_ok": False, "error": type(exc).__name__ + ": " + str(exc)}
+            cleanup_ok = False
         receipt = {"at": time.time(), "reason": reason, "returncode": returncode,
                    "cleanup_ok": cleanup_ok,
+                   "container_cleanup": container_cleanup,
                    "runtime_seconds": 0 if started is None else time.monotonic() - started}
         # Avoid writing through a vanished data mount onto the system disk.
         check_storage(cfg, directory)
