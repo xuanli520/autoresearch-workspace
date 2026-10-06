@@ -37,6 +37,7 @@ FILES = (
     "core/rpc.py",
     "core/longrun.py",
     "core/research_time.py",
+    "core/runtime_artifacts.py",
     "core/storage_migration.py",
     "core/remote.py",
     "providers/__init__.py",
