@@ -174,13 +174,7 @@ async def serve(raw: dict[str, Any], *, local_test: bool = False) -> None:
             server.close()
             await server.wait_closed()
         if scheduler is not None:
-            try:
-                scheduler.begin_shutdown()
-            except (OSError, ValueError):
-                # Storage failure must not prevent signalling our own executors.
-                for job in scheduler.active():
-                    if job["process"] is not None and job["process"].poll() is None:
-                        job["process"].terminate()
+            scheduler.begin_shutdown()
             await scheduler.settle_background()
             cleanup_deadline = time.monotonic() + 8
             while any(j["process"] is not None and j["process"].poll() is None for j in scheduler.active()):

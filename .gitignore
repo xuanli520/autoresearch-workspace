@@ -123,6 +123,10 @@
 !/tools/research_handoff/tests/
 /tools/research_handoff/tests/*
 !/tools/research_handoff/tests/test_*.py
+!/tools/research_handoff/tests/fixtures/
+/tools/research_handoff/tests/fixtures/*
+!/tools/research_handoff/tests/fixtures/__init__.py
+!/tools/research_handoff/tests/fixtures/batch_adapter.py
 **/.env
 **/.env.*
 **/api_key.txt

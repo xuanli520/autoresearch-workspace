@@ -191,7 +191,21 @@ class Scheduler:
         for event in self._job_events.values():
             event.set()
         for job in self.jobs.values():
-            self.cancel(job["id"], reason)
+            try:
+                self.cancel(job["id"], reason)
+            except (OSError, ValueError):
+                # Keep the fallback pending even when Popen has not returned.
+                job["stop_without_receipt"] = True
+                self._signal_executor_stop(job)
+
+    @staticmethod
+    def _signal_executor_stop(job: dict[str, Any]) -> None:
+        proc = job["process"]
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
 
     def _prepare_launch(self, job: dict[str, Any], gpu_uuid: str) -> tuple[Path, dict[str, str]]:
         directory = Path(job["directory"])
@@ -234,12 +248,15 @@ class Scheduler:
         try:
             job["process"] = await asyncio.to_thread(self._spawn_worker, directory, self.lock_fd, env)
         except OSError as exc:
-            cancelled = job["state"] == "CANCELLING"
+            cancelled = job["state"] == "CANCELLING" or self.closing
             job["exit"] = {"returncode": None, "cleanup_ok": True,
                            "reason": "cancelled" if cancelled else "spawn_error"}
             atomic_json(directory / "exit.json", {"at": time.time(), **job["exit"]})
             self.transition(job, "CANCELLED" if cancelled else "FAILED",
                             "cancelled" if cancelled else f"spawn_error:{type(exc).__name__}")
+        else:
+            if job.get("stop_without_receipt"):
+                self._signal_executor_stop(job)
 
     def launch(self, job: dict[str, Any], gpu_uuid: str) -> None:
         directory, env = self._prepare_launch(job, gpu_uuid)

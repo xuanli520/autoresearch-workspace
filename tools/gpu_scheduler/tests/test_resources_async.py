@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import redirect_stdout
+from io import StringIO
+import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -12,7 +16,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from tools.gpu_scheduler.common import read_json, validate_config, validate_job
+from tools.gpu_scheduler.common import atomic_json, processes, read_json, validate_config, validate_job
 from tools.gpu_scheduler.resources import choose_gpu, probe, simulated_probe
 from tools.gpu_scheduler.scheduler import Scheduler
 
@@ -158,6 +162,130 @@ class AsyncDispatchTests(unittest.IsolatedAsyncioTestCase):
         await self.scheduler.settle_background()
         self.assertEqual(self.scheduler.get(first["id"])["state"], "CANCELLED")
         self.assertFalse(marker.exists())
+
+    async def test_shutdown_rechecks_executor_after_stop_receipt_failure(self):
+        """A STOP write failure must not leave a late async executor running."""
+        marker = self.directory / "candidate-started"
+        raw = specification(self.directory)
+        raw["command"] = [sys.executable, "-B", "-c",
+                           f"from pathlib import Path; Path({str(marker)!r}).touch(); import time; time.sleep(30)"]
+        job = self.scheduler.submit(raw)
+        release, entered = threading.Event(), threading.Event()
+        spawn = self.scheduler._spawn_worker
+
+        def slow_spawn(*args):
+            entered.set()
+            if not release.wait(3):
+                raise RuntimeError("test spawn was not released")
+            return spawn(*args)
+
+        with patch.object(self.scheduler, "_spawn_worker", side_effect=slow_spawn), \
+                patch("tools.gpu_scheduler.scheduler.atomic_json") as write:
+            def fail_stop(path, value):
+                if Path(path).name == "STOP.json":
+                    raise OSError("simulated stop receipt failure")
+                return atomic_json(path, value)
+            write.side_effect = fail_stop
+            await self.scheduler.tick_async(simulated_probe(self.scheduler.config))
+            self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+            self.scheduler.begin_shutdown("test_stop")
+            self.assertTrue(self.scheduler.jobs[job["id"]].get("stop_without_receipt"))
+            release.set()
+            await self.scheduler.settle_background()
+
+        process = self.scheduler.jobs[job["id"]]["process"]
+        await asyncio.to_thread(process.wait, 5)
+        await self.scheduler.reconcile_async()
+        await self.scheduler.settle_background()
+        self.assertIsNotNone(process.poll())
+        self.assertFalse(processes.scope_members(self.scheduler.jobs[job["id"]]["token"]))
+        self.assertFalse(any(item["process"] is not None and item["process"].poll() is None
+                             for item in self.scheduler.active()))
+
+    async def test_service_stop_cleans_late_executor_and_continues_after_write_failure(self):
+        await self.check_service_stop_receipt_failure(use_signal=False)
+
+    async def test_service_sigterm_cleans_late_executor_after_write_failure(self):
+        await self.check_service_stop_receipt_failure(use_signal=True)
+
+    async def check_service_stop_receipt_failure(self, *, use_signal):
+        from tools.gpu_scheduler.server import serve
+
+        self.scheduler.root.chmod(0o700)
+        marker = self.directory / "late-candidate"
+        raw = specification(self.directory)
+        raw.update(max_runtime_seconds=30, command=[sys.executable, "-B", "-c",
+            f"from pathlib import Path; Path({str(marker)!r}).touch(); import time; time.sleep(30)"])
+        first = self.scheduler.get(self.scheduler.submit(raw)["id"])
+        second = self.scheduler.get(self.scheduler.submit({**raw, "request_id": "second"})["id"])
+        third = self.scheduler.get(self.scheduler.submit({**raw, "request_id": "queued"})["id"])
+        release, entered = threading.Event(), threading.Event()
+        spawn = self.scheduler._spawn_worker
+
+        def slow_spawn(directory, *args):
+            process = spawn(directory, *args)
+            if directory.name == first["id"]:
+                # Leave a real candidate running while its Popen handoff is pending.
+                deadline = time.monotonic() + 3
+                while (not (directory / "started.json").exists() or not marker.exists()) and time.monotonic() < deadline:
+                    time.sleep(.01)
+                entered.set()
+                if not release.wait(3):
+                    process.terminate()
+                    process.wait(5)
+                    raise RuntimeError("test spawn was not released")
+            return process
+
+        def fail_stop(path, value):
+            if Path(path) == Path(first["directory"]) / "STOP.json":
+                raise OSError("simulated stop receipt failure")
+            return atomic_json(path, value)
+
+        service = None
+        try:
+            with patch("tools.gpu_scheduler.server.validate_config", return_value=self.scheduler.config), \
+                    patch("tools.gpu_scheduler.server.Scheduler", return_value=self.scheduler), \
+                    patch.object(self.scheduler, "_spawn_worker", side_effect=slow_spawn), \
+                    patch("tools.gpu_scheduler.scheduler.atomic_json", side_effect=fail_stop), \
+                    redirect_stdout(StringIO()):
+                service = asyncio.create_task(serve({}, local_test=True))
+                self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+                self.assertTrue(marker.exists())
+                self.assertIsNone(first["process"])
+                if use_signal:
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    deadline = time.monotonic() + 2
+                    while not self.scheduler.closing and time.monotonic() < deadline:
+                        await asyncio.sleep(.01)
+                    self.assertTrue(self.scheduler.closing)
+                else:
+                    reader, writer = await asyncio.open_unix_connection(str(self.scheduler.root / "scheduler.sock"))
+                    try:
+                        writer.write(json.dumps({"op": "stop", "session_id": self.scheduler.id}).encode() + b"\n")
+                        await writer.drain()
+                        reply = json.loads(await asyncio.wait_for(reader.readline(), 2))
+                        self.assertTrue(reply["ok"], reply)
+                    finally:
+                        writer.close()
+                        await writer.wait_closed()
+                release.set()
+                await asyncio.wait_for(asyncio.shield(service), 8)
+            self.assertEqual(third["state"], "CANCELLED")
+            for job in (first, second):
+                self.assertIsNotNone(job["process"].poll())
+                self.assertEqual(job["state"], "CANCELLED")
+                self.assertTrue(job["exit"]["cleanup_ok"])
+                self.assertFalse(processes.scope_members(job["token"]))
+            receipt = read_json(self.scheduler.directory / "service-exit.json")
+            self.assertTrue(receipt["cleanup_confirmed"])
+            self.assertEqual(receipt["active_count"], 0)
+            self.assertFalse((self.scheduler.root / "scheduler.sock").exists())
+        finally:
+            release.set()
+            if service is not None and not service.done():
+                await asyncio.wait_for(service, 8)
+            for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                asyncio.get_running_loop().remove_signal_handler(sig)
 
     async def test_slow_recovery_keeps_reservation_without_blocking_another_dispatch(self):
         first = self.scheduler.get(self.scheduler.submit(specification(self.directory))["id"])

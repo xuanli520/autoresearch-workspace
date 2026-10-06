@@ -37,15 +37,29 @@ class ReviewRegressionTests(unittest.TestCase):
                         self.raw['files']['exit.json'] = {'text': json.dumps({'exit_code': rc})}
                         self.raw['processes'] = [{'pid': 9, 'state': 'S'}] if alive else []
                         result = monitor.evaluate(self.task, self.host)
-                        expected = ('COMPLETED' if rc == 0 else 'FAILED') if rc is not None else (
+                        expected = 'STOPPED' if declared == 'STOPPED' and rc in (None, 0) else (
+                            ('COMPLETED' if rc == 0 else 'FAILED') if rc is not None else (
                             declared if declared in monitor.TERMINAL else
-                            'RUNNING' if alive else 'EXITED_WITHOUT_RESULT')
+                            'RUNNING' if alive else 'EXITED_WITHOUT_RESULT'))
                         conflict = (alive and expected in monitor.TERMINAL) or (
                             rc is not None and declared in monitor.TERMINAL and declared != expected)
                         self.assertEqual(result['state'], expected)
                         self.assertEqual('STATUS_CONFLICT' in result['alerts'], conflict)
                         self.assertEqual(result['declared_state'], declared)
                         self.assertEqual(result['exit_code'], rc)
+
+    def test_cancel_aliases_and_custom_terminal_mapping_keep_successful_stop(self):
+        for declared in ('STOPPED', 'CANCELLED', 'CANCELED', 'OPERATOR_STOP'):
+            with self.subTest(declared=declared):
+                task = copy.deepcopy(self.task)
+                if declared == 'OPERATOR_STOP':
+                    task['terminal_states'] = {'STOPPED': ['OPERATOR_STOP']}
+                self.document({'state': declared})
+                self.raw['files']['exit.json'] = {'text': '{"exit_code": 0}'}
+                result = monitor.evaluate(task, self.host)
+                self.assertEqual(result['state'], 'STOPPED')
+                self.assertNotIn('STATUS_CONFLICT', result['alerts'])
+                self.assertTrue(monitor.all_tasks_terminal([result]))
 
     def test_paused_and_scheduler_waiting_states(self):
         self.document({'state': 'RUNNING'})

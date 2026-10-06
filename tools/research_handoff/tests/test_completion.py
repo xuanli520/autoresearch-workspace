@@ -781,13 +781,13 @@ class CompletionTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 'HARBOR_REWARD_MISMATCH')
 
     def task_adapter(self):
-        path = ROOT.parents[1] / 'autoresearch_三期/auto0802/ops/adapters/experiment_batch.py'
-        spec = importlib.util.spec_from_file_location('auto0802_batch_adapter', path)
+        path = ROOT / 'tests/fixtures/batch_adapter.py'
+        spec = importlib.util.spec_from_file_location('completion_batch_fixture', path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
 
-    def test_existing_task_adapter_requires_contract_before_any_work(self):
+    def test_batch_adapter_requires_contract_before_any_work(self):
         adapter = self.task_adapter()
         with mock.patch.object(adapter.subprocess, 'Popen', side_effect=AssertionError('must not launch')):
             with self.assertRaises(ValueError):
@@ -800,7 +800,7 @@ class CompletionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             adapter.load_completion(config)
 
-    def test_existing_task_adapter_seals_real_process_records_and_private_models(self):
+    def test_batch_adapter_seals_process_records_and_private_models(self):
         adapter = self.task_adapter()
         self.manifest.update(models=[], checkpoints=[])
         longrun.atomic_json(self.evidence / 'candidate.manifest.json', self.manifest)

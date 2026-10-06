@@ -778,6 +778,42 @@ time.sleep(.08);emit('turn.completed',credit=True)
         self.assertNotEqual(self.invoke('run','--run-id','test','--no-guard').returncode,0)
         self.assertEqual(self.read()['budget']['hard_deadline_at'],deadline)
 
+    def test_official_stop_is_terminal_and_archivable_in_monitor(self):
+        from tools.gpu_monitor import monitor, registry
+
+        self.init(PREAMBLE + 'time.sleep(5)')
+        process = self.launch()
+        self.assertEqual(self.invoke('stop', '--run-id', 'test', '--reason', 'monitor regression').returncode, 0)
+        self.assertEqual(process.wait(timeout=6), 0)
+        self.assertEqual(self.read()['status'], 'STOPPED')
+        self.assertEqual(json.loads((self.run / 'exit.json').read_text())['exit_code'], 0)
+        path = self.base / 'monitor.json'
+        path.write_text(json.dumps({'version': 1, 'hosts': {'local': {'transport': 'local'}},
+            'state_dir': 'monitor-state',
+            'tasks': [{'id': 'stopped', 'host': 'local', 'root': str(self.run), 'uses_gpu': False,
+                       'controller': {'type': 'research_handoff', 'run_id': 'test'},
+                       'status': {'path': 'state.json', 'key': 'status'},
+                       'exit': {'path': 'exit.json', 'key': 'exit_code'},
+                       'processes': [{'pid': process.pid, 'contains': [str(ROOT / 'controller.py')]}]}]}))
+        observed = monitor.snapshot(monitor.load_config(path))
+        task = observed['tasks'][0]
+        self.assertEqual(task['state'], 'STOPPED')
+        self.assertEqual(task['state_source'], 'declared_state')
+        self.assertNotIn('STATUS_CONFLICT', task['alerts'])
+        self.assertTrue(monitor.all_tasks_terminal(observed['tasks']))
+        watched = subprocess.run([sys.executable, '-B', monitor.__file__, 'watch',
+            '--config', str(path), '--auth', str(self.base / 'absent-auth'),
+            '--until-terminal'], capture_output=True, text=True, timeout=5)
+        self.assertEqual(watched.returncode, 0, watched.stderr)
+        self.assertEqual(json.loads((self.base / 'monitor-state/watch.json').read_text())['reason'],
+                         'ALL_TASKS_TERMINAL')
+        reasons = registry.eligible(observed, time.time())
+        self.assertEqual(reasons, {'stopped': 'observed terminal state STOPPED'})
+        archived = registry.archive(path, reasons, apply=True)
+        self.assertTrue(archived['applied'])
+        self.assertEqual(json.loads(path.read_text())['tasks'], [])
+        self.assertEqual(json.loads(Path(archived['archive']).read_text())['tasks'][0]['id'], 'stopped')
+
     def test_controller_sigkill_guard_recovers_no_credit(self):
         self.init(PREAMBLE+'time.sleep(5)');p=self.launch();token=self.read()['turn']['token']
         p.kill();p.wait(timeout=3)

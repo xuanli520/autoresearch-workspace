@@ -810,7 +810,10 @@ def evaluate(task: dict[str, Any], host: dict[str, Any],
     states.update(task.get('terminal_states', {}))
     terminal = next((k for k, vals in states.items() if declared in vals), None) if not identity_conflict else None
     state_source = 'processes'
-    if rc is not None:
+    if terminal == 'STOPPED' and rc in (None, 0):
+        state = terminal
+        state_source = 'declared_state'
+    elif rc is not None:
         state = 'COMPLETED' if rc == 0 else 'FAILED'
         state_source = 'exit_code'
     elif terminal:
