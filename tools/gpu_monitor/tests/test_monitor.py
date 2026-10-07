@@ -502,18 +502,18 @@ sys.exit(answer.returncode)
         data = monitor.evaluate(self.task, self.host)
         output = StringIO()
         with redirect_stdout(output):
-            monitor.render({'collected_at': 'now', 'tasks': [data]}, color='never', view='tasks')
+            monitor.render({'collected_at': 'now', 'tasks': [data]}, color='never')
         text = output.getvalue()
-        self.assertIn('AutoResearch GPU 任务详情', text)
-        self.assertIn('状态', text)
-        self.assertIn('进度', text)
-        self.assertIn('指标', text)
+        self.assertIn('GPU / scheduler', text)
+        self.assertIn('Agent / 12h', text)
+        self.assertIn('live', text)
+        self.assertIn('credited', text)
         self.assertNotIn('\033[', text)
         self.assertGreaterEqual(text.count('\n'), 8)
 
         output = StringIO()
         with redirect_stdout(output):
-            monitor.render({'collected_at': 'now', 'tasks': [data]}, color='always', view='tasks')
+            monitor.render({'collected_at': 'now', 'tasks': [data]}, color='always')
         self.assertIn('\033[', output.getvalue())
 
     def test_default_render_is_gpu_first_and_groups_tasks_by_gpu(self):
@@ -530,11 +530,11 @@ sys.exit(answer.returncode)
         with redirect_stdout(output):
             monitor.render(gpu_data, color='never')
         text = output.getvalue()
-        self.assertIn('GPU 资源总览', text)
-        self.assertIn('GPU 1 张', text)
-        self.assertIn('GPU0  RTX 5090', text)
-        self.assertIn('训练 A', text)
-        self.assertIn('PID 456', text)
+        self.assertIn('GPU / scheduler', text)
+        self.assertIn('GPU0 RTX 5090', text)
+        self.assertIn('run-a', text)
+        self.assertIn('未归属', text)
+        self.assertNotIn('PID 456', text)
         self.assertNotIn('AutoResearch GPU 任务详情', text)
 
     def test_unreachable_host_renders_unknown_not_zero_gpu_or_task_counts(self):
@@ -546,8 +546,9 @@ sys.exit(answer.returncode)
         with redirect_stdout(output):
             monitor.render(data, color='never')
         text = output.getvalue()
-        self.assertIn('GPU ? 张', text)
-        self.assertIn('运行任务 ? 个', text)
+        self.assertIn('GPU 0/?', text)
+        self.assertIn('UNREACHABLE', text)
+        self.assertIn('GPU unavailable / unknown', text)
         self.assertNotIn('GPU 0 张', text)
         self.assertNotIn('运行任务 0 个', text)
 

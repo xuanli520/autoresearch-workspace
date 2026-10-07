@@ -6,7 +6,7 @@
 
 共享 GPU 最新要求：在不影响他人的前提下继续自己的训练，其他计算进程出现本身不触发停训；监控只记录占用/余量/负载，不自动发停止指令。真正安全风险、用户停止和预算到期由对应任务合同处理，不干预他人。
 
-用于专家和协作 Agent 在多个题目、多个 SSH 云主机间查询、轮询和接管任务。默认 **60 秒轮询、GPU 资源总览＋严格 JSON、轻量本地记录**：先显示主机数、GPU 数量，再按 GPU 显示显存/利用率/温度、已识别运行任务和未归属进程。`stop-task` 仅返回官方停止入口提示并记录本地回执，不向远端或控制器发送停止请求。
+用于专家和协作 Agent 在多个题目、多个 SSH 云主机间查询、轮询和接管任务。人类只有一个 `watch` 入口和一个统一终端空间；机器读取使用 `status --json`。默认 **60 秒采集、最近 12 小时 48 个 15 分钟格、轻量本地记录**，一次快照同时包含 endpoint/GPU、scheduler、全部 Agent 流、时间、队列和告警。`stop-task` 仅返回官方停止入口提示并记录本地回执，不向远端或控制器发送停止请求。
 
 依赖：本地和远端 Linux、Python **3.9+** 标准库；SSH 主机需 `ssh`，GPU 遥测使用已有 `nvidia-smi`。无需安装监控服务、修改训练器、安装 Python 包或上传脚本文件。只读探针通过 SSH 标准输入运行，一台主机每轮一次探测（暂时性错误可重试）；多个主机并发查询。
 
@@ -15,31 +15,19 @@
 从项目根目录运行，命令与当前目录无关的部分均由脚本自身定位：
 
 ```bash
-# 一次查询所有已登记任务；不改写监控缓存。
-python3 tools/gpu_monitor/monitor.py status
-
-# 查看任务的训练进度、日志和指标细节。
-python3 tools/gpu_monitor/monitor.py status --view tasks
-
-# 强制开启重点颜色；auto 模式在交互终端自动开启。
-python3 tools/gpu_monitor/monitor.py status --color always
-
-# 纯文本输出，适合日志、截图和不支持 ANSI 的终端。
-python3 tools/gpu_monitor/monitor.py status --color never
-
-# Agent 获取结构化数据；默认即使任务告警也成功返回 JSON。
+# Agent 获取结构化脱敏快照；默认即使任务告警也成功返回 JSON。
 python3 tools/gpu_monitor/monitor.py status --json
 
 # 只看一个任务；--check 遇到任一告警退出 2。
 python3 tools/gpu_monitor/monitor.py status --task <task-id> --json --check
 
-# 前台轮询；Ctrl-C 只结束本地监控。
+# 唯一人类监控入口；Ctrl-C 只结束本地监控。
 python3 tools/gpu_monitor/monitor.py watch
 
-# 持续轮询所有已登记的官方长时间 Agent 任务；Ctrl-C 只结束本地监控。
-python3 tools/gpu_monitor/monitor.py watch --view agents --interval 60 --max-hours 12
+# 持续轮询所有已登记的官方长时间 Agent 任务；配置每 60 秒独立检查。
+python3 tools/gpu_monitor/monitor.py watch --interval 60 --config-check-interval 60 --max-hours 12
 
-# 启动／维持后台只读监控，默认最长 24h。重复调用不会启动同目录的第二个监控器。
+# 启动／维持后台只读监控，最长 12h。重复调用不会启动同目录的第二个监控器。
 python3 tools/gpu_monitor/monitor.py maintain
 python3 tools/gpu_monitor/monitor.py monitor-status
 
@@ -47,7 +35,7 @@ python3 tools/gpu_monitor/monitor.py monitor-status
 python3 tools/gpu_monitor/monitor.py stop-monitor
 ```
 
-`--config /path/to/tasks.json` 与 `--auth /path/to/auth.txt` 可用于以上全部命令。查询与采集器命令的 `--task ID` 可重复使用，选定子集有独立缓存目录和锁；查询/停止该子集监控时使用相同的 `--task` 集合。`stop-task` 必须恰好指定一个 `--task`。默认全量与子集可以并存，但会分别查询，不建议重复监控同一任务。
+`--config /path/to/tasks.json` 与 `--auth /path/to/auth.txt` 可用于以上全部命令。`--task ID` 可重复使用；一个配置只有一个采集锁和状态目录，子集筛选也使用这一套状态，启动第二个 watch 会被拒绝。筛选在进程内固定，改筛选需停止本地采集器再重启；`stop-task` 必须恰好指定一个 `--task`。
 
 ## 凭据：唯一的 auth.txt
 
@@ -69,14 +57,14 @@ ubuntu
 - 必填：`IP地址`、`用户名`、`密码`；可选：`登录端口`（缺省 22）。也可用 `ip` / `user` / `password` / `port` 等英文标签。
 - 标签单独成行时，下一行整行作为取值，因此密码中可以包含冒号。
 - 密码值含 `=`、`:` 等字符不受影响；缺失必填字段或端口非法时启动即报错，不会静默连错主机。
-- 换凭据后无需任何手工 `ssh-keyscan` 或删除 known_hosts：脚本每次启动对外部主机跑一次 `ssh-keygen -R` 清掉旧记录，再用 `StrictHostKeyChecking=accept-new` 与托管在 `.state/known_hosts` 的文件重新学习；运行中的 `watch` 每轮会重新读取 `auth.txt`，检测到 IP/用户/端口变化也会清理旧主机密钥，凭据写坏时保留上一份可用值不中断。
+- 换凭据后无需手工 `ssh-keyscan` 或删除 known_hosts：启动时使用托管 `.state/known_hosts`；`watch` 默认每 60 秒独立检查认证文件指纹，变化后才解析，IP/用户/端口变化时刷新对应主机密钥，凭据写坏时保留上一份可用值。
 - 可用 `--auth /path/to/auth.txt` 或环境变量 `AUTORESEARCH_AUTH_FILE` 指定别的凭据文件；`validate`、`monitor-status`、`stop-monitor` 不连接远端，`auth.txt` 不存在时也能运行。
 
 密码通过私有临时目录中的 FIFO 交给 OpenSSH askpass（OpenSSH 在 exec askpass 前会 `closefrom()`，继承的文件描述符无法传递密码，故按路径重开命名管道）。写入端和 askpass 读取端都会核验 FIFO 的设备、inode、类型及权限，拒绝被替换的管道或符号链接。密码不写配置或常规文件、不落日志，也不弹交互提示；FIFO 在每次查询后清理。**`auth.txt` 是明文口令，不是安全实践**；该文件已加入 `.gitignore`，若被复制、上传或纳入版本库，请立即在远端轮换密码。
 
 **只允许密码认证**：SSH 只尝试 `keyboard-interactive`/`password` 且 `PubkeyAuthentication=no`。密码认证需要服务器允许 password/keyboard-interactive；若同时要求密码加 MFA、OTP 或多次提示，当前单密码 askpass 不适用。SSH_ASKPASS 必须指向可执行文件路径，不能写成“python3 askpass.py”这样的命令串。超时／暂时性错误按 `connection_attempts` 重试，失败后下轮还会重新查询；认证错误直接报告。无脚本能保证互联网或远端主机永远可连，`UNREACHABLE` 表示当次未知，不代表训练停止。不自动续费或变更远端服务。未配置消息推送或对话自动唤醒，告警只出现在本地记录与输出。
 
-默认人类视图以 GPU 为中心：每台主机单独分组，每张 GPU 单独一块，只列当前能通过 PID 归属确认的运行任务；没有归属的显存进程显示为“其他”。`--view tasks` 才展开训练阶段、步数、指标和日志年龄。`RUNNING` 使用青色，`COMPLETED`/`STOPPED` 使用绿色，`FAILED`/`UNKNOWN`/告警使用红色，暂停和建议使用黄色；颜色只存在于终端渲染，不会进入 `--json`。设置环境变量 `NO_COLOR=1` 或使用 `--color never` 可关闭颜色。长错误、细节和建议会按终端宽度换行，避免把一整条 JSON 日志挤在一行。
+统一人类屏幕固定显示摘要、去重 endpoint/GPU 的实测与预约资源、全部有效 Agent 流、`live/pending/credited`、12 小时时间带、scheduler 当前作业/历史登记、外部队列聚合、当前/已恢复告警和图例。`--view` 及人类 `status` 已取消并明确提示迁移；窄终端折叠正文但保留状态、资源、告警和时间。正式分数与冻结 B/R 只在 TTY 临时显示，非 TTY、JSON、状态文件、events、Agent/handoff 和 workspace 均不含数值分数或证据。
 
 轮询可设置 `--interval 60 --max-hours 12`；`--max-polls 2` 便于短验证，`--until-terminal` 在所选任务全部有终态且无残留进程时退出。`UNREACHABLE`、`UNKNOWN`、`EXITED_WITHOUT_RESULT` 不会被当作完成。每轮最多同时探测 8 台主机，所有主机和重试共用 `probe_round_timeout_seconds` 整体截止；默认值为 `timeout_seconds * connection_attempts + retry_delay_seconds * (connection_attempts - 1)`。超时主机报告 `UNREACHABLE`，已完成结果保留。超过 8 台主机时分批仍共用原截止。监控时限是**本地采集器寿命**，最多另加一次整体查询超时；它不延长或执行训练预算。`maintain` 恢复的只有采集器。
 
@@ -102,10 +90,10 @@ python3 tools/gpu_monitor/monitor.py stop-task --task <task-id> \
   --reason '记录本次停止的真实原因'
 
 # 在官方控制器中实际停止后，检查状态与子进程。
-python3 tools/gpu_monitor/monitor.py status --task <task-id>
+python3 tools/gpu_monitor/monitor.py status --task <task-id> --json
 ```
 
-必须指定恰好一个 `--task` 和非空 `--reason`。有官方登记时，`stop-task` 返回 `OFFICIAL_STOP_REQUIRED`、退出码 2，并把原因和登记身份写入本地 `stop-requests.jsonl`；没有官方登记时拒绝执行。普通调用与 `--dry-run` 都不会向远端发信号、写文件或转交请求。回执包含保留实际 `--config`、`--auth` 的全量轮询命令及带 `--task` 的单任务复核命令。操作者必须使用该运行已有的连接/状态配置，调用 [research_handoff stop](../research_handoff/README.md#停止恢复与快速-debug) 或 [gpu_scheduler cancel](../gpu_scheduler/README.md) 实际停止指定任务，然后用同一任务范围执行 `status` 或 `watch --view agents` 复核。
+必须指定恰好一个 `--task` 和非空 `--reason`。有官方登记时，`stop-task` 返回 `OFFICIAL_STOP_REQUIRED`、退出码 2，并把原因和登记身份写入本地 `stop-requests.jsonl`；没有官方登记时拒绝执行。普通调用与 `--dry-run` 都不会向远端发信号、写文件或转交请求。回执包含保留实际 `--config`、`--auth` 的全量 `watch` 命令及带 `--task` 的复核命令。操作者使用该运行已有配置，调用 [research_handoff stop](../research_handoff/README.md#停止恢复与快速-debug) 或 [gpu_scheduler cancel](../gpu_scheduler/README.md) 实际停止指定任务，然后用 `status --json` 或统一 `watch` 复核。
 
 ## 保持 tasks.json 只包含当前任务
 
@@ -115,13 +103,13 @@ python3 tools/gpu_monitor/monitor.py status --task <task-id>
 
 ```bash
 # 先取得新的只读状态快照。
-python3 tools/gpu_monitor/monitor.py status --json > /tmp/autoresearch-monitor-status.json
+python3 tools/gpu_monitor/monitor.py status --json > <本任务事故目录>/monitor-status.json
 
 # 预览可归档的终态/过期条目；默认不改 tasks.json。
-python3 tools/gpu_monitor/registry.py prune --snapshot /tmp/autoresearch-monitor-status.json
+python3 tools/gpu_monitor/registry.py prune --snapshot <本任务事故目录>/monitor-status.json
 
 # 应用同一新鲜快照，保存历史配置，再移出活动表。
-python3 tools/gpu_monitor/registry.py prune --snapshot /tmp/autoresearch-monitor-status.json --apply
+python3 tools/gpu_monitor/registry.py prune --snapshot <本任务事故目录>/monitor-status.json --apply
 
 # 已核实被替代、旧云机或过期登记，可明确指定 ID 与原因。
 python3 tools/gpu_monitor/registry.py archive --task <old-task-id> \
@@ -134,9 +122,9 @@ python3 tools/gpu_monitor/monitor.py status --config tools/gpu_monitor/archive/<
 
 自动筛选要求快照默认不超过 300 秒、状态可观察且无匹配进程。`UNREACHABLE`/`UNKNOWN`、过旧观察、存活进程、身份/观察冲突不自动归档；截止过期但进程仍活着也必须保留并调查。归档预览输出配置 SHA256，可在应用时加 `--expected-sha256 <hash>`，防止覆盖预览后的配置变更。所有条目归档后允许空表，`maintain`/`watch` 会直接返回。
 
-运行中的采集器保留启动时选定的任务集合，修改登记表不会自动刷新它。切换登记时，先用原来的 `--task` 集合执行 `stop-monitor`，更新并 `validate` 配置，再用当前集合执行 `maintain --interval 60 --max-hours <覆盖原截止的时长> --until-terminal`。这只切换本地采集器，远端研究照常执行。默认全量监控不需要 `--task`；已有子集监控须使用同一集合查询/停止。
+运行中的采集器保存固定的 `--task` 筛选，但按独立低频时钟热重载 `tasks.json`；稳定指纹未变化时只做 `stat()`，半写、损坏或暂缺候选保留上一份有效配置并记录脱敏事件。`state_dir`、配置大版本、路径和任务筛选变化提示重启，不迁移状态。认证文件也按独立指纹低频刷新，损坏时保留上一份凭据。
 
-接手时的顺序是：`monitor-status` 确认采集器 → `status --view tasks` 或 `--json` 查询当前远端 → 检查真实心跳、轮次/评分及原截止 → 更新题目进展清单 → 归档已完成或过期登记。告警不能直接替代故障判定；例如当前长评分尚未结束，轨迹暂不增加仍可能正常。
+接手时的顺序是：`monitor-status` 确认采集器 → `status --json` 或统一 `watch` 查询当前远端 → 检查真实心跳、轮次/三类时间及原截止 → 更新题目进展清单 → 归档已完成或过期登记。告警不能直接替代故障判定；例如当前长评分尚未结束，轨迹暂不增加仍可能正常。
 
 ## 为新题目登记
 
@@ -175,7 +163,7 @@ JSONL 日志示例：
 {"event":"progress","step":100,"loss":0.7,"elapsed_seconds":12.0}
 ```
 
-流配置 `format: jsonl`，`fields: {"step":"step","metric":"loss","elapsed_seconds":"elapsed_seconds"}`，可用 `where: {"event":"progress"}` 筛选事件。字段支持点分嵌套；输出使用统一键 `step`、`metric`、`elapsed_seconds`，其他损失字段也可保留。
+流配置 `format: jsonl`，`fields: {"step":"step","metric":"loss","elapsed_seconds":"elapsed_seconds"}`，可用 `where: {"event":"progress"}` 筛选事件。字段支持点分嵌套；解析器内部可计算窗口统计，公开快照只保留步数/时间/事件等运维字段，移除指标值和日志原文。
 
 文本日志可用 `format: regex` 和带命名捕获组的 `pattern`，例如 `adapt (?P<step>\d+) / \d+ loss (?P<metric>\S+) elapsed (?P<elapsed_seconds>\S+)`；捕获值须是数字。JSONL 与 regex 只解析以换行结束的完整记录，末尾半行在后续追加后解析；错误特征仍扫描半行。`format: text` 只收集末尾文本、日志新鲜度和错误特征。输出 JSON 中 NaN/Inf 转为字符串并告警，保证机器可严格解析。增量缓存仅保留在本地进程内，最多 256 个有界尾部窗口；重启后首轮重新解析，观测文件只保存缓存标识，不保存缓存原文。
 
@@ -198,13 +186,13 @@ JSONL 日志示例：
 
 ETA 只估当前流到其 `total_steps` 的训练时间，优先使用日志中两个进度点的真实 elapsed 差；缺少时使用连续两次观察的步数差。首轮无法估计就显示 `?`，无活进程时不显示完成预期。ETA 不包括后续 probe、重载、排队；短期吞吐会波动。
 
-`best_in_tail`、`metric_delta_in_tail` 是**有界日志窗口**的描述统计，不是全程最佳 checkpoint，更不能用来挑正式 seed。不同方法、阶段、步数或协议不自动排名。学习信号足以触发人工检查，但达标、换方向或停止正式实验仍按各题授权与冻结协议判断。
+解析器的窗口统计不是正式成绩，不参与操作者评分列，不写共享快照。不同方法、阶段、步数或协议不自动排名；达标、换方向或停止正式实验仍按各题授权与冻结协议判断。
 
 ## 记录、接管和故障恢复
 
 后台目录默认为本工具的 `.state/`，包含：
 
-- `latest.json`：原子更新的最近快照，含采样时间、主机/GPU分组、任务归属、指标、告警与建议；直接读缓存须核对时间和采集器存活，优先运行实时 `status`。
+- `latest.json`：原子更新的脱敏快照，含版本、配置 SHA/revision、生效轮次、资源/归属、三类时间、告警历史与时间带；读取缓存须核对时间，实时机器接口为 `status --json`。
 - `observations-YYYY-MM-DD.jsonl`：按 UTC 日期追加每轮轻量观察。
 - `events-YYYY-MM-DD.jsonl`：首次观察、状态或告警集合变化；不会每轮重复相同事件。
 - `watch.json`、`watch.lock`、`collector.log`：本地采集器身份、截止、最后轮询、退出原因、互斥锁及终端输出。
@@ -214,7 +202,23 @@ ETA 只估当前流到其 `total_steps` 的训练时间，优先使用日志中�
 
 当前auth.txt口令模式使用BatchMode=no与受控askpass；每次查询禁用ControlMaster/ControlPath复用，避免旧socket卡住采集。主机地址与凭据取自auth.txt，配置只保留transport、connect_timeout_seconds、python、options等。该认证合同与通用控制器的SSH key/agent不同。
 
-退出码：`0` 命令成功，`1` 配置／采集器操作错误，`2` 为 `status --check` 发现告警或 `stop-task` 提示 `OFFICIAL_STOP_REQUIRED`。默认 `status` 通过 JSON 表达远端不可达，不因一个离线主机隐藏其他任务。后台轮询持续记录离线情况；其时限、终态条件和本地采集器停止请求各自生效。
+退出码：`0` 命令成功，`1` 配置／采集器操作错误或旧显示入口，`2` 为 `status --json --check` 发现告警或 `stop-task` 提示 `OFFICIAL_STOP_REQUIRED`。机器接口用 JSON 表达远端不可达，不因一个离线主机隐藏其他任务。后台轮询持续记录离线情况；其时限、终态条件和本地采集器停止请求各自生效。
+
+## 新版只读数据合同
+
+快照 `schema_version: 2` 保留任务/hosts/agents 等机器兼容投影，增加 `config`、`summary`、`display`、`alerts` 和可恢复的 `diagnostics`。同地址、端口、用户及 `auth_profile` 的别名合并为一个无密码 endpoint；不同身份不合并。GPU/进程按 endpoint、UUID、PID、boot 和启动 ticks 去重。
+
+归属顺序为官方可信容器 receipt 与 boot/PID/cgroup 身份、登记容器 ID、普通已核验 PID。每个结果给出 `source/confidence/reason`，冲突或权限不足为 unknown；不猜测 containerd-shim 子进程属于哪个任务。实测遥测在 `measured`，scheduler 显存/CU/RAM/CPU 预约在 `reserved`，实际主机资源在 `host_resources`；预约不代表硬隔离。
+
+登记 `scheduler.root/session_id/job_ids/request_ids` 后，探针只读该范围内的 status、受限 events 尾部与 durable 账本，关联当前 attempt。请求模板只改变数字轮次，保留 group 和 `/research` 后缀。`configured_job_ids` 永远是历史登记，`active_job` 来自实际状态；终态进入 history。冲突或损坏账本为 unknown，UNKNOWN 对账/INFEASIBLE/EXPIRED 使用各自运维语义，监视器不做恢复、重提或取消。
+
+`timing` 区分实时 `live_elapsed_seconds`、待结算 `pending_seconds` 和官方已确认 `credited_effective_seconds`。reported 的 pending 只是估计，不提前增加正式信用；WAITING_GPU 增加 live 并排除等待，原墙钟截止不延长。每条流 `timeline_12h` 固定 48 格并记录事实、事件类别和空洞原因。跨轮告警覆盖时间不可达/未知、Agent retry、交替坏事件、summary 停滞、队列反复过期、容器 OOM/内存上限与共享资源阻塞；恢复/重开和计数在重启后继续，空洞不立即清零。
+
+阈值在 `diagnostics.thresholds` 中配置，例如 `retry_warning: 3`、`retry_critical: 5`、`summary_warning_generations: 10`、`summary_critical_generations: 20`。summary 本身保持 warning，只有经验证的正式进展也停滞才升级。配置解析会校验阈值；`--interval` 优先于热重载设置，`--max-hours` 的原本地截止固定且不超过 12 小时。`--config-check-interval` / `--auth-check-interval` 默认各 60 秒，不随高频采集读取文件。
+
+操作者评分来源可在可信私有登记中增加 `operator_overlay`：`task_id`、`records: [{"contract_path":"relative/completion.contract.json"}]`、可选 `metadata_path` 和预先冻结的 `metadata_sha256`。元数据的 `frozen_anchors` 包含 B/R；不把数值写进 tasks.json。只接受官方 completion 验证通过的 formal/final 完整 seed、身份/源码/数据/模型 hash 和签名记录；proxy、diagnostic、screen、失配、缺证据不显示数值。验证代码在同一个 probe 进程内执行，无需在 SSH 主机安装包或写入代码。缺少可信登记时显示 unavailable；监控不搜私有 evidence，也不根据当前分数调整 B/R。
+
+只有操作者 TTY 临时合并分数、B/R 和按改进方向解释的趋势。基础 JSON、非 TTY 日志、latest/watch/observations/events 不含评分、指标数值、原始日志、私有完整路径或验证内容。控制器不调用 gpu_monitor，不捕获这一屏幕到 Agent 上下文；不得把私有 `.state` 或旧历史备份挂给 solver。旧记录保留原件，隔离不能靠新脱敏假装旧历史已安全。
 
 ## 验证
 

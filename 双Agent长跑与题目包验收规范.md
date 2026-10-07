@@ -107,7 +107,7 @@ controller/guard 执行预算和保护，GPU 服务管理作业，monitor 默认
 长时间 Agent 的统一监护入口是：
 
 ```text
-python3 -B tools/gpu_monitor/monitor.py watch --view agents --interval 60 --max-hours 12
+python3 -B tools/gpu_monitor/monitor.py watch --interval 60 --max-hours 12
 ```
 
 该视图只聚合登记表中可回查的 `research_handoff` `run_id` 与 `gpu_scheduler` `job_id`/`request_id`，不会自动发现未登记任务。停止任务时仍须调用对应官方 `controller stop` 或 scheduler `cancel`，并把上述轮询命令告知接管者。`marker`、`process_groups` 和其他自定义兼容任务语义已删除；旧登记必须先修订并通过 `validate`，不能用监控器恢复旧停止路径。

@@ -27,7 +27,7 @@
 - 用中文交流，先给结论，再说明事实、假设、建议和下一步。
 - 沿用已有授权；常规读取、文档维护和可逆修改不重复请求确认。关键输入缺失时才询问。
 - 正式双 Agent 长跑必须使用工作区受管工具：`tools/research_handoff` 管理 Agent 启停、续轮、上下文和硬截止，`tools/gpu_scheduler` 管理全部 GPU 训练/评分/复验，`tools/gpu_monitor` 管理巡检和活动登记。不得自建替代控制器、队列或守护/轮询脚本；题目只保留薄适配器和经校验配置，通用缺口修复工具并验收后再启用。
-- 长时间 Agent 任务统一登记官方 `research_handoff` `run_id` 与 `gpu_scheduler` `job_id`/`request_id`，使用 `python3 tools/gpu_monitor/monitor.py watch --view agents --interval 60 --max-hours 12` 持续轮询全量登记。该命令只读聚合状态；停止任务时仍由对应官方控制器执行，并在交接或停止说明中告知用户这条轮询命令。`marker`、进程组及其他兼容停止语义已删除，遇到旧字段必须修订登记，不能另造适配器。
+- 长时间 Agent 任务统一登记官方 `research_handoff` `run_id` 与 `gpu_scheduler` `job_id`/`request_id`，使用 `python3 tools/gpu_monitor/monitor.py watch --interval 60 --max-hours 12` 持续轮询全量登记。该命令只读聚合状态；停止任务时仍由对应官方控制器执行，并在交接或停止说明中告知用户这条轮询命令。`marker`、进程组及其他兼容停止语义已删除，遇到旧字段必须修订登记，不能另造适配器。
 - 本地控制 Agent 使用 `tools/gpu_scheduler` 优先调用阻塞式 `submit`，等待 GPU 作业完成或关键中断后再继续；只有需要持续跟踪进度或同时编排多个任务时才调用 `submit_async`/`enqueue`。durable 版本的新请求显式声明父级原 `deadline_at`/`deadline_epoch` 和完整 `max_runtime_seconds`，不设置客户端 `queue_timeout_seconds`；不可行返回 `INFEASIBLE`，可行但当前资源不足由调度器等待。等待超时/中断不等于取消，未知结果查询原 request/job，不自动重提或换 ID。
 - GPU 请求账本恢复的是排队意图，不是重跑执行。保留原 `request_id`、job ID、spec、submitted_at、bypasses 和截止；已启动执行转 `UNKNOWN` 对账，评分证据绑定 `origin_session_id` 与原目录。同 ID 改 spec 拒绝，终态不能重复排队；新实验须明确版本与原预算，不用换 session/run/request 绕过故障或截止。
 - durable 控制器接入必须用官方 SDK `on_update` 透传 `gpu.state`，将排队/对账记为原轮内 `WAITING_GPU`，不计等待信用、不耗 Agent retry，原 run 墙钟硬截止仍生效。`INFEASIBLE`、`EXPIRED`、未解决 UNKNOWN 属基础设施原因，不当作 `agent_exit_nonzero` 反复重开轮次；适配器不得自写 ensure_job、轮询或重提循环。

@@ -14,6 +14,15 @@ import subprocess
 import time
 from typing import Any
 
+try:
+    from .runtime import collect_scheduler, collect_receipts
+except (ImportError, ValueError):
+    try:
+        from runtime import collect_scheduler, collect_receipts
+    except ImportError:
+        # SSH execution streams runtime.py into the same globals first.
+        pass
+
 DEFAULT_TAIL_BYTES = 64 * 1024
 MAX_METADATA_BYTES = 256 * 1024
 GPU_QUERY_TIMEOUT_SECONDS = 8
@@ -100,6 +109,109 @@ def process_table() -> tuple[list[dict[str, Any]], int]:
     return rows, errors
 
 
+def _process_identity(pid: str | int) -> dict[str, Any]:
+    """Read stable identity and cgroup metadata for one GPU process.
+
+    The monitor never treats a PID as an owner by itself: ``boot_id`` and
+    ``start_ticks`` let consumers reject PID reuse.  Cgroup paths are retained
+    as evidence so containerd-shim descendants can be matched without walking
+    private task directories.
+    """
+    value = str(pid)
+    result: dict[str, Any] = {'pid': value, 'cgroup_paths': [], 'container_ids': [],
+                              'runtime': None, 'memory': {}}
+    proc = Path('/proc') / value
+    try:
+        result['command_summary'] = (proc / 'comm').read_text().strip()[:80]
+    except OSError:
+        result['command_summary'] = None
+    try:
+        stat_fields = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
+        result['start_ticks'] = int(stat_fields[19])
+    except (OSError, ValueError, IndexError):
+        result['start_ticks'] = None
+    try:
+        result['cgroup_text'] = (proc / 'cgroup').read_text()
+        paths = []
+        for line in result['cgroup_text'].splitlines():
+            fields = line.split(':', 2)
+            if len(fields) == 3:
+                controller, path = fields[1], fields[2]
+                paths.append({'controller': controller, 'path': path})
+        result['cgroup_paths'] = paths
+        result['cgroup_ancestors'] = sorted({str(ancestor) for item in paths
+                                           for ancestor in Path(item['path']).parents})
+        # Keep both full and short IDs.  A short ID is evidence only when it is
+        # unambiguous in the caller's registered receipts.
+        text = result['cgroup_text']
+        result['container_ids'] = sorted(set(re.findall(
+            r'(?<![a-f0-9])([a-f0-9]{12,64})(?![a-f0-9])', text)))
+        lowered = text.lower()
+        if 'containerd' in lowered:
+            result['runtime'] = 'containerd'
+        elif 'docker' in lowered:
+            result['runtime'] = 'docker'
+        elif 'kubepods' in lowered:
+            result['runtime'] = 'kubernetes'
+    except OSError as exc:
+        result['cgroup_error'] = f'{type(exc).__name__}: {exc}'
+    # cgroup v2 exposes memory files below /sys/fs/cgroup.  Do not search the
+    # filesystem; only inspect exact paths reported by /proc.
+    memory_candidates = []
+    candidate_paths = []
+    for item in result.get('cgroup_paths', []):
+        group_path = Path(item['path'])
+        candidate_paths.extend([str(group_path), *[str(parent) for parent in group_path.parents if str(parent) != '/']])
+    for path in dict.fromkeys(candidate_paths):
+        rel = path.lstrip('/')
+        root = Path('/sys/fs/cgroup') / rel
+        if not root.resolve().is_relative_to(Path('/sys/fs/cgroup').resolve()):
+            continue
+        try:
+            max_value = (root / 'memory.max').read_text().strip()
+            current = (root / 'memory.current').read_text().strip()
+            events_path = root / 'memory.events'
+            events = {}
+            if events_path.exists():
+                for line in events_path.read_text().splitlines():
+                    key, _, value = line.partition(' ')
+                    if key and value.isdigit():
+                        events[key] = int(value)
+            memory_candidates.append({'max': None if max_value == 'max' else int(max_value),
+                                      'current': int(current), 'events': events, 'path': str(root)})
+        except (OSError, ValueError):
+            continue
+    if memory_candidates:
+        limited = [item for item in memory_candidates if item['max'] is not None]
+        result['memory'] = min(limited, key=lambda item: item['max']) if limited else memory_candidates[0]
+        result['memory_ancestors'] = memory_candidates
+    try:
+        current_ticks = int((proc / 'stat').read_text().rsplit(')', 1)[1].split()[19])
+        result['identity_changed'] = current_ticks != result.get('start_ticks')
+    except (OSError, ValueError, IndexError):
+        result['identity_changed'] = True
+    return result
+
+
+def _host_resources() -> dict[str, Any]:
+    values = {}
+    try:
+        memory = {}
+        for line in Path('/proc/meminfo').read_text().splitlines():
+            key, _, text = line.partition(':')
+            if key in ('MemTotal', 'MemAvailable'):
+                memory[key] = int(text.split()[0]) * 1024
+        values.update(ram_total_bytes=memory.get('MemTotal'), ram_available_bytes=memory.get('MemAvailable'))
+    except (OSError, ValueError, IndexError):
+        values.update(ram_total_bytes=None, ram_available_bytes=None)
+    values['cpu_count'] = os.cpu_count()
+    try:
+        values['load_average'] = list(os.getloadavg())
+    except OSError:
+        values['load_average'] = None
+    return values
+
+
 def gpu_query(query: str, names: list[str]) -> dict[str, Any]:
     try:
         p = subprocess.run(['nvidia-smi', query, '--format=csv,noheader,nounits'],
@@ -114,6 +226,10 @@ def gpu_query(query: str, names: list[str]) -> dict[str, Any]:
 
 def collect(config: dict[str, Any]) -> dict[str, Any]:
     now = time.time()
+    try:
+        boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    except OSError:
+        boot_id = None
     processes, proc_errors = process_table()
     gpu = gpu_query('--query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu,temperature.gpu',
                     ['index', 'uuid', 'name', 'memory_total_mib', 'memory_used_mib', 'utilization_pct', 'temperature_c'])
@@ -121,12 +237,21 @@ def collect(config: dict[str, Any]) -> dict[str, Any]:
     # Container training runs under candidate UIDs and is not a descendant of
     # the host docker exec client. Read only its cgroup, never its arguments.
     for app in apps.get('rows', []):
+        identity = _process_identity(app.get('pid'))
+        identity['boot_id'] = boot_id
+        app.update({'pid_identity': identity, 'cgroup_paths': identity.get('cgroup_paths', []),
+                    'runtime': identity.get('runtime'), 'memory': identity.get('memory', {})})
         try:
-            text = (Path('/proc') / app['pid'] / 'cgroup').read_text()
-            app['container_ids'] = re.findall(r'(?<![a-f0-9])[a-f0-9]{64}(?![a-f0-9])', text)
-        except OSError:
+            app['container_ids'] = identity.get('container_ids', [])
+        except (KeyError, TypeError):
             app['container_ids'] = []
     tasks = {}
+    read_cache = {}
+    def cached_task_read(root, name, limit, tail=False):
+        key = (str(root), name, limit, tail)
+        if key not in read_cache:
+            read_cache[key] = read_file(root, name, limit, tail=tail)
+        return read_cache[key]
     for task in config['tasks']:
         root = Path(task['root']).resolve()
         names = set()
@@ -136,9 +261,12 @@ def collect(config: dict[str, Any]) -> dict[str, Any]:
         for selector in task.get('processes', []):
             if selector.get('pid_file'):
                 names.add(selector['pid_file'])
-        files = {name: read_file(root, name, config.get('metadata_bytes', MAX_METADATA_BYTES)) for name in names}
+        files = {name: cached_task_read(root, name, config.get('metadata_bytes', MAX_METADATA_BYTES)) for name in names}
+        if task.get('controller') and (task.get('status') or {}).get('path'):
+            event_name = str(Path(task['status']['path']).with_name('events.jsonl'))
+            files[event_name] = cached_task_read(root, event_name, config.get('tail_bytes', DEFAULT_TAIL_BYTES), tail=True)
         for stream in task.get('streams', []):
-            files[stream['path']] = read_file(root, stream['path'], config.get('tail_bytes', DEFAULT_TAIL_BYTES), tail=True)
+            files[stream['path']] = cached_task_read(root, stream['path'], config.get('tail_bytes', DEFAULT_TAIL_BYTES), tail=True)
         matched = {}
         identities = []
         process_errors = []
@@ -181,9 +309,9 @@ def collect(config: dict[str, Any]) -> dict[str, Any]:
                                                          for p in matched.values()],
                              'identity_errors': identities, 'disk_free_bytes': disk}
         tasks[task['id']]['process_errors'] = process_errors
-    try:
-        boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    except OSError:
-        boot_id = None
+        if 'collect_scheduler' in globals():
+            view = collect_scheduler(task, tasks[task['id']], now=now)
+            tasks[task['id']]['scheduler_view'] = view
+            tasks[task['id']]['ownership_receipts'] = collect_receipts(task, view, boot_id=boot_id)
     return {'observed_at': now, 'boot_id': boot_id, 'proc_permission_errors': proc_errors,
-            'gpu': gpu, 'gpu_processes': apps, 'tasks': tasks}
+            'gpu': gpu, 'gpu_processes': apps, 'tasks': tasks, 'host_resources': _host_resources()}

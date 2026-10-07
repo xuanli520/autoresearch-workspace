@@ -25,10 +25,14 @@ from typing import Any
 
 try:
     from .probe import field
+    from .privacy import public_record
+    from .ui import render_unified
     from .askpass import (FIFO_IDENTITY_ENV, FIFO_PATH_ENV, MAX_PASSWORD_BYTES,
                           inspect_fifo, open_password_fifo, validate_helper)
 except ImportError:  # Preserve direct script execution.
     from probe import field
+    from privacy import public_record
+    from ui import render_unified
     from askpass import (FIFO_IDENTITY_ENV, FIFO_PATH_ENV, MAX_PASSWORD_BYTES,
                          inspect_fifo, open_password_fifo, validate_helper)
 
@@ -67,6 +71,7 @@ DEFAULT_ERROR_PATTERNS = (
 DEFAULT_ERROR_WINDOW_LINES = 100
 MAX_STREAM_CACHE_ENTRIES = 256
 _STREAM_CACHES: OrderedDict[str, dict] = OrderedDict()
+_OPERATOR_OVERLAY = {}
 SUGGESTIONS = {
     'UNREACHABLE': '检查 SSH 网络和交互认证；远端训练是否存活未知。',
     'EXITED_WITHOUT_RESULT': '进程已不见但无可靠终态；检查退出码、OOM、控制器日志。',
@@ -142,7 +147,7 @@ def password_bytes(password: str) -> bytes:
     return secret
 
 
-def load_auth(path):
+def load_auth(path, raw_bytes=None):
     """Parse the labelled credential file; the only source of SSH auth material.
 
     Accepts ``标签：值`` on one line or the label alone followed by the value on the
@@ -151,7 +156,7 @@ def load_auth(path):
     """
     path = Path(path)
     try:
-        text = path.read_text(encoding='utf-8')
+        text = raw_bytes.decode('utf-8') if raw_bytes is not None else path.read_text(encoding='utf-8')
     except OSError as e:
         raise ValueError(f'无法读取凭据文件 {path}: {e}')
     fields = {}
@@ -182,14 +187,14 @@ def load_auth(path):
     try:
         port = int(fields.get('port') or 22)
     except ValueError:
-        raise ValueError(f'凭据文件 {path} 的登录端口不是数字: {fields.get("port")}')
+        raise ValueError(f'凭据文件 {path} 的登录端口不是数字')
     if not 1 <= port <= 65535:
-        raise ValueError(f'凭据文件 {path} 的登录端口超出范围: {port}')
+        raise ValueError(f'凭据文件 {path} 的登录端口超出范围')
     host = fields['host']
     if not re.fullmatch(r'[A-Za-z0-9_.:%\[\]-]+', host) or host.startswith('-'):
-        raise ValueError(f'凭据文件 {path} 的 IP地址无效: {host}')
+        raise ValueError(f'凭据文件 {path} 的 IP地址无效')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', fields['user']):
-        raise ValueError(f'凭据文件 {path} 的用户名无效: {fields["user"]}')
+        raise ValueError(f'凭据文件 {path} 的用户名无效')
     password_bytes(fields['password'])
     return {'host': host, 'user': fields['user'], 'password': fields['password'], 'port': port}
 
@@ -241,15 +246,18 @@ def validate_pattern(pattern: str) -> None:
         raise ValueError(f'invalid stream regular expression: {exc}') from exc
 
 
-def load_config(path: Path, auth: dict[str, Any] | None = None) -> dict[str, Any]:
-    cfg = json.loads(path.read_text())
+def load_config(path: Path, auth: dict[str, Any] | None = None, raw_bytes=None) -> dict[str, Any]:
+    source_bytes = raw_bytes if raw_bytes is not None else path.read_bytes()
+    cfg = json.loads(source_bytes)
+    if not isinstance(cfg, dict):
+        raise ValueError('config must be an object')
     if cfg.get('version') != 1 or not isinstance(cfg.get('tasks'), list) or not isinstance(cfg.get('hosts'), dict):
         raise ValueError('config requires version=1, hosts object and tasks array')
     cfg.setdefault('interval_seconds', 60)
     cfg.setdefault('timeout_seconds', 30)
     cfg.setdefault('connection_attempts', 2)
     cfg.setdefault('retry_delay_seconds', 2)
-    cfg.setdefault('max_hours', 24)
+    cfg.setdefault('max_hours', 12)
     cfg.setdefault('state_dir', '.state')
     for key in ('interval_seconds', 'timeout_seconds', 'max_hours', 'connection_attempts'):
         if not finite(cfg[key]) or cfg[key] <= 0:
@@ -272,6 +280,8 @@ def load_config(path: Path, auth: dict[str, Any] | None = None) -> dict[str, Any
             raise ValueError(f'{key} must be an integer in [256, {upper}]')
     ids = set()
     for name, host in cfg['hosts'].items():
+        if not isinstance(host, dict):
+            raise ValueError('host must be an object')
         transport = host.get('transport', 'ssh')
         if transport not in ('ssh', 'local'):
             raise ValueError(f'{name}: transport must be ssh or local')
@@ -284,6 +294,8 @@ def load_config(path: Path, auth: dict[str, Any] | None = None) -> dict[str, Any
             if not isinstance(host.get('options', []), list):
                 raise ValueError('SSH options must be an argv list')
     for task in cfg['tasks']:
+        if not isinstance(task, dict):
+            raise ValueError('task must be an object')
         if not re.fullmatch(r'[\w.-]+', task['id']) or task['id'] in ids:
             raise ValueError('task IDs must be unique simple names')
         ids.add(task['id'])
@@ -304,7 +316,8 @@ def load_config(path: Path, auth: dict[str, Any] | None = None) -> dict[str, Any
             if not isinstance(job_ids, list) or not job_ids or not all(isinstance(j, str) and j for j in job_ids):
                 raise ValueError(f"{task['id']}: scheduler requires job_id or nonempty job_ids")
             scheduler['job_ids'] = job_ids
-        if task['host'] not in cfg['hosts'] or not Path(task['root']).is_absolute():
+        if (task['host'] not in cfg['hosts'] or not Path(task['root']).is_absolute()
+                or Path(task['root']) == Path('/') or '..' in Path(task['root']).parts):
             raise ValueError(f"{task['id']}: unknown host or nonabsolute root")
         paths = [task[k]['path'] for k in ('status', 'exit', 'launch', 'deadline_file') if task.get(k)]
         for selector in task.get('processes', []):
@@ -343,6 +356,28 @@ def load_config(path: Path, auth: dict[str, Any] | None = None) -> dict[str, Any
             raise ValueError('file paths must stay relative to task root')
         if task.get('deadline_at'):
             timestamp(task['deadline_at'])
+        overlay = task.get('operator_overlay', {})
+        if not isinstance(overlay, dict):
+            raise ValueError('operator_overlay must be an object')
+        for record in overlay.get('records', []):
+            name = record.get('contract_path') if isinstance(record, dict) else None
+            if not isinstance(name, str) or not name or Path(name).is_absolute() or '..' in Path(name).parts:
+                raise ValueError('operator contract paths must stay relative to registered root')
+        name = overlay.get('metadata_path')
+        if name is not None and (not isinstance(name, str) or Path(name).is_absolute() or '..' in Path(name).parts):
+            raise ValueError('operator metadata path must stay relative to registered root')
+    try:
+        from .diagnostics import validate_thresholds
+        from .runtime import validate_registration
+    except ImportError:
+        from diagnostics import validate_thresholds
+        from runtime import validate_registration
+    validate_thresholds(cfg)
+    for task in cfg['tasks']:
+        validate_registration(task)
+    cfg['_config_metadata'] = {'path': str(path.resolve()), 'sha256': hashlib.sha256(source_bytes).hexdigest(),
+                               'revision': 1, 'loaded_at': utc(), 'reload_state': 'ACTIVE',
+                               'last_reload_at': None, 'last_reload_error': None}
     return cfg
 
 
@@ -467,11 +502,23 @@ def probe_host(host: dict[str, Any], tasks: list[dict[str, Any]], cfg: dict[str,
                deadline: float | None = None) -> dict[str, Any]:
     request = {'tasks': tasks, 'tail_bytes': cfg['tail_bytes'], 'metadata_bytes': cfg['metadata_bytes']}
     # Encode JSON as a Python literal, never interpolate task data into shell commands.
-    code = (HERE / 'probe.py').read_text() + '\nprint(json.dumps(collect(json.loads(' + repr(json.dumps(request)) + '))))\n'
+    prefix = (HERE / 'runtime.py').read_text() if (HERE / 'runtime.py').exists() else ''
+    code = prefix + '\n' + (HERE / 'probe.py').read_text()
+    if cfg.get('_operator_tty'):
+        try:
+            from .operator_overlay import completion_bootstrap
+        except ImportError:
+            from operator_overlay import completion_bootstrap
+        code += completion_bootstrap(HERE.parent.parent)
+        code += '\n' + (HERE / 'operator_overlay.py').read_text()
+    code += '\n_monitor_tasks = json.loads(' + repr(json.dumps(request)) + ')\n_monitor_raw = collect(_monitor_tasks)\n'
+    if cfg.get('_operator_tty'):
+        code += "_monitor_raw['_operator_overlay'] = collect_operator_overlay(_monitor_tasks['tasks'])\n"
+    code += 'print(json.dumps(_monitor_raw))\n'
     if host.get('transport', 'ssh') == 'local':
-        command = [sys.executable, '-']
+        command = [sys.executable, '-B', '-']
     else:
-        command = ssh_command(host, shlex.join([host.get('python', 'python3'), '-']),
+        command = ssh_command(host, shlex.join([host.get('python', 'python3'), '-B', '-']),
                               password_auth=bool(host.get('password')))
     try:
         attempts = int(cfg.get('connection_attempts', 1)) if host.get('transport', 'ssh') == 'ssh' else 1
@@ -527,7 +574,7 @@ def stop_task(cfg: dict[str, Any], task: dict[str, Any], reason: str, dry_run: b
         raise ValueError('a nonempty stop reason is required')
     if any(key in task for key in ('stop', 'marker', 'process_groups')):
         raise ValueError('custom stop contracts are unsupported; use the official controller')
-    monitor_argv = ['python3', 'tools/gpu_monitor/monitor.py', 'watch', '--view', 'agents',
+    monitor_argv = ['python3', 'tools/gpu_monitor/monitor.py', 'watch',
                     '--interval', '60', '--max-hours', '12']
     if config_path is not None:
         monitor_argv.extend(['--config', str(config_path)])
@@ -793,6 +840,10 @@ def evaluate(task: dict[str, Any], host: dict[str, Any],
         return result
     now = host['observed_at']
     raw = host['tasks'][task['id']]
+    scheduler_view = raw.get('scheduler_view', {})
+    result['active_job'] = scheduler_view.get('active_job')
+    result['configured_job_ids'] = scheduler_view.get('configured_job_ids', result.get('scheduler', {}).get('job_ids', []))
+    result['scheduler_history'] = scheduler_view.get('attempts', scheduler_view.get('history', []))
     processes = raw['processes']
     alive = bool(processes)
     declared = metadata(raw, task.get('status'))
@@ -821,6 +872,9 @@ def evaluate(task: dict[str, Any], host: dict[str, Any],
         state_source = 'declared_state'
     elif alive:
         state = 'PAUSED' if all(p['state'] in ('T', 't') for p in processes) else 'RUNNING'
+    elif not identity_conflict and result.get('active_job') and result['active_job'].get('state') in ('QUEUED', 'STARTING', 'RUNNING', 'UNKNOWN'):
+        state = result['active_job']['state']
+        state_source = 'gpu_scheduler'
     elif not identity_conflict and task.get('scheduler') is not None and declared in ('QUEUED', 'STARTING'):
         state = declared
     elif identity_conflict:
@@ -856,10 +910,10 @@ def evaluate(task: dict[str, Any], host: dict[str, Any],
     effective, target, limit = (budget_view[key] for key in ('effective', 'target', 'limit'))
     official = budget_view['official']
     result['alerts'].extend(budget_view['alerts'])
+    result['alerts'].extend(scheduler_view.get('alerts', []))
     if official:
         result.update(current_turn=field(status_doc, 'turn.number'),
-                      heartbeat_stale=field(status_doc, 'heartbeat.stale'),
-                      scientific_score=field(status_doc, 'completion.scientific_score'))
+                      heartbeat_stale=field(status_doc, 'heartbeat.stale'))
     if finite(effective) and finite(target) and effective < target and (state in TERMINAL or state == 'EXITED_WITHOUT_RESULT'):
         result['alerts'].append('EFFECTIVE_TARGET_NOT_REACHED')
     if finite(effective) and finite(limit) and effective > limit:
@@ -891,7 +945,8 @@ def evaluate(task: dict[str, Any], host: dict[str, Any],
     gpu_ids = set(task.get('gpu_uuids', []))
     own_pids = {str(p['pid']) for p in processes}
     container_ids = set(task.get('gpu_container_ids', []))
-    gpu_processes = [dict(p, belongs_to_task=p['pid'] in own_pids or bool(container_ids.intersection(p.get('container_ids', []))))
+    gpu_processes = [dict(p, belongs_to_task=p.get('owner_task_id') == task['id'] if 'owner_task_id' in p else
+                         str(p['pid']) in own_pids or bool(container_ids.intersection(p.get('container_ids', []))))
                      for p in host['gpu_processes'].get('rows', []) if uses_gpu and (not gpu_ids or p['gpu_uuid'] in gpu_ids)]
     result.update(state=state, state_source=state_source, declared_state=declared, exit_code=rc, observed_at=utc(now), last_success_at=utc(now),
                   boot_id=host.get('boot_id'), processes=processes, streams=streams,
@@ -906,14 +961,27 @@ def evaluate(task: dict[str, Any], host: dict[str, Any],
                   process_errors=raw.get('process_errors', []),
                   identity_errors=raw['identity_errors'])
     result['alerts'] = sorted(set(result['alerts']))
-    result['advice'] = [SUGGESTIONS[k] for k in result['alerts']]
+    result['advice'] = [SUGGESTIONS.get(k, k) for k in result['alerts']]
     return result
 
 
 def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        from .runtime import endpoint_key, enrich_host
+        from .diagnostics import augment
+    except ImportError:
+        from runtime import endpoint_key, enrich_host
+        from diagnostics import augment
+    started = time.monotonic()
     old = {t['id']: t for t in (previous or {}).get('tasks', [])}
-    grouped = {name: tasks for name in cfg['hosts']
-               if (tasks := [t for t in cfg['tasks'] if t['host'] == name])}
+    grouped = {}
+    for task in cfg['tasks']:
+        host = cfg['hosts'][task['host']]
+        key = endpoint_key(host) if host.get('transport') == 'local' or host.get('hostname') else 'unconfigured:' + task['host']
+        group = grouped.setdefault(key, {'host': host, 'aliases': [], 'tasks': []})
+        if task['host'] not in group['aliases']:
+            group['aliases'].append(task['host'])
+        group['tasks'].append(task)
     hosts = {}
     if grouped:
         round_timeout = cfg.get('probe_round_timeout_seconds',
@@ -921,8 +989,8 @@ def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None) -> dic
                                 + cfg.get('retry_delay_seconds', 0) * (cfg.get('connection_attempts', 1) - 1))
         deadline = time.monotonic() + round_timeout
         pool = ThreadPoolExecutor(max_workers=min(MAX_PROBE_WORKERS, len(grouped)))
-        pending = {pool.submit(probe_host, cfg['hosts'][name], tasks, cfg, deadline): name
-                   for name, tasks in grouped.items()}
+        pending = {pool.submit(probe_host, group['host'], group['tasks'], cfg, deadline): key
+                   for key, group in grouped.items()}
         try:
             for future in as_completed(pending, timeout=max(0, deadline - time.monotonic())):
                 try:
@@ -932,52 +1000,143 @@ def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None) -> dic
         except FuturesTimeoutError:
             pass
         finally:
-            for future, name in pending.items():
-                if name not in hosts:
+            for future, key in pending.items():
+                if key not in hosts:
                     future.cancel()
-                    hosts[name] = {'error': 'probe round timeout'}
-            # The context manager waits for every worker even after as_completed
-            # times out. Subprocesses share the deadline; queued work is cancelled.
+                    hosts[key] = {'error': 'probe round timeout'}
             pool.shutdown(wait=False, cancel_futures=True)
-    evaluated = [evaluate(t, hosts[t['host']], old.get(t['id'])) for t in cfg['tasks']]
+    _OPERATOR_OVERLAY.clear()
+    by_alias = {}
+    for key, raw in hosts.items():
+        if cfg.get('_operator_tty'):
+            _OPERATOR_OVERLAY.update(raw.pop('_operator_overlay', {}))
+        else:
+            raw.pop('_operator_overlay', None)
+        if not raw.get('error'):
+            enrich_host(raw, grouped[key]['tasks'], key, raw.get('observed_at'))
+        for alias in grouped[key]['aliases']:
+            by_alias[alias] = raw
+    evaluated = [evaluate(t, by_alias[t['host']], old.get(t['id'])) for t in cfg['tasks']]
     host_views = {}
-    for name, raw in hosts.items():
-        host_tasks = [task for task in evaluated if task['host'] == name]
+    for key, raw in hosts.items():
+        group = grouped[key]
+        aliases = group['aliases']
+        host_tasks = [t for t in evaluated if t['host'] in aliases]
+        view = {'endpoint_id': key, 'aliases': aliases, 'probe_count': 1}
         if raw.get('error'):
-            host_views[name] = {'state': 'UNREACHABLE', 'error': raw['error'], 'gpu_count': None, 'gpus': []}
+            view.update(state='UNREACHABLE', error=raw['error'], gpu_count=None, gpus=[])
+            host_views[aliases[0]] = view
             continue
-        task_by_pid = {}
         for task in host_tasks:
-            for process in task.get('processes', []):
-                task_by_pid[str(process['pid'])] = task
-            for app in task.get('gpu_processes', []):
-                if app.get('belongs_to_task'):
-                    task_by_pid[str(app['pid'])] = task
-        gpu_rows = raw.get('gpu', {}).get('rows', [])
-        app_rows = raw.get('gpu_processes', {}).get('rows', [])
+            source = raw.get('tasks', {}).get(task['id'], {})
+            scheduler_view = source.get('scheduler_view', {})
+            task['configured_job_ids'] = scheduler_view.get('configured_job_ids', task.get('scheduler', {}).get('job_ids', []))
+            task['active_job'] = scheduler_view.get('active_job', source.get('active_job'))
+            task['scheduler_history'] = scheduler_view.get('attempts', scheduler_view.get('history', source.get('scheduler_history', [])))
+            task['alerts'] = sorted(set(task['alerts'] + scheduler_view.get('alerts', source.get('scheduler_alerts', []))))
+            task['gpu_processes'] = [dict(app, belongs_to_task=app.get('owner_task_id') == task['id'])
+                                     for app in raw.get('gpu_processes', {}).get('rows', [])
+                                     if task.get('uses_gpu', True) and (not next(t for t in group['tasks'] if t['id'] == task['id']).get('gpu_uuids')
+                                         or app.get('gpu_uuid') in next(t for t in group['tasks'] if t['id'] == task['id']).get('gpu_uuids', []))]
+        task_map = {task['id']: task for task in host_tasks}
         gpus = []
-        for gpu in gpu_rows:
-            uuid_value = gpu.get('uuid')
-            apps = [app for app in app_rows if app.get('gpu_uuid') == uuid_value]
-            running = []
-            unknown = []
+        seen_gpu = set()
+        for gpu in raw.get('gpu', {}).get('rows', []):
+            gpu_uuid = gpu.get('uuid')
+            if gpu_uuid in seen_gpu:
+                continue
+            seen_gpu.add(gpu_uuid)
+            apps = [app for app in raw.get('gpu_processes', {}).get('rows', []) if app.get('gpu_uuid') == gpu_uuid]
+            owners, unknown = {}, []
             for app in apps:
-                task = task_by_pid.get(str(app.get('pid')))
+                task = task_map.get(app.get('owner_task_id'))
                 if task:
-                    running.append({'task_id': task['id'], 'label': task.get('label', task['id']),
-                                    'state': task['state'], 'pid': str(app.get('pid')),
-                                    'memory_used_mib': app.get('memory_used_mib')})
+                    item = owners.setdefault(task['id'], {'task_id': task['id'], 'label': task.get('label', task['id']),
+                        'state': task['state'], 'pids': [], 'memory_used_mib': 0,
+                        'source': app.get('source'), 'confidence': app.get('confidence')})
+                    item['pids'].append(str(app.get('pid')))
+                    try:
+                        item['memory_used_mib'] += float(app.get('memory_used_mib') or 0)
+                    except (ValueError, TypeError):
+                        pass
                 else:
                     unknown.append(app)
-            gpus.append({'index': gpu.get('index'), 'uuid': uuid_value, 'name': gpu.get('name'),
-                         'memory_total_mib': gpu.get('memory_total_mib'), 'memory_used_mib': gpu.get('memory_used_mib'),
-                         'utilization_pct': gpu.get('utilization_pct'), 'temperature_c': gpu.get('temperature_c'),
-                         'running_tasks': running, 'unknown_processes': unknown})
-        host_views[name] = {'state': 'OK', 'gpu_count': len(gpus), 'gpus': gpus,
-                            'process_query_error': raw.get('gpu_processes', {}).get('error')}
-    agents = aggregate_agents(evaluated)
-    return {'schema_version': 1, 'collected_at': utc(), 'read_only': True,
-            'hosts': host_views, 'tasks': evaluated, 'agents': agents}
+            def memory_sum(rows):
+                total = 0
+                for row in rows:
+                    try:
+                        total += float(row.get('memory_used_mib') or 0)
+                    except (ValueError, TypeError):
+                        pass
+                return total
+            measured = {name: gpu.get(name) for name in ('memory_total_mib', 'memory_used_mib', 'utilization_pct', 'temperature_c')}
+            reserved = gpu.get('reserved', raw.get('reserved', {}).get(gpu_uuid, {}))
+            if not reserved:
+                jobs = [source.get('scheduler_view', {}).get('active_job') for source in raw.get('tasks', {}).values()]
+                jobs = {j.get('job_id', j.get('id')): j for j in jobs if j and j.get('state') in ('STARTING', 'RUNNING', 'UNKNOWN')
+                        and j.get('gpu_uuid') in (None, gpu_uuid)}
+                reserved = {name: sum(float(j.get(name) or j.get('resources', {}).get(name) or 0) for j in jobs.values())
+                            for name in ('memory_mib', 'compute_units', 'ram_mib', 'cpu_cores')}
+            waiting = [t['active_job'] for t in host_tasks if t.get('active_job') and t['active_job'].get('state') == 'QUEUED']
+            gpus.append({**gpu, 'endpoint_id': key, 'measured': measured, 'reserved': reserved,
+                         'host_resources': raw.get('host_resources', {}),
+                         'running_tasks': list(owners.values()), 'unknown_processes': unknown,
+                         'owned_memory_mib': sum(item['memory_used_mib'] for item in owners.values()),
+                         'unknown_memory_mib': memory_sum(unknown),
+                         'external_queue_summary': raw.get('external_queue_summary', {}),
+                         'queued': len(waiting),
+                         'blocking_reason': ', '.join(sorted({j.get('reason') or 'unknown' for j in waiting}))})
+        view.update(state='OK', gpu_count=len(gpus), gpus=gpus, host_resources=raw.get('host_resources', {}),
+                    scheduler_summary=raw.get('scheduler_summary', {}),
+                    external_queue_summary=raw.get('external_queue_summary', {}),
+                    process_query_error=raw.get('gpu_processes', {}).get('error'))
+        host_views[aliases[0]] = view
+    data = {'schema_version': 2, 'collected_at': utc(), 'read_only': True,
+            'interval_seconds': cfg.get('_interval_override', cfg.get('interval_seconds', 60)),
+            'hosts': host_views, 'tasks': evaluated}
+    if cfg.get('_config_metadata'):
+        data['config'] = cfg['_config_metadata']
+    augment(data, cfg, previous or {}, time.time(), by_alias,
+            formal_unchanged={key: value.get('unchanged', False) for key, value in _OPERATOR_OVERLAY.items()})
+    for task in data['tasks']:
+        records = {alert['id']: alert for alert in task.get('alert_history', [])}
+        prior = {alert['id']: alert for alert in old.get(task['id'], {}).get('alert_history', [])}
+        for code in task.get('alerts', []):
+            alert_id = task['id'] + ':' + code
+            before = prior.get(alert_id, {})
+            records[alert_id] = {'id': alert_id, 'task_id': task['id'], 'severity': 'critical'
+                if code in ('FAILED', 'NONFINITE', 'STATUS_CONFLICT', 'CONTROLLER_IDENTITY_MISMATCH',
+                            'SCHEDULER_IDENTITY_CONFLICT', 'SCHEDULER_LEDGER_INVALID', 'DEADLINE_EXCEEDED') else 'warning',
+                'state': 'open', 'first_seen': before.get('first_seen', data['collected_at']),
+                'last_seen': data['collected_at'], 'observed_count': before.get('observed_count', 0) + 1,
+                'threshold': 1, 'source': 'task_probe', 'evidence': {'rule': code},
+                'data_gap': task['state'] == 'UNREACHABLE'}
+        for alert_id, before in prior.items():
+            if before.get('source') == 'task_probe' and alert_id not in records:
+                records[alert_id] = dict(before, state=before.get('state') if task['state'] == 'UNREACHABLE' else 'resolved',
+                                         data_gap=task['state'] == 'UNREACHABLE')
+        task['alert_history'] = list(records.values())
+    data['alerts'] = [alert for task in data['tasks'] for alert in task.get('alert_history', [])]
+    data['agents'] = aggregate_agents(data['tasks'])
+    for task in data['tasks']:
+        for stream in task.get('streams', []):
+            stream['latest'] = {key: value for key, value in stream.get('latest', {}).items()
+                                if key in ('step', 'elapsed_seconds', 'event', 'state', 'turn', 'generation')}
+    gpus = [gpu for host in host_views.values() for gpu in host.get('gpus', [])]
+    active_jobs = {task['active_job'].get('request_id') or task['active_job'].get('job_id'): task['active_job']
+                   for task in data['tasks'] if task.get('active_job')}
+    queue = [job for job in active_jobs.values() if job.get('state') == 'QUEUED']
+    waits = [job.get('waiting_seconds', job.get('wait_seconds')) for job in queue if finite(job.get('waiting_seconds', job.get('wait_seconds')))]
+    open_alerts = [a for a in data.get('alerts', []) if a.get('state') == 'open']
+    data['summary'] = {'critical_alerts': sum(a.get('severity') == 'critical' for a in open_alerts),
+        'warning_alerts': sum(a.get('severity') in ('warning', 'error') for a in open_alerts),
+        'running_streams': sum(len(task.get('streams') or [None]) for task in data['tasks'] if task['state'] == 'RUNNING'),
+        'gpu_occupied': sum(bool(g.get('running_tasks') or g.get('unknown_processes')) for g in gpus),
+        'gpu_total': len(gpus) if not any(h.get('error') for h in host_views.values()) else None,
+        'scheduler': {'running': sum(j.get('state') in ('STARTING', 'RUNNING') for j in active_jobs.values()),
+                      'queued': len(queue), 'oldest_wait_seconds': max(waits) if waits else None},
+        'collection_seconds': round(time.monotonic() - started, 3)}
+    return public_record(data, [host.get('password') for host in cfg['hosts'].values()])
 
 
 def aggregate_agents(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1005,7 +1164,7 @@ def aggregate_agents(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
             'alerts': list(task.get('alerts', [])), 'processes': task.get('processes', []),
             **{key: task[key] for key in ('budget_mode', 'effective_seconds', 'effective_target_seconds',
                 'effective_target_remaining_seconds', 'deadline_at', 'budget_remaining_seconds',
-                'current_turn', 'heartbeat_stale', 'scientific_score') if key in task},
+                'current_turn', 'heartbeat_stale', 'timing', 'active_job', 'configured_job_ids', 'timeline_12h') if key in task},
             **identity,
         })
     return agents
@@ -1028,6 +1187,7 @@ def load_latest(state: Path) -> dict[str, Any]:
 
 
 def persist(state: Path, data: dict[str, Any], previous: dict[str, Any]) -> None:
+    data = public_record(data)
     state.mkdir(parents=True, exist_ok=True)
     atomic_json(state / 'latest.json', data)
     day = data['collected_at'][:10]
@@ -1035,12 +1195,19 @@ def persist(state: Path, data: dict[str, Any], previous: dict[str, Any]) -> None
         f.write(dump(data) + '\n')
     old = {t['id']: t for t in previous.get('tasks', [])}
     with (state / f'events-{day}.jsonl').open('a') as f:
+        for event in data.get('config_events', []):
+            f.write(dump(event) + '\n')
         for task in data['tasks']:
             before = old.get(task['id'], {})
             if (task['state'], task['alerts']) != (before.get('state'), before.get('alerts')):
                 f.write(dump({'time': data['collected_at'], 'task': task['id'],
                               'previous_state': before.get('state'), 'state': task['state'],
                               'alerts': task['alerts'], 'advice': task['advice']}) + '\n')
+        prior = {a['id']: a for a in previous.get('alerts', [])}
+        for alert in data.get('alerts', []):
+            before = prior.get(alert['id'], {})
+            if (alert.get('state'), alert.get('severity'), alert.get('observed_count')) != (before.get('state'), before.get('severity'), before.get('observed_count')):
+                f.write(dump({'event': 'ALERT_UPDATED', 'time': data['collected_at'], 'alert': alert}) + '\n')
 
 
 def duration(seconds):
@@ -1108,185 +1275,8 @@ def _state_style(colors, state):
     return colors.dim(state)
 
 
-def render_tasks(data, color='auto'):
-    """Render task/log details for debugging; JSON callers must use ``--json`` instead."""
-    colors = Colors(_color_enabled(color))
-    width = shutil.get_terminal_size((110, 24)).columns
-    rule = colors.dim('─' * min(max(width, 48), 96))
-    tasks = data.get('tasks', [])
-    print()
-
-    print(colors.bold(colors.blue('AutoResearch GPU 任务详情')))
-    print(colors.dim(f"采集时间 {data.get('collected_at', '?')}   只读模式   任务 {len(tasks)} 个"))
-    print(rule)
-    for index, t in enumerate(tasks):
-        state = t.get('state', 'UNKNOWN')
-        alerts = t.get('alerts', [])
-        title = f"{t['id']}  ·  {t.get('label', t['id'])}"
-        print(colors.bold(colors.white(f'[{index + 1}/{len(tasks)}] {title}')))
-        print(f"  状态   {_state_style(colors, state)}    阶段 {colors.bold(str(t.get('declared_state') or '?'))}")
-        pids = ', '.join(str(p['pid']) for p in t.get('processes', [])) or '-'
-        if t.get('budget_mode') == 'effective':
-            print(f"  进程   {pids}    已计有效 {colors.bold(duration(t.get('effective_seconds')))} / 目标 {duration(t.get('effective_target_seconds'))} / 硬上限 {duration(t.get('effective_limit_seconds'))}")
-            print(f"  预算   距有效目标 {duration(t.get('effective_target_remaining_seconds'))}    有效余额 {duration(t.get('effective_remaining_seconds'))}")
-        elif t.get('budget_mode') == 'active':
-            print(f"  进程   {pids}    已确认有效 {duration(t.get('effective_seconds'))} / 目标 {duration(t.get('effective_target_seconds'))}")
-            print(f"  预算   距有效目标 {duration(t.get('effective_target_remaining_seconds'))}    距墙钟截止 {duration(t.get('budget_remaining_seconds'))}")
-        else:
-            print(f"  进程   {pids}    距墙钟截止 {colors.bold(duration(t.get('budget_remaining_seconds')))}")
-        if t.get('error'):
-            for line in _wrap_lines(t['error'], width, '  查询失败 ', colors):
-                print(colors.red(line))
-        for stream in t.get('streams', []):
-            latest = stream.get('latest') or {}
-            print(f"  流程   {colors.magenta(stream['id'])}")
-            if latest:
-                step = latest.get('step')
-                total = stream.get('total_steps')
-                progress = f"{_number(step)}/{_number(total)}" if total else _number(step)
-                rate = f"{stream['step_per_second']:.3g}/s" if stream.get('step_per_second') is not None else '?'
-                delta = _number(stream.get('metric_delta_in_tail'))
-                metric = latest.get('metric')
-                print(f"    进度   {colors.bold(progress)}   速率 {rate}   ETA {colors.bold(duration(stream.get('eta_seconds')))}")
-                print(f"    指标   {stream.get('metric_name') or 'metric'}={colors.bold(_number(metric))}   "
-                      f"窗口变化 {delta}   日志年龄 {duration(stream.get('log_age_seconds'))}")
-                extras = [(key, value) for key, value in latest.items()
-                          if key not in {'step', 'metric', 'elapsed_seconds'} and value is not None]
-                if extras:
-                    extra_text = '   '.join(f'{key}={_number(value)}' for key, value in extras)
-                    for line in _wrap_lines(extra_text, width, '    细节   ', colors):
-                        print(colors.dim(line))
-            elif stream.get('tail'):
-                for line in _wrap_lines(stream['tail'][-1], width, '    日志   ', colors):
-                    print(colors.dim(line))
-        if alerts:
-            print(f"  {colors.red(colors.bold('告警'))}  " + colors.red('  '.join(alerts)))
-            for advice in t.get('advice', []):
-                for line in _wrap_lines(advice, width, '         ', colors):
-                    print(colors.yellow(line))
-        if index != len(tasks) - 1:
-            print(rule)
-    print()
-
-
-def render_agents(data, color='auto'):
-    """Render the official research_handoff/gpu_scheduler task registry."""
-    colors = Colors(_color_enabled(color))
-    agents = data.get('agents') or aggregate_agents(data.get('tasks', []))
-    print()
-    print(colors.bold(colors.blue('AutoResearch 官方长时间 Agent 总览')))
-    print(colors.dim(f"采集时间 {data.get('collected_at', '?')}   只读模式   Agent {len(agents)} 个"))
-    for agent in agents:
-        state = _state_style(colors, agent.get('state', 'UNKNOWN'))
-        refs = []
-        if agent.get('controller'):
-            refs.append(f"research_handoff:{agent['controller'].get('run_id')}")
-        if agent.get('scheduler'):
-            refs.append('gpu_scheduler:' + ','.join(agent['scheduler'].get('job_ids', [])))
-        print(f"  {colors.bold(agent.get('id', '?'))}  {state}  主机 {agent.get('host', '?')}")
-        print(f"    官方身份  {'; '.join(refs) or '?'}   进程 {len(agent.get('processes', []))} 个")
-        if agent.get('budget_mode') == 'active':
-            print(f"    有效时间  {duration(agent.get('effective_seconds'))}/{duration(agent.get('effective_target_seconds'))}"
-                  f"   墙钟余额 {duration(agent.get('budget_remaining_seconds'))}   当前轮 {agent.get('current_turn', '?')}")
-        if agent.get('alerts'):
-            print(colors.yellow('    告警  ' + ' '.join(agent['alerts'])))
-    print()
-
-
-def _percent(used, total):
-    try:
-        return f'{float(used) / float(total) * 100:.1f}%'
-    except (TypeError, ValueError, ZeroDivisionError):
-        return '?'
-
-
-def render_gpu(data, color='auto'):
-    """Render the resource view: host -> GPU -> live task ownership."""
-    colors = Colors(_color_enabled(color))
-    width = shutil.get_terminal_size((110, 24)).columns
-    rule = colors.dim('─' * min(max(width, 48), 96))
-    hosts = data.get('hosts', {})
-    tasks = data.get('tasks', [])
-    active_ids = {item['task_id'] for host in hosts.values() for gpu in host.get('gpus', [])
-                  for item in gpu.get('running_tasks', [])}
-    unreachable_hosts = {name for name, host in hosts.items()
-                         if host.get('error') or host.get('state') == 'UNREACHABLE'}
-    known_gpu_count = sum((host.get('gpu_count') or 0) for name, host in hosts.items()
-                          if name not in unreachable_hosts)
-    if unreachable_hosts:
-        gpu_summary = (f'{known_gpu_count}+? 张' if known_gpu_count else '? 张') + \
-            f'（{len(unreachable_hosts)} 台主机不可达）'
-        unknown_task_hosts = {task.get('host') for task in tasks
-                              if task.get('host') in unreachable_hosts}
-        task_summary = (f'{len(active_ids)}+? 个' if active_ids else '? 个') \
-            if unknown_task_hosts else f'{len(active_ids)} 个'
-    else:
-        gpu_summary = f'{known_gpu_count} 张'
-        task_summary = f'{len(active_ids)} 个'
-    print()
-    print(colors.bold(colors.blue('AutoResearch GPU 资源总览')))
-    print(colors.dim(f"采集时间 {data.get('collected_at', '?')}   只读模式   "
-                     f"主机 {len(hosts)} 台   GPU {gpu_summary}   "
-                     f"运行任务 {task_summary}"))
-    print(rule)
-    for host_index, (host_name, host) in enumerate(hosts.items()):
-        if host.get('error'):
-            print(colors.bold(colors.white(f'[{host_name}]')))
-            print(colors.red('  查询失败: ' + str(host['error'])))
-            if host_index != len(hosts) - 1:
-                print(rule)
-            continue
-        gpu_count = host.get('gpu_count', 0)
-        print(colors.bold(colors.white(f'[{host_name}]  ·  {gpu_count} 张 GPU')))
-        if not host.get('gpus'):
-            print(colors.yellow('  没有读取到 GPU；请检查 nvidia-smi 或主机连接。'))
-        for gpu_index, gpu in enumerate(host.get('gpus', [])):
-            used = gpu.get('memory_used_mib', '?')
-            total = gpu.get('memory_total_mib', '?')
-            utilization = str(gpu.get('utilization_pct', '?')) + '%'
-            title = f"GPU{gpu.get('index', '?')}  {gpu.get('name') or 'Unknown GPU'}"
-            print(f"  {colors.bold(colors.cyan(title))}")
-            print(f"    占用   {colors.bold(str(used) + '/' + str(total) + ' MiB')} ({_percent(used, total)})  "
-                  f"利用率 {colors.bold(utilization)}  温度 {gpu.get('temperature_c', '?')}°C")
-            running = gpu.get('running_tasks', [])
-            unknown = gpu.get('unknown_processes', [])
-            if running:
-                print(f"    任务   {colors.green(str(len(running)) + ' 个已识别任务')}")
-                seen = set()
-                for item in running:
-                    key = (item.get('task_id'), item.get('pid'))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    state = _state_style(colors, item.get('state', 'UNKNOWN'))
-                    memory = item.get('memory_used_mib', '?')
-                    print(f"      • {item.get('label', item.get('task_id'))}  {state}  "
-                          f"PID {item.get('pid', '?')}  显存 {memory} MiB")
-            else:
-                print(f"    任务   {colors.dim('无已识别运行任务')}")
-            if unknown:
-                unknown_text = '、'.join(f"PID {item.get('pid', '?')} ({item.get('memory_used_mib', '?')} MiB)"
-                                        for item in unknown)
-                for line in _wrap_lines(unknown_text, width, '    其他   ', colors):
-                    print(colors.yellow(line))
-            elif str(used) not in ('0', '0.0') and not running:
-                print(colors.yellow('    其他   显存有占用，但 nvidia-smi 未返回可归属进程。'))
-            if host.get('process_query_error'):
-                print(colors.yellow('    其他   进程列表查询失败：' + str(host['process_query_error'])))
-            if gpu_index != len(host.get('gpus', [])) - 1:
-                print()
-        if host_index != len(hosts) - 1:
-            print(rule)
-    print()
-
-
-def render(data, color='auto', view='gpu'):
-    """Render a human view; ``gpu`` is the default and ``tasks`` is diagnostic."""
-    if view == 'tasks':
-        return render_tasks(data, color)
-    if view == 'agents':
-        return render_agents(data, color)
-    return render_gpu(data, color)
+def render(data, color='auto'):
+    return render_unified(data, color)
 
 
 def refresh_auth(cfg: dict[str, Any], auth_path: Path) -> None:
@@ -1313,7 +1303,18 @@ def all_tasks_terminal(tasks: list[dict[str, Any]]) -> bool:
                and not UNCERTAIN_LIFECYCLE_ALERTS.intersection(task.get('alerts', [])) for task in tasks)
 
 
-def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None, auth_path=None, view='gpu'):
+def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None,
+          auth_path=None, config_path=None, task_ids=(), config_check_interval=60,
+          auth_check_interval=60, interval_override=None, color='auto', json_output=False):
+    try:
+        from .reload import ConfigReloader, AuthReloader
+    except ImportError:
+        from reload import ConfigReloader, AuthReloader
+    initial_auth = next(({'host': h['hostname'], 'user': h['user'], 'password': h['password'], 'port': h.get('port', 22)}
+                         for h in cfg['hosts'].values() if h.get('password')), None)
+    auth_reloader = AuthReloader(auth_path, initial_auth, load_auth, apply_auth, purge_host_key) if auth_path else None
+    reloader = ConfigReloader(config_path, cfg, load_config, task_ids,
+                              auth_getter=lambda: auth_reloader.current if auth_reloader else None) if config_path else None
     state.mkdir(parents=True, exist_ok=True)
     with (state / 'watch.lock').open('a') as lock:
         try:
@@ -1323,44 +1324,89 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
         token = token or uuid.uuid4().hex
         info = {'pid': os.getpid(), 'token': token, 'started_at': utc(),
                 'deadline_at': utc(time.time() + max_hours * 3600), 'state': 'RUNNING', 'read_only': True}
+        if reloader:
+            info['config'] = reloader.metadata()
         atomic_json(state / 'watch.json', info)
         stop_path = state / 'stop-monitor.json'
         end = time.monotonic() + max_hours * 3600
-        count = 0
-        reason = 'MONITOR_TIME_LIMIT'
+        next_probe_at = time.monotonic()
+        next_config_check_at = next_probe_at + config_check_interval
+        next_auth_check_at = next_probe_at + auth_check_interval
+        count, reason, events = 0, 'MONITOR_TIME_LIMIT', []
         try:
             while time.monotonic() < end:
-                if auth_path:
-                    refresh_auth(cfg, Path(auth_path))
-                previous = load_latest(state)
-                data = snapshot(cfg, previous)
-                persist(state, data, previous)
-                render(data, view=view)
-                count += 1
-                info.update(last_poll_at=data['collected_at'], polls=count)
-                atomic_json(state / 'watch.json', info)
-                if max_polls and count >= max_polls:
-                    reason = 'POLL_LIMIT'
-                    break
-                if until_terminal and all_tasks_terminal(data['tasks']):
-                    reason = 'ALL_TASKS_TERMINAL'
-                    break
-                wake = min(end, time.monotonic() + interval)
-                while time.monotonic() < wake:
-                    try:
-                        stop = json.loads(stop_path.read_text())
-                        if stop.get('token') == token:
-                            reason = 'LOCAL_MONITOR_STOP_REQUESTED'
-                            return
-                    except (FileNotFoundError, ValueError):
-                        pass
-                    time.sleep(min(0.5, max(0, wake - time.monotonic())))
+                try:
+                    stop = json.loads(stop_path.read_text())
+                    if stop.get('token') == token:
+                        reason = 'LOCAL_MONITOR_STOP_REQUESTED'
+                        break
+                except (FileNotFoundError, ValueError):
+                    pass
+                now = time.monotonic()
+                if reloader and now >= next_config_check_at:
+                    events.extend(reloader.check(count + 1))
+                    cfg = reloader.current
+                    next_config_check_at = time.monotonic() + config_check_interval
+                if auth_reloader and now >= next_auth_check_at:
+                    events.extend(auth_reloader.check(cfg))
+                    next_auth_check_at = time.monotonic() + auth_check_interval
+                if now >= next_probe_at:
+                    probe_started = time.monotonic()
+                    current = dict(reloader.selected_config() if reloader else cfg)
+                    current['_operator_tty'] = sys.stdout.isatty() and not json_output
+                    current['_interval_override'] = interval_override if interval_override is not None else current.get('interval_seconds', interval)
+                    current['probe_round_timeout_seconds'] = min(current.get('probe_round_timeout_seconds', current.get('timeout_seconds', 30)),
+                                                                 max(0.001, end - probe_started))
+                    previous = load_latest(state)
+                    data = snapshot(current, previous)
+                    if reloader:
+                        data['config'] = reloader.metadata()
+                    if events:
+                        data['config_events'] = public_record(events)
+                        events = []
+                    for task_id in data.get('config', {}).get('missing_task_ids', []):
+                        data['alerts'].append({'id': 'CONFIG_TASK_MISSING:' + task_id, 'task_id': task_id,
+                            'severity': 'critical', 'state': 'open', 'first_seen': data['collected_at'],
+                            'last_seen': data['collected_at'], 'observed_count': 1, 'threshold': 1,
+                            'source': 'config', 'evidence': {'task_id': task_id}, 'data_gap': True})
+                    if data.get('config', {}).get('reload_state') in ('FAILED', 'RESTART_REQUIRED'):
+                        prior = next((a for a in previous.get('alerts', []) if a.get('id') == 'CONFIG_RELOAD_FAILED'), {})
+                        data['alerts'].append({'id': 'CONFIG_RELOAD_FAILED', 'severity': 'warning', 'state': 'open',
+                            'first_seen': prior.get('first_seen', data['collected_at']), 'last_seen': data['collected_at'],
+                            'observed_count': prior.get('observed_count', 0) + 1, 'threshold': 1, 'source': 'config',
+                            'evidence': {'error': data['config']['last_reload_error']}, 'data_gap': True})
+                    summary = data.setdefault('summary', {})
+                    summary['critical_alerts'] = sum(a.get('severity') == 'critical' and a.get('state') == 'open' for a in data['alerts'])
+                    summary['warning_alerts'] = sum(a.get('severity') in ('warning', 'error') and a.get('state') == 'open' for a in data['alerts'])
+                    persist(state, data, previous)
+                    if current['_operator_tty']:
+                        print('\033[2J\033[H', end='')
+                        render_unified(data, color, _OPERATOR_OVERLAY)
+                    else:
+                        print(dump(public_record(data)), flush=True)
+                    _OPERATOR_OVERLAY.clear()
+                    count += 1
+                    info.update(last_poll_at=data['collected_at'], polls=count, config=data.get('config'),
+                                auth=auth_reloader.metadata() if auth_reloader else None)
+                    atomic_json(state / 'watch.json', info)
+                    if max_polls and count >= max_polls:
+                        reason = 'POLL_LIMIT'
+                        break
+                    if until_terminal and data['tasks'] and all_tasks_terminal(data['tasks']):
+                        reason = 'ALL_TASKS_TERMINAL'
+                        break
+                    next_probe_at = probe_started + current['_interval_override']
+                wake = min(end, next_probe_at,
+                           next_config_check_at if reloader else end,
+                           next_auth_check_at if auth_reloader else end)
+                time.sleep(min(0.5, max(0, wake - time.monotonic())))
         except KeyboardInterrupt:
             reason = 'KEYBOARD_INTERRUPT'
         except BaseException:
             reason = 'MONITOR_ERROR'
             raise
         finally:
+            _OPERATOR_OVERLAY.clear()
             info.update(state='STOPPED', ended_at=utc(), reason=reason)
             atomic_json(state / 'watch.json', info)
 
@@ -1383,11 +1429,12 @@ def main():
                    help='凭据文件，默认工作区根目录 auth.txt（可用 AUTORESEARCH_AUTH_FILE 覆盖）')
     p.add_argument('--task', action='append', help='task ID; repeat to select several')
     p.add_argument('--json', action='store_true', help='machine-readable output')
-    p.add_argument('--view', choices=['gpu', 'tasks', 'agents'], default='gpu',
-                   help='human view: GPU ownership summary (default) or task details')
+    p.add_argument('--view', help=argparse.SUPPRESS)
     p.add_argument('--color', choices=['auto', 'always', 'never'], default='auto',
                    help='terminal colors for human output; JSON is never colored')
     p.add_argument('--interval', type=float)
+    p.add_argument('--config-check-interval', type=float, default=60)
+    p.add_argument('--auth-check-interval', type=float, default=60)
     p.add_argument('--max-hours', type=float)
     p.add_argument('--max-polls', type=int)
     p.add_argument('--until-terminal', action='store_true')
@@ -1397,15 +1444,18 @@ def main():
     p.add_argument('--token', help=argparse.SUPPRESS)
     a = p.parse_args()
     try:
+        if a.view is not None or a.action == 'status' and not a.json:
+            raise ValueError('旧分屏/人类 status 已取消；请使用 python3 tools/gpu_monitor/monitor.py watch（无 --view）；机器读取使用 status --json')
         auth_path = a.auth.resolve()
         needs_remote = a.action in ('status', 'watch', 'maintain')
         # 凭据文件是唯一的认证来源；只有需要连接远端时才强制要求它存在。
         cfg = load_config(a.config.resolve())
+        full_cfg = cfg
         if a.task:
             unknown = set(a.task) - {t['id'] for t in cfg['tasks']}
             if unknown:
                 raise ValueError(f'unknown task IDs: {sorted(unknown)}')
-            cfg['tasks'] = [t for t in cfg['tasks'] if t['id'] in a.task]
+            cfg = dict(cfg, tasks=[t for t in cfg['tasks'] if t['id'] in a.task])
         active_hosts = {task['host'] for task in cfg['tasks']}
         if needs_remote and any(host.get('transport', 'ssh') == 'ssh'
                                 for name, host in cfg['hosts'].items() if name in active_hosts):
@@ -1415,14 +1465,14 @@ def main():
                     cfg['hosts'][name] = apply_auth(cfg['hosts'][name], auth)
             prepare_ssh({'hosts': {name: cfg['hosts'][name] for name in active_hosts}})
         state = (a.config.resolve().parent / cfg['state_dir']).resolve()
-        # A selection gets its own watch lock/history; a full watch cannot lose tasks.
-        if a.task:
-            key = hashlib.sha256('\n'.join(sorted(set(a.task))).encode()).hexdigest()[:12]
-            state = state / ('selection-' + key)
+        # A configuration owns one collector and one history, including fixed task selections.
         interval = a.interval if a.interval is not None else cfg['interval_seconds']
         hours = a.max_hours if a.max_hours is not None else cfg['max_hours']
-        if not finite(interval) or interval < 1 or not finite(hours) or hours <= 0 or (a.max_polls is not None and a.max_polls < 1):
-            raise ValueError('interval >= 1, max-hours > 0 and max-polls >= 1 required')
+        if (not finite(interval) or interval < 1 or not finite(hours) or not 0 < hours <= 12
+                or not finite(a.config_check_interval) or a.config_check_interval <= 0
+                or not finite(a.auth_check_interval) or a.auth_check_interval <= 0
+                or (a.max_polls is not None and a.max_polls < 1)):
+            raise ValueError('interval >= 1, 0 < max-hours <= 12, positive check intervals and max-polls >= 1 required')
         if a.action == 'validate':
             print(dump({'valid': True, 'tasks': [t['id'] for t in cfg['tasks']], 'state_dir': str(state)}))
         elif a.action == 'stop-task':
@@ -1431,14 +1481,17 @@ def main():
             return stop_task(cfg, cfg['tasks'][0], a.reason, a.dry_run, state, a.config.resolve(), auth_path)
         elif a.action == 'status':
             data = snapshot(cfg, load_latest(state))
-            print(dump(data)) if a.json else render(data, a.color, a.view)
-            if a.check and any(t['alerts'] for t in data['tasks']):
+            print(dump(public_record(data)))
+            if a.check and (any(t['alerts'] for t in data['tasks']) or
+                            any(alert.get('state') == 'open' for alert in data.get('alerts', []))):
                 return 2
         elif a.action == 'watch':
             if not cfg['tasks']:
                 print('没有活动任务，无需启动监控器。')
                 return 0
-            watch(cfg, state, interval, hours, a.max_polls, a.until_terminal, a.token, auth_path, a.view)
+            watch(full_cfg, state, interval, hours, a.max_polls, a.until_terminal, a.token,
+                  auth_path, a.config.resolve(), a.task or (), a.config_check_interval,
+                  a.auth_check_interval, a.interval, a.color, a.json)
         elif a.action == 'monitor-status':
             info = json.loads((state / 'watch.json').read_text()) if (state / 'watch.json').exists() else {}
             print(dump({'collector_alive': monitor_alive(state), 'watch': info, 'state_dir': str(state)}))
@@ -1460,7 +1513,11 @@ def main():
             token = uuid.uuid4().hex
             command = [sys.executable, '-u', str(Path(__file__).resolve()), 'watch', '--config', str(a.config.resolve()),
                        '--auth', str(auth_path),
-                       '--interval', str(interval), '--max-hours', str(hours), '--token', token, '--view', a.view]
+                       '--max-hours', str(hours), '--token', token,
+                       '--config-check-interval', str(a.config_check_interval),
+                       '--auth-check-interval', str(a.auth_check_interval)]
+            if a.interval is not None:
+                command += ['--interval', str(a.interval)]
             for task_id in a.task or []:
                 command += ['--task', task_id]
             if a.until_terminal:
@@ -1483,7 +1540,7 @@ def main():
                 raise ValueError('collector startup not confirmed; see collector.log')
             print(dump({'collector_pid': child.pid, 'state_dir': str(state), 'read_only': True}))
     except (ValueError, KeyError, OSError, TypeError) as e:
-        print(f'gpu-monitor: {e}', file=sys.stderr)
+        print(f'gpu-monitor: {public_record(str(e))}', file=sys.stderr)
         return 1
     return 0
 
