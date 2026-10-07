@@ -8,6 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
+import heapq
 import json
 import math
 import re
@@ -532,27 +533,69 @@ def _category(state: str, policy: str | None) -> str:
     return 'not_started' if state == 'NOT_STARTED' else 'unknown'
 
 
+def _timeline_intervals(samples: list, first: float, now: float) -> list[dict]:
+    """Resolve overlapping facts once, retaining their actual half-open bounds."""
+    changes = {first: [], now: []}
+    for index, (begin, end, category, gaps, kinds, priority) in enumerate(samples):
+        begin, end = max(first, begin), min(now, end)
+        if end <= begin:
+            continue
+        changes.setdefault(begin, []).append((True, index, (priority, begin, index), category, gaps, kinds))
+        changes.setdefault(end, []).append((False, index, None, None, None, None))
+    active, heap, result = {}, [], []
+    points = sorted(changes)
+    for position, begin in enumerate(points[:-1]):
+        for start, index, rank, category, gaps, kinds in changes[begin]:
+            if start:
+                active[index] = (category, gaps, kinds)
+                heapq.heappush(heap, tuple(-v for v in rank))
+            else:
+                active.pop(index, None)
+        while heap and -heap[0][2] not in active:
+            heapq.heappop(heap)
+        category, gaps, kinds = (active[-heap[0][2]] if heap else
+                                ('unknown', ['no_registered_history'], []))
+        source = ('event' if heap and -heap[0][0] < 3 else 'observation') if heap else 'missing'
+        end = points[position + 1]
+        if result and (result[-1]['category'], result[-1]['data_gap'], result[-1]['event_categories'],
+                       result[-1]['source']) == (category, gaps, kinds, source):
+            result[-1]['end_at'] = utc(end)
+        else:
+            result.append({'start_at': utc(begin), 'end_at': utc(end), 'category': category,
+                           'data_gap': gaps, 'event_categories': kinds, 'source': source})
+    return result
+
+
 def timeline(task: dict, old: list[dict], events: list[dict], document: dict,
              now: float, gaps: list[str]) -> list[dict]:
-    """48 rolling intervals ending at now, based only on events and observations."""
+    """Project exact persisted intervals into 48 display buckets, never replay buckets."""
     first = now - BUCKET_SECONDS * BUCKET_COUNT
     samples = []
     for bucket in old:
-        begin, end = epoch(bucket.get('start_at')), epoch(bucket.get('end_at'))
-        if begin is not None and end is not None and end > first:
-            samples.append((begin, end, bucket.get('category', 'unknown'), bucket.get('data_gap', []), bucket.get('event_categories', [])))
+        # Legacy polluted buckets cannot reveal the original gap boundaries.
+        intervals = bucket.get('segments', [] if bucket.get('data_gap') else [bucket])
+        for interval in intervals:
+            begin, end = epoch(interval.get('start_at')), epoch(interval.get('end_at'))
+            if begin is not None and end is not None and end > first:
+                category = interval.get('category', 'unknown')
+                holes = interval.get('data_gap', [])
+                priority = (0 if holes == ['no_registered_history'] else
+                            1 if interval.get('source') == 'event' else 3)
+                samples.append((begin, end, category, holes, interval.get('event_categories', []), priority))
     turn = document.get('turn', {})
     started = epoch(turn.get('started_at')) if isinstance(turn, dict) else None
     state = task.get('state', 'UNKNOWN')
     policy = task.get('timing', {}).get('credit_policy')
     category = _category('WAITING_GPU' if task.get('timing', {}).get('waiting_gpu') else state, policy)
-    if gaps:
+    if any(reason in gaps for reason in ('endpoint_unreachable', 'controller_status_unavailable',
+                                        'controller_identity_unverified')):
         category = 'unknown'
     previous_time = epoch(task.get('_diagnostic_previous_at'))
-    observed_start = previous_time if previous_time is not None else now - 1
-    if started is not None and state == 'RUNNING' and not gaps and previous_time is None:
+    observed_start = min(previous_time, now) if previous_time is not None else now - 1
+    if previous_time is not None and now - previous_time > task.get('_diagnostic_max_gap_seconds', 120):
+        observed_start = now - 1
+    if started is not None and started <= now and state == 'RUNNING' and not gaps and previous_time is None:
         observed_start = started
-    samples.append((max(first, observed_start), now, category, gaps, []))
     transitions = []
     for event in events:
         name = event['event']
@@ -566,34 +609,37 @@ def timeline(task: dict, old: list[dict], events: list[dict], document: dict,
                 'completed' if name == 'turn.finished' and event.get('returncode') == 0 else 'event')
         if mark != 'event':
             transitions.append((event['at'], mark, name))
-        if event['at'] >= first:
-            samples.append((event['at'], event['at'] + .001, mark, [], [name]))
     for index, (at, mark, name) in enumerate(transitions):
         end = transitions[index + 1][0] if index + 1 < len(transitions) else now
-        # Fresh endpoint gaps supersede the last known event, while older valid
-        # intervals remain inspectable in the rolling history.
-        if gaps:
+        if category == 'unknown':
             end = min(end, observed_start)
         if end > first and end > at:
-            samples.append((max(first, at), end, mark, [], [name]))
+            samples.append((at, end, mark, [], [name], 2))
+    # Transitions between polls describe that interval; the current observation
+    # describes the state after the final transition, including non-event changes.
+    if category != 'unknown' and transitions:
+        observed_start = max(observed_start, min(now, transitions[-1][0]))
+    samples.append((observed_start, now, category, gaps, [], 4))
+    intervals = _timeline_intervals(samples, first, now)
     result = []
     for index in range(BUCKET_COUNT):
         begin, end = first + index * BUCKET_SECONDS, first + (index + 1) * BUCKET_SECONDS
-        overlaps = [sample for sample in samples if sample[0] < end and sample[1] >= begin]
-        if overlaps:
-            dominant = max(overlaps, key=lambda sample: (sample[1], sample[0]))
-            current = dominant[2]
-            holes = sorted(set(reason for sample in overlaps for reason in sample[3]))
-            categories = sorted(set(kind for sample in overlaps for kind in sample[4]))
-        else:
-            current, holes, categories = 'unknown', ['no_registered_history'], []
+        segments = [dict(row, start_at=utc(max(begin, epoch(row['start_at']))),
+                         end_at=utc(min(end, epoch(row['end_at'])))) for row in intervals
+                    if epoch(row['start_at']) < end and epoch(row['end_at']) > begin]
+        current = segments[-1]['category'] if segments else 'unknown'
+        holes = sorted(set(reason for row in segments for reason in row['data_gap']))
+        categories = sorted(set(kind for row in segments for kind in row['event_categories']) |
+                            {event['event'] for event in events if begin <= event['at'] < end})
+        known = sum(epoch(row['end_at']) - epoch(row['start_at']) for row in segments if row['category'] != 'unknown')
         result.append({'start_at': utc(begin), 'end_at': utc(end), 'state': current,
                        'category': current, 'event_categories': categories,
-                       'waiting': any(s[2] == 'waiting' for s in overlaps),
-                       'running': any(s[2] in ('credited', 'pending') for s in overlaps),
-                       'failed_retry': any(s[2] == 'failed_retry' for s in overlaps),
-                       'manual_stop': any(s[2] == 'manual_stop' for s in overlaps),
-                       'data_gap': holes})
+                       'waiting': any(s['category'] == 'waiting' for s in segments),
+                       'running': any(s['category'] in ('credited', 'pending') for s in segments),
+                       'failed_retry': any(s['category'] == 'failed_retry' for s in segments),
+                       'manual_stop': any(s['category'] == 'manual_stop' for s in segments),
+                       'known_seconds': known, 'unknown_seconds': max(0, end - begin - known),
+                       'data_gap': holes, 'segments': segments})
     return result
 
 
@@ -623,7 +669,13 @@ def augment(data: dict, cfg: dict, previous: dict | None, now: float,
                                and document.get('controller') == 'autoresearch-longrun'
                                and document.get('run_id') == controller.get('run_id')):
             document = {}
-        events, gaps = _events(raw, now)
+        # All controller/event timestamps belong to the endpoint clock. The
+        # collector's local clock is only for snapshot freshness and its lifetime.
+        remote_now = epoch(host.get('collected_at'))
+        if remote_now is None:
+            remote_now = epoch(host.get('observed_at'))
+        diagnostic_now = remote_now if remote_now is not None else now
+        events, gaps = _events(raw, diagnostic_now)
         if host.get('error') or task.get('state') == 'UNREACHABLE':
             gaps.append('endpoint_unreachable')
         if task.get('controller') and not document:
@@ -633,8 +685,12 @@ def augment(data: dict, cfg: dict, previous: dict | None, now: float,
                         (spec.get('controller') or {}).get('run_id'), spec.get('scheduler')])
         if prior_state.get('scope_fingerprint', scope) != scope:
             prior_state, old = {}, {}
-        state = _history(prior_state, events, now, thresholds)
+        if remote_now is None and host.get('error'):
+            diagnostic_now = now + prior_state.get('clock_offset_seconds', 0)
+        state = _history(prior_state, events, diagnostic_now, thresholds)
         state['scope_fingerprint'] = scope
+        if remote_now is not None:
+            state['clock_offset_seconds'] = remote_now - now
         if state.get('out_of_order_events', 0) > prior_state.get('out_of_order_events', 0):
             gaps.append('out_of_order_events_ignored')
         progress = document.get('progress', {})
@@ -646,11 +702,11 @@ def augment(data: dict, cfg: dict, previous: dict | None, now: float,
                     and (state.get('summary_generation') is None or finite(generation) and generation >= state['summary_generation'])):
                 state.update(summary_unchanged_generations=int(count), summary_hash=summary,
                              summary_generation=generation)
-        task['timing'] = timing(task, spec, document, host, now, events)
+        task['timing'] = timing(task, spec, document, host, diagnostic_now, events)
         gaps = sorted(set(gaps + task['timing']['data_gap']))
-        active = _rules(task, raw, host, state, now, thresholds, gaps,
+        active = _rules(task, raw, host, state, diagnostic_now, thresholds, gaps,
                         (formal_unchanged or {}).get(task['id']) is True)
-        task['alert_history'] = _transition(old.get('alert_history', []), active, now, gaps)
+        task['alert_history'] = _transition(old.get('alert_history', []), active, diagnostic_now, gaps)
         task['diagnostic_summary'] = {key: state[key] for key in ('retry_consecutive', 'summary_unchanged_generations', 'latest_event') if key in state}
         task['retry_count'] = state['retry_consecutive']
         task['summary_stagnant_generations'] = state['summary_unchanged_generations']
@@ -658,16 +714,22 @@ def augment(data: dict, cfg: dict, previous: dict | None, now: float,
             task['latest_event'] = state['latest_event']['event']
         heartbeat_doc = document.get('heartbeat') or {}
         heartbeat = epoch(heartbeat_doc.get('last_event_at')) if isinstance(heartbeat_doc, dict) else None
-        task['heartbeat_age_seconds'] = max(0, now - heartbeat) if heartbeat is not None and heartbeat <= now else None
+        task['heartbeat_age_seconds'] = max(0, diagnostic_now - heartbeat) if heartbeat is not None and heartbeat <= diagnostic_now else None
         task['_diagnostic_previous_at'] = state.get('last_observed_at')
-        task['timeline_12h'] = timeline(task, old.get('timeline_12h', []), events, document, now, gaps)
+        interval = data.get('interval_seconds', cfg.get('interval_seconds', 60))
+        interval = interval if finite(interval) and interval > 0 else 60
+        task['_diagnostic_max_gap_seconds'] = max(2 * interval, interval + cfg.get('probe_round_timeout_seconds', 30))
+        task['timeline_12h'] = timeline(task, old.get('timeline_12h', []), events, document, diagnostic_now, gaps)
+        if old.get('timeline_recovery'):
+            task['timeline_recovery'] = deepcopy(old['timeline_recovery'])
         task.pop('_diagnostic_previous_at', None)
+        task.pop('_diagnostic_max_gap_seconds', None)
         for stream in task.get('streams', []):
             stream['timeline_12h'] = deepcopy(task['timeline_12h'])
-        state['last_observed_at'] = utc(now)
+        state['last_observed_at'] = utc(diagnostic_now)
         states[task['id']] = state
         alerts.extend(task['alert_history'])
-    data['diagnostics'] = {'version': 1, 'tasks': states}
+    data['diagnostics'] = {'version': 2, 'tasks': states}
     data['alerts'] = alerts
     data['display'] = {'operator_entrypoint': 'watch', 'timeline_hours': 12,
                        'timeline_bucket_seconds': BUCKET_SECONDS, 'layout': 'unified'}

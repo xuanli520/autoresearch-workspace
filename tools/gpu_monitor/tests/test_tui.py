@@ -15,6 +15,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import monitor
+import diagnostics
 from presentation import LEGEND, freshness, is_agent, resource_lines, score_line, timeline
 from sessions import CollectorSource, SnapshotSource, collector_running
 
@@ -90,6 +91,13 @@ class DisplayProjectionTests(unittest.TestCase):
         self.assertTrue(freshness(data, now)[1])
         self.assertEqual(freshness({}, now), (None, True))
         self.assertEqual(timeline({'timeline_12h': [{'state': 'pending', 'data_gap': ['denied']}]})[-1][0], '?')
+
+    def test_partial_gap_shows_latest_known_state_but_full_gap_is_unknown(self):
+        buckets = [{'category': 'pending', 'known_seconds': 840, 'unknown_seconds': 60,
+                    'data_gap': ['endpoint_unreachable']},
+                   {'category': 'unknown', 'known_seconds': 0, 'unknown_seconds': 900,
+                    'data_gap': ['endpoint_unreachable']}]
+        self.assertEqual(timeline({'timeline_12h': buckets})[-2:], [('■', 'green'), ('?', 'dim')])
 
 
 class SourceTests(unittest.TestCase):
@@ -195,6 +203,34 @@ class SourceTests(unittest.TestCase):
 
 @unittest.skipIf(MonitorApp is None, 'Install requirements-tui.txt for interactive tests')
 class TuiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_selected_detail_keeps_history_after_gap_and_repeated_refreshes(self):
+        now = 100000
+        task = fixture(1)['tasks'][0]
+        document = {'turn': {'started_at': diagnostics.utc(now - 3600)}}
+        task['timeline_12h'] = diagnostics.timeline(task, [], [], document, now, [])
+        source = FakeSource(fixture(1))
+        source.data['tasks'][0] = task
+        app = MonitorApp(source, color='never')
+        async with app.run_test(size=(120, 40)) as pilot:
+            try:
+                await pilot.pause()
+                selected = app.selected_id
+                for poll in range(1, 7):
+                    task['_diagnostic_previous_at'] = diagnostics.utc(now + (poll - 1) * 60)
+                    task['state'] = 'UNREACHABLE' if poll == 1 else 'RUNNING'
+                    task['timeline_12h'] = diagnostics.timeline(task, task['timeline_12h'], [], document,
+                                                               now + poll * 60, ['endpoint_unreachable'] if poll == 1 else [])
+                    app.post_message(SnapshotReady(source.data, {}, {'mode': 'background'}))
+                    await pilot.pause()
+                self.assertEqual(app.selected_id, selected)
+                detail = app.base('#detail').query_one('.timeline', Static).render().plain
+                self.assertIn('■', detail)
+                self.assertNotIn('?' * 48, detail)
+                await pilot.press('enter')
+                await pilot.pause()
+                self.assertIn('■', app.screen.query_one('.timeline', Static).render().plain)
+            finally:
+                source.stop()
     async def test_slow_collection_keeps_keyboard_and_resize_responsive(self):
         class SlowSource(FakeSource):
             mode = 'foreground'

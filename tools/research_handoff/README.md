@@ -118,6 +118,12 @@ python3 -B controller.py --remote connection.json start --run-id trial-01 --resu
 
 Harbor `environment.import_path` 指向 `tools.research_handoff.providers.harbor_docker:ManagedDockerEnvironment`，`kwargs.network_config` 传本轮 `launch.json.docker_network`，`kwargs.ownership_root` 指向可信数据盘归属目录。该 provider 依赖已验收的 Harbor Docker API；普通 CPU 控制器不导入 Harbor。任务多服务自定义网络须另行验收，不能据主容器隔离推断所有 side service 都隔离。
 
+GPU 接入必须显式在研究 main 与独立 `tests/` verifier 的 `environment.kwargs` 中声明 `"gpu_attachment": "cdi"`。官方 provider 的默认值固定为 CDI，GPU 容器在构造及启动前拒绝 `device-request`；资源文件移除 legacy NVIDIA reservations，只注入 `nvidia.com/gpu=<本轮 scheduler UUID>` 并设 `NVIDIA_VISIBLE_DEVICES=void`。启动后再次核对实际容器没有 DeviceRequests、NVML 仅可见该 UUID，并在全新 Python 进程中调用 CUDA driver 初始化/设备计数。失败即拒绝该容器并定向回收本环境，不自动降级或重启共享 Docker。
+
+配置中的 `gpu_attachment` 字段不是动态通过证据。目标环境仍需 main/verifier 分别留 `gpu-access-<project>.json`、OCI/inspect 设备规则及同值容器资源更新后新进程 CUDA 复验；该回执由可信 provider 通过 `ownership_root` 保存，不允许候选生成或修改。启动探针只证明本次启动的设备访问，完整 checkpoint reload 与可信评分仍必须实际完成。旧不可变发布不会因本地默认值修改自动升级，接入须冻结新版本、保留原 run/request/截止并按实际部署授权验收。
+
+GPU 启动要求可信、solver 不可写的 `ownership_root`，省略时在创建容器前拒绝。镜像须预装 `python3`、`nvidia-smi` 并通过 CDI 提供 `libcuda.so.1`；初始化探针使用标准库 ctypes，无需额外安装 PyTorch。缺程序、库、CDI 设备或 CUDA 初始化失败均应归为基础设施错误，由原 job 的正式清理/对账合同处理，不作为候选方法分数。回执包含 provider 源码 SHA256、GPU 绑定声明 SHA256、时间与容器角色；完整发布/Harbor config 哈希仍从正式运行 manifest 对账。
+
 `doctor` 和每轮启动前核对默认 bridge 元数据、内核接口、网关、NAT 和模型转发。`doctor` 与 `docker-network --config network.json` 只读；缺失转发会直接报告，不能仅因桥仍存在就宣布网络健康。`--repair` 可补建无附着容器的缺失接口，并补齐明确配置的专用桥转发。配置 `bridge_interface` 为该专用桥名称、`repair_forwarding: true` 时，正式启动及 provider 模型阶段也可恢复缺失的端点规则；禁止自动修公共 `docker0`。宿主恢复仅增加本题桥、子网和模型 IP 的 HTTPS 规则，不清空链、不改变策略、不重启共享服务。provider 随后从受限 solver 内做有界 TCP/TLS 预检，失败时不启动模型请求；归属目录保留桥、HTTPS 与 namespace 策略回执。预检不代替真实模型工具调用与普通外网拒绝探针。
 
 复用公共 Docker 时，若其他运行时启动清除了 `docker0` 转发，显式执行 `docker-network --config network.json --repair --restore-default-forwarding` 可恢复默认桥构建的正常外网访问。配置必须启用网络且明确 `bridge_interface: docker0`；只增加匹配该接口和其实际子网的 NAT、出站及已建立连接返回规则，不修改其他桥、链策略或共享服务。Agent 仍由 sidecar namespace 的 nft 规则限制到冻结模型端点；这项恢复不会自动运行。`--repair` 单独使用只修公共缺失接口，转发保持只读检查。

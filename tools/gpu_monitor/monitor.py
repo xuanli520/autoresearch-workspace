@@ -1181,9 +1181,78 @@ def atomic_json(path: Path, value: Any) -> None:
 
 def load_latest(state: Path) -> dict[str, Any]:
     try:
-        return json.loads((state / 'latest.json').read_text())
+        latest = json.loads((state / 'latest.json').read_text())
     except (FileNotFoundError, ValueError):
         return {}
+    if latest.get('diagnostics', {}).get('version') == 1:
+        restore_timelines(state, latest)
+    return latest
+
+
+def restore_timelines(state: Path, latest: dict) -> None:
+    """Recover legacy display history from scoped observations, leaving originals intact."""
+    try:
+        from .diagnostics import BUCKET_COUNT, BUCKET_SECONDS, _category, epoch, timeline
+    except ImportError:
+        from diagnostics import BUCKET_COUNT, BUCKET_SECONDS, _category, epoch, timeline
+    states = latest.get('diagnostics', {}).get('tasks', {})
+    tasks = {task['id']: task for task in latest.get('tasks', []) if task.get('timeline_12h')}
+    samples = {key: [] for key in tasks}
+    ends = {key: epoch(task['timeline_12h'][-1].get('end_at')) for key, task in tasks.items()}
+    local_end = epoch(latest.get('collected_at'))
+    if local_end is None or not tasks:
+        return
+    days = {utc(local_end)[:10], utc(local_end - BUCKET_COUNT * BUCKET_SECONDS)[:10]}
+    last, counts = {}, {key: 0 for key in tasks}
+    for day in sorted(days):
+        try:
+            stream = (state / f'observations-{day}.jsonl').open()
+        except OSError:
+            continue
+        with stream:
+            for line in stream:
+                try:
+                    observation = json.loads(line)
+                except ValueError:
+                    continue
+                collected = epoch(observation.get('collected_at'))
+                if collected is None or not local_end - 43200 <= collected <= local_end:
+                    continue
+                observed_states = observation.get('diagnostics', {}).get('tasks', {})
+                for task in observation.get('tasks', []):
+                    key = task.get('id')
+                    if key not in tasks or ends[key] is None:
+                        continue
+                    scope = states.get(key, {}).get('scope_fingerprint')
+                    if not scope or observed_states.get(key, {}).get('scope_fingerprint') != scope:
+                        last.pop(key, None)
+                        continue
+                    at = epoch(task.get('observed_at')) or collected + states[key].get('clock_offset_seconds', 0)
+                    at = min(at, ends[key])
+                    previous = last.get(key)
+                    if previous is not None and at <= previous:
+                        continue
+                    interval = observation.get('interval_seconds', 60)
+                    interval = interval if finite(interval) and interval > 0 else 60
+                    elapsed = observation.get('summary', {}).get('collection_seconds', 0)
+                    elapsed = elapsed if finite(elapsed) and elapsed >= 0 else 0
+                    begin = previous if previous is not None and at - previous <= max(2 * interval, interval + elapsed) else at - 1
+                    holes = sorted(set(task.get('alerts', [])) & UNCERTAIN_LIFECYCLE_ALERTS)
+                    category = _category('WAITING_GPU' if task.get('timing', {}).get('waiting_gpu') else task.get('state'),
+                                         task.get('timing', {}).get('credit_policy'))
+                    if category == 'unknown' or holes:
+                        category = 'unknown'
+                        holes = holes or ['endpoint_unreachable' if task.get('state') == 'UNREACHABLE' else 'observation_unknown']
+                    samples[key].append({'start_at': utc(begin), 'end_at': utc(at), 'category': category,
+                                         'data_gap': holes, 'event_categories': []})
+                    last[key], counts[key] = at, counts[key] + 1
+    for key, task in tasks.items():
+        if not samples[key]:
+            continue
+        # No extrapolation past the last recorded sample during migration.
+        projection = dict(task, state='UNKNOWN', _diagnostic_previous_at=utc(ends[key]))
+        task['timeline_12h'] = timeline(projection, [{'segments': samples[key]}], [], {}, ends[key], [])
+        task['timeline_recovery'] = {'source': 'scoped_observations', 'observations': counts[key]}
 
 
 def persist(state: Path, data: dict[str, Any], previous: dict[str, Any]) -> None:

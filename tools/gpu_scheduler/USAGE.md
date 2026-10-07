@@ -17,6 +17,8 @@
 
 适配器不得自建 `ensure_job`、固定排队超时、轮询队列、守护器或重提循环。通用能力缺失时修官方工具并验收，通过新不可变发布接入。
 
+GPU 容器准入同时遵循 [统一 CDI 硬合同](../../双Agent长跑与题目包验收规范.md#gpu-容器设备注入硬合同)。所有 NVIDIA GPU 研究容器和独立 verifier 均通过官方 `ManagedDockerEnvironment(gpu_attachment="cdi")`，禁用 legacy DeviceRequests/`--gpus` 回退，精确绑定本 job UUID、记录两类容器的新进程 CUDA 回执。CDI 不可用或回执不足是基础设施接入阻塞，不改成方法分数，不以重开轮次/换 request 绕过。
+
 ## 2. 提交前冻结声明
 
 模型调用、镜像构建、安装和 CPU 分析应在 GPU 作业之外完成；提交范围覆盖真正的训练、评分和重载，不因瞬时利用率低借走未来峰值预约。完整正式协议不得为了凑准入而随意切片或缩短。

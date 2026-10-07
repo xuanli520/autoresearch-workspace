@@ -313,5 +313,5 @@ def collect(config: dict[str, Any]) -> dict[str, Any]:
             view = collect_scheduler(task, tasks[task['id']], now=now)
             tasks[task['id']]['scheduler_view'] = view
             tasks[task['id']]['ownership_receipts'] = collect_receipts(task, view, boot_id=boot_id)
-    return {'observed_at': now, 'boot_id': boot_id, 'proc_permission_errors': proc_errors,
+    return {'observed_at': now, 'collected_at': time.time(), 'boot_id': boot_id, 'proc_permission_errors': proc_errors,
             'gpu': gpu, 'gpu_processes': apps, 'tasks': tasks, 'host_resources': _host_resources()}

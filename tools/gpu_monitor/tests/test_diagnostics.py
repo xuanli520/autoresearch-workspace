@@ -7,6 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import diagnostics
+from presentation import timeline as display_timeline
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -321,6 +322,154 @@ class DiagnosticsTests(unittest.TestCase):
             self.cfg['diagnostics'] = value
             with self.assertRaises(ValueError):
                 self.sample()
+
+    def test_healthy_history_does_not_expand_by_one_bucket_per_poll(self):
+        previous = self.sample()
+        for poll in range(1, 61):
+            previous = self.sample(previous=previous, now=self.now + poll * 60)
+        buckets = previous['tasks'][0]['timeline_12h']
+        self.assertEqual(sum(b['known_seconds'] for b in buckets), 7200)
+        self.assertEqual(sum(b['running'] for b in buckets), 8)
+        self.assertEqual(sum(s == '■' for s, _ in display_timeline(previous['tasks'][0])), 8)
+
+    def test_one_endpoint_gap_stays_one_minute_after_recovery_and_restart(self):
+        previous = self.sample()
+        self.host['error'] = 'offline'
+        self.task['state'] = 'UNREACHABLE'
+        previous = self.sample(previous=previous, now=self.now + 60)
+        self.assertEqual(display_timeline(previous['tasks'][0])[-1][0], '?')
+        self.host.pop('error')
+        self.task['state'] = 'RUNNING'
+        previous = json.loads(json.dumps(previous))
+        for poll in range(2, 61):
+            previous = self.sample(previous=previous, now=self.now + poll * 60)
+        buckets = previous['tasks'][0]['timeline_12h']
+        gap_seconds = sum(diagnostics.epoch(s['end_at']) - diagnostics.epoch(s['start_at'])
+                          for b in buckets for s in b['segments'] if 'endpoint_unreachable' in s['data_gap'])
+        self.assertEqual(gap_seconds, 60)
+        self.assertLessEqual(sum('endpoint_unreachable' in b['data_gap'] for b in buckets), 2)
+        self.assertEqual(display_timeline(previous['tasks'][0])[-1][0], '■')
+        self.assertGreaterEqual(sum(s == '■' for s, _ in display_timeline(previous['tasks'][0])), 7)
+
+    def test_half_open_intervals_do_not_contaminate_touching_bucket(self):
+        end = 43200
+        bucket = {'segments': [{'start_at': diagnostics.utc(end - 1800),
+                               'end_at': diagnostics.utc(end - 900), 'category': 'unknown',
+                               'data_gap': ['endpoint_unreachable'], 'event_categories': []}]}
+        task = {'state': 'RUNNING', 'timing': {'credit_policy': 'reported'},
+                '_diagnostic_previous_at': diagnostics.utc(end - 900)}
+        buckets = diagnostics.timeline(task, [bucket], [], {}, end, [])
+        self.assertEqual(buckets[-2]['data_gap'], ['endpoint_unreachable'])
+        self.assertEqual(buckets[-1]['data_gap'], ['no_registered_history'])
+        self.assertEqual(buckets[-1]['known_seconds'], 1)
+
+    def test_partial_gap_keeps_known_latest_state_and_gap_details(self):
+        first = self.sample()
+        self.task['state'] = 'UNREACHABLE'
+        gap = self.sample(previous=first, now=self.now + 60)
+        self.task['state'] = 'RUNNING'
+        recovered = self.sample(previous=gap, now=self.now + 120)['tasks'][0]
+        bucket = recovered['timeline_12h'][-1]
+        self.assertEqual(bucket['unknown_seconds'], 60)
+        self.assertTrue(bucket['data_gap'])
+        self.assertEqual(bucket['category'], 'pending')
+        self.assertEqual(display_timeline(recovered)[-1][0], '■')
+
+    def test_replayed_events_do_not_erase_observed_endpoint_gap(self):
+        events = [self.event('turn.started', at=6400, turn=1)]
+        first = self.sample(events)
+        self.task['state'] = 'UNREACHABLE'
+        gap = self.sample(events, first, now=self.now + 60)
+        self.task['state'] = 'RUNNING'
+        recovered = self.sample(events, gap, now=self.now + 120)
+        segments = [s for b in recovered['tasks'][0]['timeline_12h'] for s in b['segments']]
+        self.assertEqual(sum(diagnostics.epoch(s['end_at']) - diagnostics.epoch(s['start_at'])
+                             for s in segments if s['category'] == 'unknown' and
+                             'endpoint_unreachable' in s['data_gap']), 60)
+
+    def test_transitions_between_polls_keep_waiting_failure_and_recovery(self):
+        first = self.sample()
+        events = [self.event('turn.gpu_state', at=self.now + 10, waiting=True),
+                  self.event('turn.gpu_state', at=self.now + 20, waiting=False),
+                  self.event('turn.retry_scheduled', at=self.now + 30, reason='heartbeat_stale'),
+                  self.event('turn.started', at=self.now + 40)]
+        second = self.sample(events, first, now=self.now + 60)
+        segments = [s for b in second['tasks'][0]['timeline_12h'] for s in b['segments']]
+        for category in ('waiting', 'failed_retry'):
+            self.assertEqual(sum(diagnostics.epoch(s['end_at']) - diagnostics.epoch(s['start_at'])
+                                 for s in segments if s['category'] == category), 10)
+        self.assertEqual(second['tasks'][0]['timeline_12h'][-1]['category'], 'pending')
+
+    def test_pollution_in_legacy_buckets_is_not_imported_as_precise_gap(self):
+        old = self.sample()
+        for b in old['tasks'][0]['timeline_12h']:
+            b.pop('segments')
+            b['data_gap'] = ['event_timestamp_unknown_or_future', 'no_registered_history']
+        old['diagnostics']['version'] = 1
+        events = [self.event('turn.started', at=6400)]
+        current = self.sample(events, old, now=self.now + 60)
+        self.assertEqual(current['diagnostics']['version'], 2)
+        self.assertEqual(current['tasks'][0]['timeline_12h'][-1]['data_gap'], [])
+        self.assertGreater(sum(b['known_seconds'] for b in current['tasks'][0]['timeline_12h']), 3600)
+
+    def test_endpoint_end_clock_accepts_events_and_turns_ahead_of_local_clock(self):
+        self.host.update(observed_at=self.now + 5, collected_at=self.now + 15)
+        self.document['turn']['started_at'] = diagnostics.utc(self.now + 8)
+        self.document['heartbeat'] = {'last_event_at': diagnostics.utc(self.now + 12)}
+        events = [self.event('turn.started', at=self.now + 8),
+                  self.event('turn.gpu_state', at=self.now + 12, waiting=False)]
+        current = self.sample(events)
+        task = current['tasks'][0]
+        self.assertEqual(task['timing']['live_elapsed_seconds'], 7)
+        self.assertEqual(task['timing']['data_gap'], [])
+        self.assertEqual(task['heartbeat_age_seconds'], 3)
+        self.assertEqual(task['timeline_12h'][-1]['data_gap'], ['no_registered_history'])
+        self.assertEqual(task['timeline_12h'][-1]['category'], 'pending')
+        self.assertEqual(diagnostics.epoch(task['timeline_12h'][-1]['end_at']), self.now + 15)
+        self.assertEqual(task['timing']['credited_effective_seconds'], 500)
+        self.assertEqual(task['timing']['deadline_at'], diagnostics.utc(50000))
+
+    def test_endpoint_clock_rejects_genuinely_future_events(self):
+        self.host.update(observed_at=self.now + 5, collected_at=self.now + 15)
+        events = [self.event('turn.started', at=self.now + 18)]
+        data = self.sample(events)
+        self.assertIn('event_timestamp_unknown_or_future', data['tasks'][0]['timeline_12h'][-1]['data_gap'])
+        self.assertNotIn('latest_event', data['diagnostics']['tasks']['demo'])
+
+    def test_unreachable_poll_uses_previous_endpoint_clock_without_reversing_time(self):
+        self.host.update(observed_at=self.now + 5, collected_at=self.now + 15)
+        first = self.sample()
+        self.host.pop('observed_at')
+        self.host.pop('collected_at')
+        self.host['error'] = 'offline'
+        self.task['state'] = 'UNREACHABLE'
+        current = self.sample(previous=first, now=self.now + 60)
+        self.assertEqual(diagnostics.epoch(current['tasks'][0]['timeline_12h'][-1]['end_at']), self.now + 75)
+
+    def test_older_than_twelve_hours_facts_expire_without_spreading(self):
+        first = self.sample()
+        self.task['state'] = 'UNREACHABLE'
+        gap = self.sample(previous=first, now=self.now + 60)
+        self.task['state'] = 'RUNNING'
+        current = self.sample(previous=gap, now=self.now + 43320)
+        self.assertTrue(all('endpoint_unreachable' not in b['data_gap'] for b in current['tasks'][0]['timeline_12h']))
+
+    def test_long_unobserved_interval_is_not_filled_with_current_running_state(self):
+        first = self.sample()
+        current = self.sample(previous=first, now=self.now + 3600)
+        self.assertEqual(sum(b['known_seconds'] for b in current['tasks'][0]['timeline_12h']), 3601)
+        self.assertIn('no_registered_history', current['tasks'][0]['timeline_12h'][-1]['data_gap'])
+
+    def test_old_event_does_not_erase_observed_stop_during_later_replay(self):
+        events = [self.event('turn.started', at=6400)]
+        first = self.sample(events)
+        self.task['state'] = 'STOPPED'
+        stopped = self.sample(events, first, now=self.now + 60)
+        self.task['state'] = 'RUNNING'
+        current = self.sample(events, json.loads(json.dumps(stopped)), now=self.now + 120)
+        segments = [s for b in current['tasks'][0]['timeline_12h'] for s in b['segments']]
+        self.assertEqual(sum(diagnostics.epoch(s['end_at']) - diagnostics.epoch(s['start_at'])
+                             for s in segments if s['category'] == 'manual_stop'), 60)
 
 
 if __name__ == '__main__':

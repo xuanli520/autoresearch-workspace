@@ -367,6 +367,8 @@ Public/Dev 用于反馈，Dev 数据不用于训练；训练允许资产另声�
 
 将**干净公开任务快照**传至已授权云 GPU；私有实验／证据保存在 solver 无法访问的位置。验证完整链路：镜像构建 → GPU 容器启动 → Starter → 完整 Public/Dev 评分 → reward → 干净退出与产物回收。专家侧安全 Harness 另验 Reference。
 
+GPU 注入按 [统一长跑规范的 CDI 硬合同](双Agent长跑与题目包验收规范.md#gpu-容器设备注入硬合同) 执行：研究 main 与独立 verifier 都接入官方 `ManagedDockerEnvironment(gpu_attachment="cdi")`，不保留 legacy 回退。逐类保存实际 OCI/设备权限、唯一调度 GPU、可信 startup CUDA 回执，并在同值容器资源更新后验证新进程初始化及真实 checkpoint reload；仅研究 main 使用 CDI 不算接入完成。
+
 保存真实 Harbor job config/result/log/reward、镜像与代码版本。单 seed 探针只证明该探针通过，不能当完整多 seed 归一化验收。冻结后若改训练器、评分器、预算或数据，要分析并补跑受影响验证，不能沿用旧结果证明新版本。
 
 若该次验收要求 H06，以上运行材料必须满足同 Trial 对账：`config.json`、`result.json`、优先 reward 文件和非空运行日志齐全，任务/交付版本可核，结束状态正常，rewards 数值一致，日志调用链对应冻结的评分入口。记录 Trial 身份和交付哈希/版本，避免只凭通用日志或其他版本的成功结果证明当前包。

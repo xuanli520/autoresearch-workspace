@@ -66,7 +66,7 @@ python3 tools/gpu_monitor/monitor.py stop-monitor
 | `?` | 查看帮助与图例 |
 | `q` / Ctrl-C | 退出本地界面 |
 
-图例：`■` 运行（含待结算），`W` 等待/排队/有依据的对账等待，`!` 失败/重试，`S` 已停止，`·` 未启动，`?` 未知/数据缺失，`=` 完成或轮次结束。运行活动与结算数字分别显示，不再将“计时中”列为独立状态。颜色与符号使用统一大小写映射，`--color never` / `NO_COLOR` 可关闭颜色。
+图例：`■` 运行（含待结算），`W` 等待/排队/有依据的对账等待，`!` 失败/重试，`S` 已停止，`·` 未启动，`?` 未知/数据缺失，`=` 完成或轮次结束。时间格显示格末状态；部分采样缺失保留在详情，不遮住随后已知状态。运行活动与结算数字分别显示，不再将“计时中”列为独立状态。颜色与符号使用统一大小写映射，`--color never` / `NO_COLOR` 可关闭颜色。
 
 计时标为“本轮经过”“本轮待确认估计”“累计已确认”“距有效目标”“距硬截止”；数字只更新自真实快照，不通过界面动画增加信用。“本轮非等待时长估计”不表示真实 GPU 执行用时。RAM 标为可用量/总量，GPU 实测利用率与预约 CU 分列。分数趋势按优化方向显示改善、退步或持平。
 
@@ -251,7 +251,7 @@ ETA 只估当前流到其 `total_steps` 的训练时间，优先使用日志中�
 
 登记 `scheduler.root/session_id/job_ids/request_ids` 后，探针只读该范围内的 status、受限 events 尾部与 durable 账本，关联当前 attempt。请求模板只改变数字轮次，保留 group 和 `/research` 后缀。`configured_job_ids` 永远是历史登记，`active_job` 来自实际状态；终态进入 history。冲突或损坏账本为 unknown，UNKNOWN 对账/INFEASIBLE/EXPIRED 使用各自运维语义，监视器不做恢复、重提或取消。
 
-`timing` 区分实时 `live_elapsed_seconds`、待结算 `pending_seconds` 和官方已确认 `credited_effective_seconds`。reported 的 pending 只是估计，不提前增加正式信用；WAITING_GPU 增加 live 并排除等待，原墙钟截止不延长。每条流 `timeline_12h` 固定 48 格并记录事实、事件类别和空洞原因。跨轮告警覆盖时间不可达/未知、Agent retry、交替坏事件、summary 停滞、队列反复过期、容器 OOM/内存上限与共享资源阻塞；恢复/重开和计数在重启后继续，空洞不立即清零。
+`timing` 区分实时 `live_elapsed_seconds`、待结算 `pending_seconds` 和官方已确认 `credited_effective_seconds`。reported 的 pending 只是估计，不提前增加正式信用；WAITING_GPU 增加 live 并排除等待，原墙钟截止不延长。每条流 `timeline_12h` 固定 48 格，保存半开精确 `segments`、`known_seconds`/`unknown_seconds`、事件类别和空洞原因；后续采样重放区间而非显示格，不扩散旧缺口。事件与计时校验使用远端 probe 的采集结束时间，本地时钟只用于快照新鲜度和采集器寿命。首次读取旧 diagnostics v1 快照时，从同一 scope 的本地 observations 恢复已记录历史，跨身份及长采样空洞保持未知，原件不改；后续 v2 快照不重复扫描。跨轮告警覆盖时间不可达/未知、Agent retry、交替坏事件、summary 停滞、队列反复过期、容器 OOM/内存上限与共享资源阻塞；恢复/重开和计数在重启后继续，空洞不立即清零。
 
 阈值在 `diagnostics.thresholds` 中配置，例如 `retry_warning: 3`、`retry_critical: 5`、`summary_warning_generations: 10`、`summary_critical_generations: 20`。summary 本身保持 warning，只有经验证的正式进展也停滞才升级。配置解析会校验阈值；`--interval` 优先于热重载设置，`--max-hours` 的原本地截止固定且不超过 12 小时。`--config-check-interval` / `--auth-check-interval` 默认各 60 秒，不随高频采集读取文件。
 

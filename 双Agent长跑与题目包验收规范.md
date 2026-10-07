@@ -70,6 +70,12 @@ GPU 客户端可操作同服务其他作业，不是 solver 权限边界；socke
 
 Docker/Harbor 必须通过已验收的官方 provider、容器归属注册及同 job slice 约束接入；任意外部 daemon/远端 provider 没有自动通用取消保证。目标环境真实清理未验收时不能直接提交会脱离管理的命令。任务控制器 cleanup hook 本身不等于 GPU 作业已回收，GPU 释放确认前不得归还其预约；确认不足则 UNKNOWN 并隔离对应卡。
 
+### GPU 容器设备注入硬合同
+
+所有 Codex 研究 main 容器和可信独立 verifier，只要声明 GPU，都必须通过 `tools.research_handoff.providers.harbor_docker:ManagedDockerEnvironment` 并使用 `gpu_attachment="cdi"`。官方 provider 默认值也是 `cdi`；`device-request`、Docker `--gpus`、Compose `reservations.devices` 的 NVIDIA legacy hook 路径禁止用于正式 GPU 容器。provider 在启动前拒绝显式 legacy 值，不能在 CDI 不可用时自动回退；若题包或目标环境不能提供 CDI，启动应阻塞并修复/验收 provider，而不是换注入方式继续跑。
+
+接入验收必须同时覆盖研究 main 与独立 verifier：生成的 Compose/OCI 配置含 `nvidia.com/gpu=<scheduler UUID>`，没有 legacy DeviceRequests/`reservations.devices`，并设置 `NVIDIA_VISIBLE_DEVICES=void`；启动后 `docker inspect`、NVML 和全新 CUDA 进程探针逐项通过，回执记录角色、容器 ID、唯一 GPU UUID、设备注入模式和源码/配置哈希。只看配置文件、只测研究 main、只看到 `nvidia-smi` 或仅有目录/pytest 通过，都不能证明 verifier 和 reload 路径已受 CDI 保护。动态验收应在同值 Docker 资源更新后再次启动新 CUDA 进程；结果失败按基础设施接入失败处理，不产出科学分数。
+
 ## 5. 受管部署与双流启动
 
 实际参数按工具 README、示例和 CLI 核验。下列命令从工作区根运行，`<...>` 必须替换为真实配置或 ID，不是可原样执行的脚本。

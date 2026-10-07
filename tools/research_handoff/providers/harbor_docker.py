@@ -21,13 +21,13 @@ from ..core.docker_network import bridge_preflight, egress_rules, validate_netwo
 class ManagedDockerEnvironment(DockerEnvironment):
     def __init__(self, *args, network_config=None, model_host_addresses=None,
                  use_default_bridge=True, ownership_root=None, completion_contract=None,
-                 public_image_digest=None, gpu_attachment="device-request", gpu_memory_policy=None, **kwargs):
+                 public_image_digest=None, gpu_attachment="cdi", gpu_memory_policy=None, **kwargs):
         if type(use_default_bridge) is not bool:
             raise ValueError("use_default_bridge must be boolean")
         if not use_default_bridge:
             raise ValueError("managed Harbor provider requires the Docker default bridge")
         if gpu_attachment not in {"device-request", "cdi"}:
-            raise ValueError("gpu_attachment must be device-request or cdi")
+            raise ValueError("gpu_attachment must be cdi for GPU containers")
         self.gpu_attachment = gpu_attachment
         self.gpu_memory_policy = gpu_memory_policy
         self._gpu_memory_guard = None
@@ -50,6 +50,9 @@ class ManagedDockerEnvironment(DockerEnvironment):
             if not public_image_digest:
                 raise ValueError("scientific completion requires an audited public image digest")
         super().__init__(*args, **kwargs)
+        if getattr(getattr(self, 'task_env_config', None), 'gpus', 0) and gpu_attachment != "cdi":
+            raise ValueError("GPU research and verifier containers require gpu_attachment='cdi'; "
+                             "legacy device-request is prohibited")
         if self.ownership_root:
             if self.ownership_root.stat().st_uid != os.getuid():
                 raise ValueError("container receipts require a trusted host-owned directory")
@@ -107,6 +110,7 @@ class ManagedDockerEnvironment(DockerEnvironment):
         return [*paths, self._managed_build_path]
 
     def _write_resources_compose_file(self):
+        gpu = self._validate_gpu_attachment()
         path = super()._write_resources_compose_file()
         document = json.loads(path.read_text())
         if os.environ.get("GPU_SCHEDULER_JOB_DIR"):
@@ -117,22 +121,79 @@ class ManagedDockerEnvironment(DockerEnvironment):
                 main.update(limits)
                 resources = main.setdefault("deploy", {}).setdefault("resources", {})
                 resources.setdefault("limits", {}).update(memory=str(limits["mem_limit"]), cpus=str(limits["cpus"]))
-        if self.task_env_config.gpus:
-            gpu = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-            if self.task_env_config.gpus != 1 or not re.fullmatch(r"GPU-[a-fA-F0-9-]+", gpu):
-                raise ValueError("one scheduler-assigned GPU UUID is required")
+        if gpu:
             resources = document["services"]["main"].setdefault("deploy", {}).setdefault("resources", {})
             reservations = resources.setdefault("reservations", {})
-            if self.gpu_attachment == "cdi":
-                reservations.pop("devices", None)
-                main = document["services"]["main"]
-                main["devices"] = ["nvidia.com/gpu=" + gpu]
-                main.setdefault("environment", {})["NVIDIA_VISIBLE_DEVICES"] = "void"
-            else:
-                reservations["devices"] = [
-                    {"driver": "nvidia", "device_ids": [gpu], "capabilities": ["gpu"]}]
+            reservations.pop("devices", None)
+            main = document["services"]["main"]
+            main.pop("gpus", None)
+            main["devices"] = ["nvidia.com/gpu=" + gpu]
+            main.setdefault("environment", {})["NVIDIA_VISIBLE_DEVICES"] = "void"
         path.write_text(json.dumps(document, indent=2))
         return path
+
+    def _validate_gpu_attachment(self):
+        if not self.task_env_config.gpus:
+            return None
+        if self.gpu_attachment != "cdi":
+            raise ValueError("GPU research and verifier containers require gpu_attachment='cdi'; "
+                             "legacy device-request is prohibited")
+        gpu = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if self.task_env_config.gpus != 1 or not re.fullmatch(r"GPU-[a-fA-F0-9-]+", gpu):
+            raise ValueError("one scheduler-assigned GPU UUID is required")
+        return gpu
+
+    async def _attest_gpu_access(self, gpu):
+        import hashlib
+        import subprocess
+        import time
+
+        inspected = await self._run_docker_compose_command(['ps', '-q', 'main'])
+        containers = inspected.stdout.strip().splitlines()
+        if len(containers) != 1:
+            raise ValueError("GPU attestation requires one exact main container")
+        container = containers[0]
+        checked = subprocess.run(['docker', '--host', self.network_config['docker_host'],
+                                  'inspect', container], capture_output=True, text=True,
+                                 check=True, timeout=15)
+        info = json.loads(checked.stdout)[0]
+        if info['HostConfig'].get('DeviceRequests'):
+            raise ValueError("GPU container has legacy DeviceRequests; CDI-only startup required")
+        gpu_environment = dict(value.split('=', 1) for value in info['Config'].get('Env', [])
+                               if value.startswith('NVIDIA_VISIBLE_DEVICES='))
+        if gpu_environment.get('NVIDIA_VISIBLE_DEVICES') != 'void':
+            raise ValueError("CDI GPU container must set NVIDIA_VISIBLE_DEVICES=void")
+        nvml = await self.exec('nvidia-smi --query-gpu=uuid --format=csv,noheader',
+                               user='root', timeout_sec=15)
+        visible = nvml.stdout.strip().splitlines() if nvml.stdout else []
+        if nvml.return_code or visible != [gpu]:
+            raise RuntimeError("GPU preflight failed: NVML must expose only the assigned GPU UUID")
+        # Driver initialization in a fresh process also detects revoked device
+        # access without loading a model or exposing any private task assets.
+        probe = (
+            "import ctypes,json; driver=ctypes.CDLL('libcuda.so.1'); "
+            "initialized=driver.cuInit(0); count=ctypes.c_int(); "
+            "count_status=driver.cuDeviceGetCount(ctypes.byref(count)) if initialized==0 else -1; "
+            "print(json.dumps({'driver_init_returncode':initialized,"
+            "'device_count_returncode':count_status,'device_count':count.value})); "
+            "raise SystemExit(0 if initialized==0 and count_status==0 and count.value==1 else 1)"
+        )
+        cuda = await self.exec('python3 -B -c ' + shlex.quote(probe), user='root', timeout_sec=15)
+        if cuda.return_code:
+            raise RuntimeError("GPU preflight failed: a fresh process could not initialize CUDA")
+        result = json.loads(cuda.stdout)
+        if result != {'driver_init_returncode': 0, 'device_count_returncode': 0, 'device_count': 1}:
+            raise RuntimeError("GPU preflight returned an invalid CUDA device result")
+        binding = {'gpu_attachment': 'cdi', 'assigned_gpu_uuid': gpu,
+                   'nvidia_visible_devices': 'void'}
+        self._receipt('gpu-access-' + _sanitize_docker_compose_project_name(self.session_id), {
+            'version': 1, 'role': 'verifier' if self._trusted_verifier else 'research',
+            'at_epoch': time.time(),
+            'provider_source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'gpu_binding_sha256': hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest(),
+            'container_id': container, 'gpu_attachment': 'cdi', 'assigned_gpu_uuid': gpu,
+            'visible_gpu_uuids': visible, 'legacy_device_requests': False,
+            'nvidia_visible_devices': 'void', 'cuda': result})
 
     def _write_egress_control_services_compose_file(self):
         path = super()._write_egress_control_services_compose_file()
@@ -188,6 +249,9 @@ class ManagedDockerEnvironment(DockerEnvironment):
             "enforcement": "Harbor sidecar nft output chain in task network namespace"})
 
     async def start(self, force_build):
+        gpu = self._validate_gpu_attachment()
+        if gpu and self.ownership_root is None:
+            raise ValueError("GPU startup requires a trusted ownership_root for device-access receipts")
         # Harbor's full verifier log mount contains private test evidence. It is
         # never exposed to a solver, including when completion is disabled.
         if not self._trusted_verifier:
@@ -203,6 +267,15 @@ class ManagedDockerEnvironment(DockerEnvironment):
             register_project(_sanitize_docker_compose_project_name(self.session_id),
                              self.network_config['docker_host'])
         result = await super().start(force_build)
+        if gpu:
+            try:
+                await self._attest_gpu_access(gpu)
+            except Exception:
+                try:
+                    await super().stop(delete=True)
+                except Exception:
+                    self.logger.exception("GPU startup rejected; container cleanup requires reconciliation")
+                raise
         if self.gpu_memory_policy:
             import subprocess
             from .host_gpu_memory import HostGpuMemoryGuard

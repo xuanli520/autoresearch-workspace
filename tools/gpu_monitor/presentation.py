@@ -103,7 +103,8 @@ def timeline(task):
     buckets = buckets[-48:]
     result = [('?', 'dim')] * (48 - len(buckets))
     for bucket in buckets:
-        value = 'UNKNOWN' if bucket.get('data_gap') else bucket.get('category', bucket.get('state', 'unknown'))
+        value = ('UNKNOWN' if bucket.get('data_gap') and 'known_seconds' not in bucket
+                 else bucket.get('category', bucket.get('state', 'unknown')))
         symbol, _, style = status(value)
         result.append((symbol, style))
     return result
