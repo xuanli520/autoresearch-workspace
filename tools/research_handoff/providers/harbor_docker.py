@@ -18,6 +18,23 @@ from harbor.models.task.config import NetworkMode
 from ..core.docker_network import bridge_preflight, egress_rules, validate_network_config
 
 
+def compose_override(document):
+    """Reset inherited GPU requests after Harbor's prebuilt/task overlays."""
+    import yaml
+
+    class ResetList(list):
+        pass
+
+    class Dumper(yaml.SafeDumper):
+        pass
+
+    Dumper.add_representer(ResetList, lambda dumper, value: dumper.represent_sequence('!reset', value))
+    main = document['services']['main']
+    main.setdefault('deploy', {}).setdefault('resources', {}).setdefault('reservations', {})['devices'] = ResetList()
+    main['gpus'] = ResetList()
+    return yaml.dump(document, Dumper=Dumper, sort_keys=False)
+
+
 class ManagedDockerEnvironment(DockerEnvironment):
     def __init__(self, *args, network_config=None, model_host_addresses=None,
                  use_default_bridge=True, ownership_root=None, completion_contract=None,
@@ -85,7 +102,7 @@ class ManagedDockerEnvironment(DockerEnvironment):
             # TMPDIR is set by the official worker to the verified data disk.
             import tempfile
             self._managed_build_dir = tempfile.TemporaryDirectory()
-            self._managed_build_path = Path(self._managed_build_dir.name) / "managed-build-network.json"
+            self._managed_build_path = Path(self._managed_build_dir.name) / "managed-build-network.yaml"
         main = {} if getattr(self, '_use_prebuilt', False) else {"build": {"network": "default"}}
         if self._trusted_verifier:
             main['network_mode'] = 'none'
@@ -106,7 +123,12 @@ class ManagedDockerEnvironment(DockerEnvironment):
                 main["cgroup_parent"] = limits["cgroup_parent"]
                 if self._enable_egress_control:
                     services[self._EGRESS_CONTROL_SERVICE_NAME] = dict(limits)
-        self._managed_build_path.write_text(json.dumps({"services": services}))
+        document = {"services": services}
+        gpu = self._validate_gpu_attachment()
+        if gpu:
+            main['devices'] = ['nvidia.com/gpu=' + gpu]
+            main.setdefault('environment', {})['NVIDIA_VISIBLE_DEVICES'] = 'void'
+        self._managed_build_path.write_text(compose_override(document) if gpu else json.dumps(document))
         return [*paths, self._managed_build_path]
 
     def _write_resources_compose_file(self):
@@ -157,8 +179,13 @@ class ManagedDockerEnvironment(DockerEnvironment):
                                   'inspect', container], capture_output=True, text=True,
                                  check=True, timeout=15)
         info = json.loads(checked.stdout)[0]
-        if info['HostConfig'].get('DeviceRequests'):
-            raise ValueError("GPU container has legacy DeviceRequests; CDI-only startup required")
+        requests = info['HostConfig'].get('DeviceRequests') or []
+        if requests and (len(requests) != 1 or requests[0].get('Driver') != 'cdi'
+                         or requests[0].get('DeviceIDs') != ['nvidia.com/gpu=' + gpu]
+                         or requests[0].get('Count') != 0
+                         or requests[0].get('Capabilities') or requests[0].get('Options')):
+            raise ValueError("GPU container has legacy DeviceRequests or a different CDI device; "
+                             "CDI-only startup required")
         gpu_environment = dict(value.split('=', 1) for value in info['Config'].get('Env', [])
                                if value.startswith('NVIDIA_VISIBLE_DEVICES='))
         if gpu_environment.get('NVIDIA_VISIBLE_DEVICES') != 'void':
@@ -193,6 +220,7 @@ class ManagedDockerEnvironment(DockerEnvironment):
             'gpu_binding_sha256': hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest(),
             'container_id': container, 'gpu_attachment': 'cdi', 'assigned_gpu_uuid': gpu,
             'visible_gpu_uuids': visible, 'legacy_device_requests': False,
+            'cdi_device_requests': requests,
             'nvidia_visible_devices': 'void', 'cuda': result})
 
     def _write_egress_control_services_compose_file(self):

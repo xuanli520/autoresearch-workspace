@@ -144,6 +144,32 @@ class CompletionProviderTests(unittest.IsolatedAsyncioTestCase):
                 await environment._attest_gpu_access('GPU-' + 'a' * 32)
         environment.exec.assert_not_awaited()
 
+    async def test_docker29_native_cdi_device_request_is_accepted(self):
+        environment = self.provider()
+        environment._receipt = mock.Mock()
+        gpu = 'GPU-' + 'a' * 32
+        request = {'Driver': 'cdi', 'Count': 0, 'DeviceIDs': ['nvidia.com/gpu=' + gpu],
+                   'Capabilities': None, 'Options': None}
+        info = {'HostConfig': {'DeviceRequests': [request]},
+                'Config': {'Env': ['NVIDIA_VISIBLE_DEVICES=void']}}
+        environment.exec.side_effect = [
+            types.SimpleNamespace(return_code=0, stdout=gpu + '\n'),
+            types.SimpleNamespace(return_code=0, stdout=json.dumps({
+                'driver_init_returncode': 0, 'device_count_returncode': 0, 'device_count': 1}))]
+        with mock.patch('subprocess.run', return_value=types.SimpleNamespace(stdout=json.dumps([info]))):
+            await environment._attest_gpu_access(gpu)
+        self.assertEqual(environment._receipt.call_args.args[1]['cdi_device_requests'], [request])
+
+    async def test_cdi_request_for_all_or_another_gpu_is_rejected(self):
+        for selected in ['all', 'GPU-' + 'b' * 32]:
+            environment = self.provider()
+            request = {'Driver': 'cdi', 'Count': 0, 'DeviceIDs': ['nvidia.com/gpu=' + selected]}
+            with mock.patch('subprocess.run', return_value=types.SimpleNamespace(
+                    stdout=json.dumps([{'HostConfig': {'DeviceRequests': [request]}}]))):
+                with self.assertRaisesRegex(ValueError, 'different CDI device'):
+                    await environment._attest_gpu_access('GPU-' + 'a' * 32)
+            environment.exec.assert_not_awaited()
+
     async def test_runtime_legacy_environment_is_rejected(self):
         environment = self.provider()
         info = {'HostConfig': {'DeviceRequests': None},
