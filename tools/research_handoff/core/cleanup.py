@@ -30,12 +30,15 @@ def amended_cleanup(turn_dir: Path, launch: dict) -> tuple[dict, dict, str | Non
     return config['cleanup'], config['env'], str(config_path)
 
 
-def cleanup_task(turn_dir: Path, *, retry_pending: bool = False) -> bool:
+def cleanup_task(turn_dir: Path, *, retry_pending: bool = False,
+                 recovery_config: dict | None = None, recovery_source: str | None = None) -> bool:
     if not (turn_dir / 'launch.json').is_file():
         # No command can pass the launch gate without this durable record.
         return not (turn_dir / 'GO').exists()
     launch = read_json(turn_dir/'launch.json')
     cfg, amended_env, amendment = amended_cleanup(turn_dir, launch)
+    if recovery_config is not None:
+        cfg, amended_env, amendment = recovery_config['cleanup'], recovery_config['env'], recovery_source
     if not cfg.get('command'):
         return True
     receipt_name = 'cleanup-retry-exit.json' if retry_pending else 'cleanup-exit.json'

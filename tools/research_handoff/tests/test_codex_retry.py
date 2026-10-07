@@ -34,7 +34,10 @@ def upstream(responses, tls=None):
         def do_POST(self):
             body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
             requests.append((self.path, body, self.headers.get("Authorization")))
-            status, content_type, payload = responses[min(len(requests) - 1, len(responses) - 1)]
+            reply = responses[min(len(requests) - 1, len(responses) - 1)]
+            status, content_type, payload = reply[:3]
+            if len(reply) > 3:
+                time.sleep(reply[3])
             if status is None:
                 self.connection.shutdown(socket.SHUT_RDWR)
                 return
@@ -42,7 +45,10 @@ def upstream(responses, tls=None):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(payload)
+            try:
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         def log_message(self, *_args):
             pass
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -183,17 +189,20 @@ class CodexRetryTests(unittest.TestCase):
                            "content_index": 0, "delta": "OK"},
                           {"type": "response.output_item.done", "output_index": 0, "item": item},
                           {"type": "response.completed", "response": response})
-            for exhausted, separator in ((False, False), (False, True), (True, False)):
+            for exhausted, separator, delayed in ((False, False, False), (False, True, False),
+                                                  (True, False, False), (False, True, True)):
                 replies = [(400, "application/json", b'{"error":{"type":"invalid_request_error","code":"model_not_found"}}')]
+                if delayed:
+                    replies[0] = (*replies[0], 1.5)
                 if not exhausted:
                     replies.append((200, "text/event-stream", success))
-                with self.subTest(exhausted=exhausted, separator=separator), upstream(replies, tls) as (url, requests):
-                    home = Path(tmp) / f"home-{exhausted}-{separator}"
+                with self.subTest(exhausted=exhausted, separator=separator, delayed=delayed), upstream(replies, tls) as (url, requests):
+                    home = Path(tmp) / f"home-{exhausted}-{separator}-{delayed}"
                     home.mkdir()
                     policy = home / "policy.json"
                     log = home / "attempts.jsonl"
                     policy.write_text(json.dumps({"base_url": url, "request_max_retries": 8, "stream_max_retries": 8,
-                                                  "stream_idle_timeout_ms": 90000, "max_seconds": 100,
+                                                  "stream_idle_timeout_ms": 1000 if delayed else 90000, "max_seconds": 100,
                                                   "log_path": str(log)}))
                     env = dict(os.environ, CODEX_HOME=str(home), OPENAI_API_KEY="offline-test-key", SSL_CERT_FILE=str(cert))
                     flags = shlex.split(transport_flags({"base_url": "https://wrong.invalid/v1"}))

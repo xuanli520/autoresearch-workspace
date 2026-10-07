@@ -223,6 +223,13 @@ python3 -B controller.py --remote connection.json recover --run-id trial-01
 python3 -B controller.py --remote connection.json start --run-id trial-01 --resume --background
 ```
 
+若旧 cleanup 钩子因缺失重启退出证据而失败，可在执行主机使用
+`recover --run-id <id> --cleanup-config <config.json> --reason <reason>`。
+替代配置只能改变 `cleanup` 和 `env`，其余冻结字段必须与原配置一致；
+控制器、guard 和所属 worker 必须已退出。该操作保存替代配置、哈希及真实
+cleanup 回执，再按零信用恢复原轮；不会补造 `worker-exit.json`，也不会激活
+新运行配置。之后仍须 `rebase`（跨 boot）、`amend`、`doctor` 和显式 resume。
+
 | 现象 / stop_reason | 查看与处理 |
 |---|---|
 | `UNKNOWN` | SSH 未确认；用同一 run-id 重查，禁止据此自动重发变更 |

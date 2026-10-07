@@ -153,6 +153,8 @@ def remote_dispatch(args: argparse.Namespace) -> int:
         return code
     if args.action in ('guard', 'run') or getattr(args, 'no_guard', False):
         raise ControllerError('remote control requires start --background with the cloud guard')
+    if args.action == 'recover' and getattr(args, 'cleanup_config', None):
+        raise ControllerError('recovery cleanup config must be audited on the execution host; invoke recover there')
     values = {name: str(value) if isinstance(value, Path) else value for name, value in vars(args).items()}
     values.update(remote=None, state_dir=cfg['state_dir'])
     payload = {'args': values, 'data_mount': cfg['data_mount']}

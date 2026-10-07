@@ -1031,6 +1031,50 @@ time.sleep(.08);emit('turn.completed',credit=True)
         self.assertEqual(self.invoke('recover','--run-id','test').returncode,0)
         self.assertEqual(self.read()['budget']['active_seconds'],0)
 
+    def test_recover_with_audited_cleanup_preserves_missing_worker_exit_and_credit(self):
+        cfg = self.init(PREAMBLE+'time.sleep(5)', cleanup={
+            'command':[sys.executable, '-c', 'raise SystemExit(9)'], 'timeout_seconds':1})
+        p = self.launch(guard=False)
+        token = self.read()['turn']['token']
+        p.kill(); p.wait(timeout=3)
+        self.until(lambda: not scope_members(token))
+        turn = Path(self.read()['turn']['dir'])
+        (turn/'worker-exit.json').unlink(missing_ok=True)
+        before = self.read()
+        self.assertNotEqual(self.invoke('recover', '--run-id', 'test').returncode, 0)
+        cfg['cleanup']['command'] = [sys.executable, '-c', 'pass']
+        target = self.base/'recovery-config.json'
+        target.write_text(json.dumps(cfg))
+        result = self.invoke('recover', '--run-id', 'test', '--cleanup-config', target,
+                             '--reason', 'replace obsolete failed cleanup hook')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = self.read()
+        self.assertEqual(after['config_sha256'], before['config_sha256'])
+        self.assertEqual(after['budget']['active_seconds'], before['budget']['active_seconds'])
+        self.assertEqual(after['budget']['hard_deadline_at'], before['budget']['hard_deadline_at'])
+        self.assertFalse((turn/'worker-exit.json').exists())
+        self.assertEqual(after['turn']['reason'], 'controller_lost')
+        self.assertEqual(after['turn']['elapsed_seconds'], 0)
+        receipts = list((self.run/'cleanup-recovery').glob('*/receipt.json'))
+        self.assertEqual(len(receipts), 1)
+        self.assertTrue(json.loads(receipts[0].read_text())['cleanup_ok'])
+
+    def test_recovery_cleanup_rejects_scientific_or_budget_changes_and_live_controller(self):
+        cfg = self.init(PREAMBLE+'time.sleep(5)')
+        target = self.base/'recovery-config.json'
+        changed = json.loads(json.dumps(cfg))
+        changed['budget']['window_seconds'] += 1
+        target.write_text(json.dumps(changed))
+        result = self.invoke('recover', '--run-id', 'test', '--cleanup-config', target, '--reason', 'test')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('only cleanup and env', result.stderr)
+        target.write_text(json.dumps(cfg))
+        p = self.launch(guard=False)
+        result = self.invoke('recover', '--run-id', 'test', '--cleanup-config', target, '--reason', 'test')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Resource temporarily unavailable', result.stderr)
+        self.assertIsNone(p.poll())
+
     def test_guard_death_stops_current_worker(self):
         self.init(PREAMBLE+'time.sleep(5)');p=self.launch();s=self.read()
         signal_identity(s['guard_pid'],s['guard_start_ticks'],signal.SIGKILL)

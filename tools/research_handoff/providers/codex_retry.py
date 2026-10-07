@@ -6,6 +6,7 @@ import concurrent.futures
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 from pathlib import Path
 import signal
 import ssl
@@ -317,7 +318,11 @@ def main(argv=None):
     provider = {"name": "Bounded model retry", "base_url": f"http://127.0.0.1:{server.server_port}" + retry.url.path.rstrip("/"),
                 "env_key": "OPENAI_API_KEY", "wire_api": "responses", "supports_websockets": False,
                 "request_max_retries": 0, "stream_max_retries": 0,
-                "stream_idle_timeout_ms": config["stream_idle_timeout_ms"]}
+                # The local proxy buffers complete responses, so SSE comments do
+                # not reset Codex's semantic idle timer. Its watchdog bounds the
+                # local wait; each actual upstream read still has the 90s policy.
+                "stream_idle_timeout_ms": max(config["stream_idle_timeout_ms"],
+                                              math.ceil(config["max_seconds"] * 1000) + 1000)}
     table = "{" + ",".join(key + "=" + json.dumps(value) for key, value in provider.items()) + "}"
     # Last CLI overrides win. One layer owns retries; Codex keeps its native session.
     overrides = ["-c", 'model_provider="research_https"', "-c", "model_providers.research_https=" + table,

@@ -248,8 +248,39 @@ def recover_locked(run_dir: Path, *, reason: str = 'controller_lost') -> dict[st
     return safe_summary(state)
 
 
-def recover_run(run_dir: Path) -> dict[str, Any]:
+def recover_run(run_dir: Path, *, cleanup_config: Path | None = None,
+                reason: str | None = None) -> dict[str, Any]:
     with file_lock(run_dir / '.controller.lock', blocking=False):
+        if cleanup_config is not None:
+            if not reason or not reason.strip():
+                raise ControllerError('recovery cleanup override requires an explicit reason')
+            state = load_state(run_dir)
+            old = task_config(run_dir)
+            config = load_config(cleanup_config)
+            if any(config[key] != old[key] for key in old if key not in {'cleanup', 'env'}):
+                raise ControllerError('recovery cleanup override may change only cleanup and env')
+            if state['status'] in COMPLETION_TERMINAL_STATES or state.get('completion', {}).get('phase') == 'FINALIZING':
+                raise ControllerError('recovery cleanup override requires an interrupted research run')
+            if any(pid_matches(state.get(name + '_pid'), state.get(name + '_start_ticks'),
+                               state.get('process_boot_id')) for name in ('controller', 'guard')):
+                raise ControllerError('controller or guard is still alive')
+            token = state['turn'].get('token')
+            if not token or not terminate_scope(token, 0):
+                raise ControllerError('recovery cleanup override requires a cleaned owned worker')
+            check_storage(old['storage']['data_mount'], run_dir, cleanup_config)
+            folder = run_dir / 'cleanup-recovery' / uuid.uuid4().hex
+            folder.mkdir(parents=True, mode=0o700)
+            atomic_json(folder / 'previous-state.json', state)
+            atomic_json(folder / 'config.json', config)
+            source = folder / 'config.json'
+            ok = cleanup_task(Path(state['turn']['dir']), recovery_config=config, recovery_source=str(source))
+            atomic_json(folder / 'receipt.json', {'at': utc_now(), 'reason': reason,
+                        'previous_config_sha256': state['config_sha256'], 'config_sha256': sha256(source),
+                        'turn': state['turn']['number'], 'cleanup_ok': ok})
+            append_event(run_dir, 'run.recovery_cleanup', reason=reason, cleanup_ok=ok,
+                         receipt=str(folder.relative_to(run_dir)))
+            if not ok:
+                raise ControllerError('recovery cleanup hook failed; inspect cleanup.log before resuming')
         return recover_locked(run_dir)
 
 
@@ -1432,8 +1463,12 @@ def build_parser() -> argparse.ArgumentParser:
             cmd.add_argument('--background', action='store_true')
         else:
             cmd.add_argument('--request-id', help=argparse.SUPPRESS)
-    for name in ('status', 'doctor', 'recover'):
+    for name in ('status', 'doctor'):
         sub.add_parser(name).add_argument('--run-id', required=True)
+    cmd = sub.add_parser('recover'); cmd.add_argument('--run-id', required=True)
+    cmd.add_argument('--cleanup-config', type=Path,
+                     help='audited cleanup/env replacement for an interrupted run; preserves its frozen config')
+    cmd.add_argument('--reason')
     cmd = sub.add_parser('rebase'); cmd.add_argument('--run-id', required=True); cmd.add_argument('--reason', required=True)
     cmd = sub.add_parser('watch'); cmd.add_argument('--run-id', required=True)
     cmd.add_argument('--interval', type=float, default=5); cmd.add_argument('--seconds', type=float); cmd.add_argument('--json', action='store_true')
@@ -1485,7 +1520,7 @@ def dispatch(args: argparse.Namespace, *, remote_payload: dict[str, Any] | None 
     if args.action == 'doctor':
         result = doctor_run(run_dir); return result, 0 if result['ok'] else 1
     if args.action == 'stop': return operator_stop(run_dir, args.reason, signal_controller=not args.no_signal), 0
-    if args.action == 'recover': return recover_run(run_dir), 0
+    if args.action == 'recover': return recover_run(run_dir, cleanup_config=args.cleanup_config, reason=args.reason), 0
     if args.action == 'rebase': return rebase_boot_run(run_dir, reason=args.reason), 0
     if args.action == 'amend':
         config = remote_payload['config'] if remote_payload else load_config(args.config)
