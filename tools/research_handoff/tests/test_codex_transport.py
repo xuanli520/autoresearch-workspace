@@ -13,9 +13,25 @@ class TransportTests(unittest.TestCase):
         self.assertFalse(provider["supports_websockets"])
         self.assertEqual(provider["wire_api"], "responses")
         self.assertEqual(provider["env_key"], "OPENAI_API_KEY")
-        self.assertEqual(provider["request_max_retries"], 1)
-        self.assertEqual(provider["stream_max_retries"], 1)
+        self.assertEqual(provider["request_max_retries"], 8)
+        self.assertEqual(provider["stream_max_retries"], 8)
+        self.assertEqual(provider["stream_idle_timeout_ms"], 90000)
         self.assertEqual(provider["base_url"], "https://model.example/api/v3")
+
+    def test_explicit_eight_retries(self):
+        argv = shlex.split(transport_flags({"base_url": "https://model.example",
+                                           "request_max_retries": 8, "stream_max_retries": 8,
+                                           "stream_idle_timeout_ms": 90000}))
+        config = tomllib.loads("\n".join(argv[index + 1] for index in range(0, len(argv), 2)))
+        provider = config["model_providers"][config["model_provider"]]
+        self.assertEqual(provider["request_max_retries"], 8)
+        self.assertEqual(provider["stream_max_retries"], 8)
+        self.assertEqual(provider["stream_idle_timeout_ms"], 90000)
+
+    def test_nine_retries_is_rejected(self):
+        for key in ("request_max_retries", "stream_max_retries"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                transport_flags({"base_url": "https://model.example", key: 9})
 
     def test_default_keeps_existing_transport(self):
         self.assertEqual(transport_flags(None), "")

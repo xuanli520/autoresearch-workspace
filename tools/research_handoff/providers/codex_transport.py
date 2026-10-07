@@ -16,11 +16,11 @@ def transport_flags(config):
         raise ValueError("model transport requires a credential-free HTTPS base URL")
     provider = {"name": "Managed HTTPS Responses", "base_url": url, "env_key": "OPENAI_API_KEY",
                 "wire_api": "responses", "supports_websockets": False,
-                "request_max_retries": 1, "stream_max_retries": 1, "stream_idle_timeout_ms": 90000}
+                "request_max_retries": 8, "stream_max_retries": 8, "stream_idle_timeout_ms": 90000}
     for key in allowed - {"base_url"}:
         if key in config:
             value = config[key]
-            maximum = 300000 if key == "stream_idle_timeout_ms" else 5
+            maximum = 300000 if key == "stream_idle_timeout_ms" else 8
             minimum = 1000 if key == "stream_idle_timeout_ms" else 0
             if type(value) is not int or not minimum <= value <= maximum:
                 raise ValueError(f"invalid model transport {key}")

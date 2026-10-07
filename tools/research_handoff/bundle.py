@@ -47,6 +47,8 @@ FILES = (
     "providers/harbor_docker.py",
     "providers/host_gpu_memory.py",
     "providers/codex_transport.py",
+    "providers/codex_retry.py",
+    "providers/codex_retry_install.py",
     "templates/agent_protocol.py",
     "templates/launch_controller.sh",
     "templates/public_docker_network.service.in",

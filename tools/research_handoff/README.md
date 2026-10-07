@@ -129,6 +129,12 @@ Docker/containerd 应使用现有开机启用、`Restart=always` 的系统服务
 
 兼容 Responses 的外部模型可通过 `providers.codex_transport.transport_flags` 生成专用 `research_https` provider：HTTPS URL、`wire_api=responses`、`supports_websockets=false`，以及有界请求/流重试与读空闲窗口。API key 只引用环境变量，不进入参数；不使用已经 removed 的 `responses_websockets` feature 开关。任务薄适配器接受 `model_transport` 配置，并保留未显式配置模型的原有传输。
 
+显式 HTTPS transport 默认 `request_max_retries: 8`、`stream_max_retries: 8`、`stream_idle_timeout_ms: 90000`；重试参数允许整数 `0..8`，读空闲窗口允许整数 `1000..300000` 毫秒。Codex 0.159.3 对部分 HTTP 400 错误直接退出，因此正式适配器还须在原生二进制哈希与版本验证后调用 `providers.codex_retry_install.install_retry(agent, environment, model_transport, iteration_timeout_seconds)`，只安装到本轮新建的 Harbor 容器。未显式配置 transport 时保留原有路径。
+
+受管传输层在同一个 Codex 进程/turn 内重试模型访问失败，包括所有非成功 HTTP 状态、认证/路由/参数错误、连接/TLS/读超时、错误响应、SSE error/failed/incomplete 和未完成断流。首次加最多 8 次重试，退避为 1、2、4、8、10、10、10、10 秒；上游读空闲窗口 90 秒，原单轮超时、停止信号与 controller 原硬截止优先。loopback provider 的 Codex 内部重试设为 0/0，并禁用 `unbounded_connection_retries`，避免重复叠加。完整 SSE 成功响应先校验再交给 Codex；失败尝试的半段文本或工具事件不会交付，等待期间只发送 SSE comment 心跳。该策略会推迟本次响应的显示与工具执行，仍保留原会话。重试日志 `/logs/agent/model-transport.jsonl` 只记录请求标识、尝试次数、状态和错误分类，不写密钥或请求/响应内容。loopback proxy 复用已冻结 HTTPS 端点，不增加外网访问权限。
+
+上述策略不改变 controller 轮次重试、计时或预算。冻结配置的显式旧值仍优先于默认值，迁移必须生成新配置和不可变发布，不热改活动目录。离线回归用 `CODEX_TRANSPORT_TEST_BINARY` 指定实际 Codex 二进制，验证 HTTP 400 恢复仍只有一个 turn，以及耗尽时上游恰好 9 次，不访问付费模型网关。
+
 成功轮可在冻结配置的同一预算内续轮。进程非零退出、worker 意外退出、显式 `turn.failed`、缺少完成事件/上下文报告、心跳丢失、worker 错误及单轮超时默认持续重试，不设次数上限；每次失败 attempt 独立留档且不获得成功轮信用。清理钩子收到 `AUTORESEARCH_RETRY_PENDING=1` 时应保留跨轮运行资源，仅清理本轮资源。人工停止、预算或硬截止、guard 丢失、存储/挂载异常、清理失败及其他不可恢复错误不会重试，并按合同收尾。研究排队、工具阻塞等轮内细分、可信评分和 QA16 科研有效时间仍需任务适配器另留证据；进程活动秒数不自动等于科研有效时间。
 
 ## Agent 接入协议
