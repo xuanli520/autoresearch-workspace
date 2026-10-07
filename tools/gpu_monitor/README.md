@@ -8,11 +8,21 @@
 
 用于专家和协作 Agent 在多个题目、多个 SSH 云主机间查询、轮询和接管任务。人类只有一个 `watch` 入口和一个统一终端空间；机器读取使用 `status --json`。默认 **60 秒采集、最近 12 小时 48 个 15 分钟格、轻量本地记录**，一次快照同时包含 endpoint/GPU、scheduler、全部 Agent 流、时间、队列和告警。`stop-task` 仅返回官方停止入口提示并记录本地回执，不向远端或控制器发送停止请求。
 
-依赖：本地和远端 Linux、Python **3.9+** 标准库；SSH 主机需 `ssh`，GPU 遥测使用已有 `nvidia-smi`。无需安装监控服务、修改训练器、安装 Python 包或上传脚本文件。只读探针通过 SSH 标准输入运行，一台主机每轮一次探测（暂时性错误可重试）；多个主机并发查询。
+依赖：机器接口及远端探针使用 Linux、Python **3.9+** 标准库；本地交互界面使用 Python **3.10+** 与锁定版本的 **Textual 8.2.8**。SSH 主机需 `ssh`，GPU 遥测使用已有 `nvidia-smi`。远端无需安装 Python 包、监控服务或上传脚本文件。只读探针通过 SSH 标准输入运行，一台主机每轮一次探测（暂时性错误可重试）；多个主机并发查询。
 
 ## 直接使用
 
 从项目根目录运行，命令与当前目录无关的部分均由脚本自身定位：
+
+首次使用 TUI，在本地专用环境安装依赖并激活（机器接口不需要此步骤）：
+
+```bash
+python3 -m venv tools/gpu_monitor/.venv
+tools/gpu_monitor/.venv/bin/python -m pip install -r tools/gpu_monitor/requirements-tui.txt
+source tools/gpu_monitor/.venv/bin/activate
+```
+
+若系统 Python 没有 `ensurepip`，可使用已有 `uv venv tools/gpu_monitor/.venv` 与 `uv pip install --python tools/gpu_monitor/.venv/bin/python -r tools/gpu_monitor/requirements-tui.txt`。也可直接使用 `tools/gpu_monitor/.venv/bin/python` 执行以下命令。
 
 ```bash
 # Agent 获取结构化脱敏快照；默认即使任务告警也成功返回 JSON。
@@ -21,7 +31,7 @@ python3 tools/gpu_monitor/monitor.py status --json
 # 只看一个任务；--check 遇到任一告警退出 2。
 python3 tools/gpu_monitor/monitor.py status --task <task-id> --json --check
 
-# 唯一人类监控入口；Ctrl-C 只结束本地监控。
+# 唯一人类监控入口；已有后台采集器时直接复用快照。
 python3 tools/gpu_monitor/monitor.py watch
 
 # 持续轮询所有已登记的官方长时间 Agent 任务；配置每 60 秒独立检查。
@@ -35,7 +45,36 @@ python3 tools/gpu_monitor/monitor.py monitor-status
 python3 tools/gpu_monitor/monitor.py stop-monitor
 ```
 
-`--config /path/to/tasks.json` 与 `--auth /path/to/auth.txt` 可用于以上全部命令。`--task ID` 可重复使用；一个配置只有一个采集锁和状态目录，子集筛选也使用这一套状态，启动第二个 watch 会被拒绝。筛选在进程内固定，改筛选需停止本地采集器再重启；`stop-task` 必须恰好指定一个 `--task`。
+`--config /path/to/tasks.json` 与 `--auth /path/to/auth.txt` 可用于以上全部命令。`--task ID` 可重复使用；一个配置只有一个采集锁和状态目录。交互 `watch` 遇到已有采集器时打开快照视图，不读取 SSH 凭据、不重复探测远端；非交互采集继续拒绝重复持锁。前台采集范围在启动时固定；TUI 的 `/` 筛选只改变显示。`stop-task` 必须恰好指定一个 `--task`。
+
+## TUI 操作与布局
+
+交互 `watch` 使用终端备用屏幕与局部更新，刷新不追加滚屏。`watch --json`、输出重定向和 `maintain` 使用脱敏 JSON，不导入 Textual。缺少交互依赖时明确提示安装，不回退到整页打印。
+
+默认资源摘要在上方，正式长时间 Agent 每个登记任务一行，选中任务显示时间线、计时、身份、作业、日志流及告警。Agent 只包含 `controller.type=research_handoff` 且有 `run_id` 的官方长运行登记；训练、评分、队列等其他任务放入默认折叠的**通用任务**，计数分别统计。身份暂不可验证的已登记 Agent 仍保留并显示对应告警。机器快照 `agents` 采用相同分类，完整 `tasks` 继续包含所有登记任务。
+
+≥120 列左右布局，80–119 列上下布局，小于 80 列使用简化任务表并通过 Enter 打开完整详情。长 ID 在表格省略，详情可查看完整值；48 格时间线在窄详情中横向滚动。窗口缩放与采集更新保留任务选择、焦点和可用滚动位置。
+
+| 按键 | 操作 |
+|---|---|
+| ↑↓ / 鼠标 | 选择任务、滚动；点击通用任务标题展开或折叠 |
+| Tab | 切换焦点，包括折叠标题、任务表、详情和滚动区 |
+| Enter / Esc | 打开详情 / 返回；Esc 也可清除筛选 |
+| `/` | 按任务名称、ID、主机筛选；匹配通用任务时自动展开 |
+| `r` | 前台请求采集（进行中的请求合并）；后台模式重读本地快照 |
+| `g` | 查看完整 GPU、归属、预约资源与队列 |
+| `?` | 查看帮助与图例 |
+| `q` / Ctrl-C | 退出本地界面 |
+
+图例：`■` 运行（含待结算），`W` 等待/排队/有依据的对账等待，`!` 失败/重试，`S` 已停止，`·` 未启动，`?` 未知/数据缺失，`=` 完成或轮次结束。运行活动与结算数字分别显示，不再将“计时中”列为独立状态。颜色与符号使用统一大小写映射，`--color never` / `NO_COLOR` 可关闭颜色。
+
+计时标为“本轮经过”“本轮待确认估计”“累计已确认”“距有效目标”“距硬截止”；数字只更新自真实快照，不通过界面动画增加信用。“本轮非等待时长估计”不表示真实 GPU 执行用时。RAM 标为可用量/总量，GPU 实测利用率与预约 CU 分列。分数趋势按优化方向显示改善、退步或持平。
+
+顶栏显示采集模式、间隔、更新时间和数据年龄；年龄超过 `max(2×间隔, 间隔+上次采集耗时)` 标记过期。后台停止、快照损坏或暂不可读时保留最后有效画面并标记状态，不自动接管或恢复采集。正文默认突出当前告警，已恢复告警和时间格事件保留在详情。
+
+前台退出会结束自己持锁的本地采集，在当前探测截止内完成清理；后台快照模式退出只关闭界面。后台模式的 `--interval` / 配置检查参数不覆盖已有采集器；`--max-hours` 限制本地界面寿命，`--max-polls` 统计不同快照，`--until-terminal` 只按新鲜且满足既有终态合同的快照退出。快照中的其他任务不会被界面筛选暂停或停止。
+
+私有分数与 B/R 只在**前台直接采集的操作者 TTY** 中通过单次快照内存 overlay 显示；后台快照模式明确显示不可用，不另开探测补齐分数。JSON、状态文件、events 和日志继续脱敏。
 
 ## 凭据：唯一的 auth.txt
 
@@ -64,7 +103,7 @@ ubuntu
 
 **只允许密码认证**：SSH 只尝试 `keyboard-interactive`/`password` 且 `PubkeyAuthentication=no`。密码认证需要服务器允许 password/keyboard-interactive；若同时要求密码加 MFA、OTP 或多次提示，当前单密码 askpass 不适用。SSH_ASKPASS 必须指向可执行文件路径，不能写成“python3 askpass.py”这样的命令串。超时／暂时性错误按 `connection_attempts` 重试，失败后下轮还会重新查询；认证错误直接报告。无脚本能保证互联网或远端主机永远可连，`UNREACHABLE` 表示当次未知，不代表训练停止。不自动续费或变更远端服务。未配置消息推送或对话自动唤醒，告警只出现在本地记录与输出。
 
-统一人类屏幕固定显示摘要、去重 endpoint/GPU 的实测与预约资源、全部有效 Agent 流、`live/pending/credited`、12 小时时间带、scheduler 当前作业/历史登记、外部队列聚合、当前/已恢复告警和图例。`--view` 及人类 `status` 已取消并明确提示迁移；窄终端折叠正文但保留状态、资源、告警和时间。正式分数与冻结 B/R 只在 TTY 临时显示，非 TTY、JSON、状态文件、events、Agent/handoff 和 workspace 均不含数值分数或证据。
+统一人类界面与快捷键见上文。`--view` 及人类 `status` 已取消并明确提示迁移；正式分数与冻结 B/R 不进入非 TTY、JSON、状态文件、events、Agent/handoff 和 workspace。
 
 轮询可设置 `--interval 60 --max-hours 12`；`--max-polls 2` 便于短验证，`--until-terminal` 在所选任务全部有终态且无残留进程时退出。`UNREACHABLE`、`UNKNOWN`、`EXITED_WITHOUT_RESULT` 不会被当作完成。每轮最多同时探测 8 台主机，所有主机和重试共用 `probe_round_timeout_seconds` 整体截止；默认值为 `timeout_seconds * connection_attempts + retry_delay_seconds * (connection_attempts - 1)`。超时主机报告 `UNREACHABLE`，已完成结果保留。超过 8 台主机时分批仍共用原截止。监控时限是**本地采集器寿命**，最多另加一次整体查询超时；它不延长或执行训练预算。`maintain` 恢复的只有采集器。
 
@@ -223,8 +262,8 @@ ETA 只估当前流到其 `total_steps` 的训练时间，优先使用日志中�
 ## 验证
 
 ```bash
-python3 -m unittest discover -s tools/gpu_monitor/tests -v
+tools/gpu_monitor/.venv/bin/python -B -m unittest discover -s tools/gpu_monitor/tests -v
 python3 tools/gpu_monitor/monitor.py validate
 ```
 
-本地检查覆盖断连、状态优先级与冲突、权威预算与身份校验、整轮超时、增量日志与半字符、轮转、可配置错误窗口、FIFO 篡改、SSH 重试、凭据热重载、路径边界及只读停止指引。旧云端查询和停止预览记录见 [verification.json](verification.json)，这些历史记录不证明当前源码已完成动态 SSH 复验。
+本地检查覆盖断连、状态优先级与冲突、权威预算与身份校验、整轮超时、增量日志与半字符、轮转、可配置错误窗口、FIFO 篡改、SSH 重试、凭据热重载、路径边界及只读停止指引；Textual Pilot 另验小窗口、动态缩放、Agent/通用分类、筛选、详情刷新、选择/滚动保持、后台复用和退出。标准库环境可运行机器接口测试，缺少 Textual 时会跳过交互用例。旧云端查询和停止预览记录见 [verification.json](verification.json)，这些历史记录不证明当前源码已完成动态 SSH 复验。

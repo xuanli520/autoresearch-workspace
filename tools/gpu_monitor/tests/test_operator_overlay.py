@@ -42,7 +42,6 @@ class OperatorOverlayTests(unittest.TestCase):
                      'processes': [], 'uses_gpu': False,
                      'operator_overlay': {'task_id': 'completion-test',
                          'records': [{'contract_path': self.contract_path.name}]}}
-        self.addCleanup(monitor._OPERATOR_OVERLAY.clear)
 
     def write_contract(self):
         self.contract_path.write_text(json.dumps(self.fixture.contract), encoding='utf-8')
@@ -179,8 +178,9 @@ class OperatorOverlayTests(unittest.TestCase):
 
     def test_tty_snapshot_extracts_verified_overlay_before_public_json_and_persist(self):
         config = self.config(True)
-        data = monitor.snapshot(config)
-        self.assertEqual(monitor._OPERATOR_OVERLAY['registered']['latest'], self.SCORE)
+        overlay = {}
+        data = monitor.snapshot(config, operator_overlay=overlay)
+        self.assertEqual(overlay['registered']['latest'], self.SCORE)
         self.assert_no_scores(data)
         state = self.fixture.base / 'monitor-state'
         monitor.persist(state, data, {})
@@ -192,13 +192,13 @@ class OperatorOverlayTests(unittest.TestCase):
         raw = monitor.probe_host(config['hosts']['local'], config['tasks'], config)
         self.assertNotIn('_operator_overlay', raw)
         self.assert_no_scores(raw)
-        data = monitor.snapshot(config)
+        overlay = {'stale': {'latest': self.SCORE}}
+        data = monitor.snapshot(config, operator_overlay=overlay)
         self.assert_no_scores(data)
-        self.assertEqual(monitor._OPERATOR_OVERLAY, {})
+        self.assertEqual(overlay, {})
 
     def test_non_tty_watch_never_prints_or_persists_overlay(self):
         config = self.config(False)
-        monitor._OPERATOR_OVERLAY['stale'] = {'latest': self.SCORE, 'B': self.BASELINE, 'R': self.REFERENCE}
         state = self.fixture.base / 'watch-state'
         output = StringIO()
         with redirect_stdout(output):
@@ -207,7 +207,6 @@ class OperatorOverlayTests(unittest.TestCase):
         for path in state.iterdir():
             if path.is_file():
                 self.assert_no_scores(path.read_text())
-        self.assertEqual(monitor._OPERATOR_OVERLAY, {})
 
     def test_defense_in_depth_strips_scores_before_persist(self):
         data = {'collected_at': monitor.utc(1000), 'tasks': [], 'alerts': [],

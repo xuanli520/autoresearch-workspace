@@ -83,6 +83,7 @@
 /tools/gpu_monitor/*
 !/tools/gpu_monitor/.gitignore
 !/tools/gpu_monitor/README.md
+!/tools/gpu_monitor/requirements-tui.txt
 !/tools/gpu_monitor/*.py
 !/tools/gpu_monitor/examples/
 /tools/gpu_monitor/examples/*

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import monitor
 from privacy import public_record
-from ui import cell_width, render_unified
+from presentation import cell_width, render_unified
 
 
 class Terminal(StringIO):
@@ -27,15 +27,9 @@ class UnifiedTests(unittest.TestCase):
         output = Terminal()
         with redirect_stdout(output):
             render_unified({'collected_at': '2026-10-07T00:00:00+00:00'}, 'never', width=180)
-        self.assertEqual(output.getvalue(),
-            'AutoResearch  10-07 08:00:00  每 60s  采集 ?s  只读\n'
-            '严重 0 / 警告 0  运行流 0  GPU 0/?  scheduler 运行 0 / 排队 0 / 最久 ?\n'
-            'GPU / scheduler\n'
-            'Agent / 12h (48 x 15m) -> now\n'
-            '  无登记流\n'
-            '告警\n'
-            '  无已确认告警\n'
-            '图例 # 计时中  W 等 GPU/对账  ~ 运行待结算  ! 失败重试  | 人工停止/修订  . 未启动  ? 未知/权限/数据空洞  = 完成\n')
+        self.assertIn('10-07 08:00:00', output.getvalue())
+        self.assertIn('■ 运行（含待结算）', output.getvalue())
+        self.assertNotIn('计时中', output.getvalue())
 
     def fixture(self):
         buckets = [{'state': 'pending', 'data_gap': []}] * 48
@@ -73,11 +67,11 @@ class UnifiedTests(unittest.TestCase):
         with redirect_stdout(output):
             render_unified(self.fixture(), 'never', overlay, width=120)
         text = output.getvalue()
-        for value in ('scheduler', 'GPU-1', 'task:s1', 'task:s2', '12h', 'pending', 'credited',
-                      'job-current', 'historical', 'resolved', 'SUMMARY_STAGNANT',
-                      'insufficient_ram_mib', '外部 2', '最佳 / 最新', 'B=', 'R=', '↓优', '图例'):
+        for value in ('scheduler', 'GPU-1', '日志流 s1', '日志流 s2', '12h', '本轮待确认估计', '累计已确认',
+                      'job-current', '历史登记', '已恢复', 'SUMMARY_STAGNANT',
+                      'insufficient_ram_mib', '外部队列 2', '最佳', 'B=', 'R=', '退步', '■ 运行'):
             self.assertIn(value, text)
-        self.assertEqual(text.count('[' + '~' * 48 + ']'), 2)
+        self.assertEqual(text.count('■' * 48), 1)
         self.assertNotIn('\033[', text)
 
     def test_narrow_width_and_degradation_keep_fields(self):
@@ -90,7 +84,7 @@ class UnifiedTests(unittest.TestCase):
             text = output.getvalue()
             self.assertTrue(all(cell_width(line) <= width for line in text.splitlines()))
             compact = ''.join(text.splitlines())
-            for token in ('task:s1', 'task:s2', 'credited', 'job-current', 'permission denied', 'resolved'):
+            for token in ('日志流 s1', '日志流 s2', '累计已确认', 'job-current', 'permission denied', '已恢复'):
                 self.assertIn(token, compact)
 
     def test_non_tty_ignores_overlay_even_if_passed_by_caller(self):

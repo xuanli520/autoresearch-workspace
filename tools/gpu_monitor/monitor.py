@@ -18,7 +18,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
 import time
 import uuid
 from typing import Any
@@ -26,13 +25,13 @@ from typing import Any
 try:
     from .probe import field
     from .privacy import public_record
-    from .ui import render_unified
+    from .presentation import render_unified
     from .askpass import (FIFO_IDENTITY_ENV, FIFO_PATH_ENV, MAX_PASSWORD_BYTES,
                           inspect_fifo, open_password_fifo, validate_helper)
 except ImportError:  # Preserve direct script execution.
     from probe import field
     from privacy import public_record
-    from ui import render_unified
+    from presentation import render_unified
     from askpass import (FIFO_IDENTITY_ENV, FIFO_PATH_ENV, MAX_PASSWORD_BYTES,
                          inspect_fifo, open_password_fifo, validate_helper)
 
@@ -71,7 +70,6 @@ DEFAULT_ERROR_PATTERNS = (
 DEFAULT_ERROR_WINDOW_LINES = 100
 MAX_STREAM_CACHE_ENTRIES = 256
 _STREAM_CACHES: OrderedDict[str, dict] = OrderedDict()
-_OPERATOR_OVERLAY = {}
 SUGGESTIONS = {
     'UNREACHABLE': '检查 SSH 网络和交互认证；远端训练是否存活未知。',
     'EXITED_WITHOUT_RESULT': '进程已不见但无可靠终态；检查退出码、OOM、控制器日志。',
@@ -965,7 +963,8 @@ def evaluate(task: dict[str, Any], host: dict[str, Any],
     return result
 
 
-def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None,
+             *, operator_overlay: dict | None = None) -> dict[str, Any]:
     try:
         from .runtime import endpoint_key, enrich_host
         from .diagnostics import augment
@@ -1005,11 +1004,12 @@ def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None) -> dic
                     future.cancel()
                     hosts[key] = {'error': 'probe round timeout'}
             pool.shutdown(wait=False, cancel_futures=True)
-    _OPERATOR_OVERLAY.clear()
+    overlay = operator_overlay if operator_overlay is not None else {}
+    overlay.clear()
     by_alias = {}
     for key, raw in hosts.items():
         if cfg.get('_operator_tty'):
-            _OPERATOR_OVERLAY.update(raw.pop('_operator_overlay', {}))
+            overlay.update(raw.pop('_operator_overlay', {}))
         else:
             raw.pop('_operator_overlay', None)
         if not raw.get('error'):
@@ -1097,7 +1097,7 @@ def snapshot(cfg: dict[str, Any], previous: dict[str, Any] | None = None) -> dic
     if cfg.get('_config_metadata'):
         data['config'] = cfg['_config_metadata']
     augment(data, cfg, previous or {}, time.time(), by_alias,
-            formal_unchanged={key: value.get('unchanged', False) for key, value in _OPERATOR_OVERLAY.items()})
+            formal_unchanged={key: value.get('unchanged', False) for key, value in overlay.items()})
     for task in data['tasks']:
         records = {alert['id']: alert for alert in task.get('alert_history', [])}
         prior = {alert['id']: alert for alert in old.get(task['id'], {}).get('alert_history', [])}
@@ -1150,7 +1150,7 @@ def aggregate_agents(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for task in tasks:
         controller = task.get('controller')
         scheduler = task.get('scheduler')
-        if controller is None and scheduler is None:
+        if not controller or controller.get('type') != 'research_handoff' or not controller.get('run_id'):
             continue
         identity = {}
         if controller is not None:
@@ -1210,71 +1210,6 @@ def persist(state: Path, data: dict[str, Any], previous: dict[str, Any]) -> None
                 f.write(dump({'event': 'ALERT_UPDATED', 'time': data['collected_at'], 'alert': alert}) + '\n')
 
 
-def duration(seconds):
-    if seconds is None:
-        return '?'
-    sign = '-' if seconds < 0 else ''
-    seconds = abs(int(seconds))
-    return f'{sign}{seconds // 3600}h{seconds % 3600 // 60:02d}m'
-
-
-ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
-
-
-class Colors:
-    def __init__(self, enabled):
-        self.enabled = enabled
-
-    def paint(self, text, code):
-        return f'\033[{code}m{text}\033[0m' if self.enabled else text
-
-    def __getattr__(self, name):
-        codes = {'reset': '0', 'bold': '1', 'dim': '2', 'red': '31', 'green': '32',
-                 'yellow': '33', 'blue': '34', 'magenta': '35', 'cyan': '36', 'white': '37'}
-        if name not in codes:
-            raise AttributeError(name)
-        return lambda text: self.paint(text, codes[name])
-
-
-def _color_enabled(mode):
-    if mode == 'always':
-        return True
-    if mode == 'never' or os.environ.get('NO_COLOR') is not None:
-        return False
-    return sys.stdout.isatty()
-
-
-def _wrap_lines(text, width, indent='', colors=None):
-    text = str(text)
-    if width <= len(indent) + 8:
-        width = len(indent) + 8
-    return textwrap.wrap(text, width=max(8, width - len(indent)),
-                         initial_indent=indent, subsequent_indent=indent,
-                         break_long_words=False, break_on_hyphens=False) or [indent.rstrip()]
-
-
-def _number(value, digits=3):
-    if value is None:
-        return '?'
-    if isinstance(value, float):
-        return f'{value:.{digits}f}'.rstrip('0').rstrip('.')
-    if isinstance(value, int):
-        return f'{value:,}'
-    return str(value)
-
-
-def _state_style(colors, state):
-    if state in ('COMPLETED', 'STOPPED'):
-        return colors.green(state)
-    if state in ('FAILED', 'UNKNOWN', 'EXITED_WITHOUT_RESULT'):
-        return colors.red(state)
-    if state in ('PAUSED', 'UNREACHABLE'):
-        return colors.yellow(state)
-    if state == 'RUNNING':
-        return colors.cyan(state)
-    return colors.dim(state)
-
-
 def render(data, color='auto'):
     return render_unified(data, color)
 
@@ -1305,7 +1240,8 @@ def all_tasks_terminal(tasks: list[dict[str, Any]]) -> bool:
 
 def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None,
           auth_path=None, config_path=None, task_ids=(), config_check_interval=60,
-          auth_check_interval=60, interval_override=None, color='auto', json_output=False):
+          auth_check_interval=60, interval_override=None, color='auto', json_output=False,
+          on_update=None, on_state=None, stop_event=None, refresh_event=None, operator_tty=False):
     try:
         from .reload import ConfigReloader, AuthReloader
     except ImportError:
@@ -1323,7 +1259,8 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
             raise ValueError('a monitor already owns this state directory')
         token = token or uuid.uuid4().hex
         info = {'pid': os.getpid(), 'token': token, 'started_at': utc(),
-                'deadline_at': utc(time.time() + max_hours * 3600), 'state': 'RUNNING', 'read_only': True}
+                'deadline_at': utc(time.time() + max_hours * 3600), 'state': 'RUNNING', 'read_only': True,
+                'task_ids': list(task_ids), 'interval_seconds': interval}
         if reloader:
             info['config'] = reloader.metadata()
         atomic_json(state / 'watch.json', info)
@@ -1335,6 +1272,9 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
         count, reason, events = 0, 'MONITOR_TIME_LIMIT', []
         try:
             while time.monotonic() < end:
+                if stop_event is not None and stop_event.is_set():
+                    reason = 'LOCAL_INTERFACE_EXIT'
+                    break
                 try:
                     stop = json.loads(stop_path.read_text())
                     if stop.get('token') == token:
@@ -1350,15 +1290,23 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
                 if auth_reloader and now >= next_auth_check_at:
                     events.extend(auth_reloader.check(cfg))
                     next_auth_check_at = time.monotonic() + auth_check_interval
+                if refresh_event is not None and refresh_event.is_set():
+                    next_probe_at = min(next_probe_at, now)
                 if now >= next_probe_at:
+                    if refresh_event is not None:
+                        refresh_event.clear()
                     probe_started = time.monotonic()
                     current = dict(reloader.selected_config() if reloader else cfg)
-                    current['_operator_tty'] = sys.stdout.isatty() and not json_output
+                    current['_operator_tty'] = on_update is not None and operator_tty and not json_output
                     current['_interval_override'] = interval_override if interval_override is not None else current.get('interval_seconds', interval)
                     current['probe_round_timeout_seconds'] = min(current.get('probe_round_timeout_seconds', current.get('timeout_seconds', 30)),
                                                                  max(0.001, end - probe_started))
                     previous = load_latest(state)
-                    data = snapshot(current, previous)
+                    overlay = {}
+                    if on_state:
+                        on_state(dict(info, mode='foreground', collecting=True))
+                    data = (snapshot(current, previous, operator_overlay=overlay) if current['_operator_tty']
+                            else snapshot(current, previous))
                     if reloader:
                         data['config'] = reloader.metadata()
                     if events:
@@ -1379,16 +1327,16 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
                     summary['critical_alerts'] = sum(a.get('severity') == 'critical' and a.get('state') == 'open' for a in data['alerts'])
                     summary['warning_alerts'] = sum(a.get('severity') in ('warning', 'error') and a.get('state') == 'open' for a in data['alerts'])
                     persist(state, data, previous)
-                    if current['_operator_tty']:
-                        print('\033[2J\033[H', end='')
-                        render_unified(data, color, _OPERATOR_OVERLAY)
-                    else:
+                    if on_update is None:
                         print(dump(public_record(data)), flush=True)
-                    _OPERATOR_OVERLAY.clear()
                     count += 1
                     info.update(last_poll_at=data['collected_at'], polls=count, config=data.get('config'),
-                                auth=auth_reloader.metadata() if auth_reloader else None)
+                                auth=auth_reloader.metadata() if auth_reloader else None,
+                                interval_seconds=current['_interval_override'])
                     atomic_json(state / 'watch.json', info)
+                    if on_update:
+                        on_update(data, overlay, dict(info, mode='foreground', collecting=False))
+                    overlay.clear()
                     if max_polls and count >= max_polls:
                         reason = 'POLL_LIMIT'
                         break
@@ -1396,19 +1344,28 @@ def watch(cfg, state, interval, max_hours, max_polls, until_terminal, token=None
                         reason = 'ALL_TASKS_TERMINAL'
                         break
                     next_probe_at = probe_started + current['_interval_override']
+                    if refresh_event is not None:
+                        # A request during an in-flight probe is satisfied by that probe.
+                        refresh_event.clear()
                 wake = min(end, next_probe_at,
                            next_config_check_at if reloader else end,
                            next_auth_check_at if auth_reloader else end)
-                time.sleep(min(0.5, max(0, wake - time.monotonic())))
+                delay = min(0.5, max(0, wake - time.monotonic()))
+                if stop_event is not None:
+                    stop_event.wait(delay)
+                else:
+                    time.sleep(delay)
         except KeyboardInterrupt:
             reason = 'KEYBOARD_INTERRUPT'
         except BaseException:
             reason = 'MONITOR_ERROR'
             raise
         finally:
-            _OPERATOR_OVERLAY.clear()
             info.update(state='STOPPED', ended_at=utc(), reason=reason)
             atomic_json(state / 'watch.json', info)
+            if on_state:
+                on_state(dict(info, mode='foreground', collecting=False))
+        return info
 
 
 def monitor_alive(state):
@@ -1447,7 +1404,8 @@ def main():
         if a.view is not None or a.action == 'status' and not a.json:
             raise ValueError('旧分屏/人类 status 已取消；请使用 python3 tools/gpu_monitor/monitor.py watch（无 --view）；机器读取使用 status --json')
         auth_path = a.auth.resolve()
-        needs_remote = a.action in ('status', 'watch', 'maintain')
+        interactive = a.action == 'watch' and not a.json and sys.stdin.isatty() and sys.stdout.isatty()
+        needs_remote = a.action in ('status', 'maintain') or a.action == 'watch' and not interactive
         # 凭据文件是唯一的认证来源；只有需要连接远端时才强制要求它存在。
         cfg = load_config(a.config.resolve())
         full_cfg = cfg
@@ -1489,6 +1447,24 @@ def main():
             if not cfg['tasks']:
                 print('没有活动任务，无需启动监控器。')
                 return 0
+            if interactive:
+                try:
+                    if __package__:
+                        from .ui import run_tui
+                        from .sessions import CollectorSource, SnapshotSource, collector_running
+                    else:
+                        from ui import run_tui
+                        from sessions import CollectorSource, SnapshotSource, collector_running
+                except ImportError as exc:
+                    raise ValueError('交互界面需要 Textual；请在本地环境运行 python -m pip install -r tools/gpu_monitor/requirements-tui.txt') from exc
+                options = dict(max_hours=hours, max_polls=a.max_polls, until_terminal=a.until_terminal)
+                source = (SnapshotSource(state, task_ids=a.task or (), **options) if collector_running(state) else
+                          CollectorSource(full_cfg, state, auth_path=auth_path, config_path=a.config.resolve(),
+                                          interval=interval, task_ids=a.task or (), token=a.token,
+                                          config_check_interval=a.config_check_interval,
+                                          auth_check_interval=a.auth_check_interval,
+                                          interval_override=a.interval, **options))
+                return run_tui(source, color=a.color, task_ids=a.task or ())
             watch(full_cfg, state, interval, hours, a.max_polls, a.until_terminal, a.token,
                   auth_path, a.config.resolve(), a.task or (), a.config_check_interval,
                   a.auth_check_interval, a.interval, a.color, a.json)
