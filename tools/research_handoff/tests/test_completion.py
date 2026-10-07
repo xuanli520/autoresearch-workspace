@@ -213,8 +213,10 @@ class CompletionTests(unittest.TestCase):
         parent['candidate_manifest'] = 'selected.candidate.json'
         parent['completion'].update(jobs_manifest='selected.jobs.json', result='selected.score.json',
                                     receipt='selected.receipt.json', isolation='selected.isolation.json')
-        with self.assertRaisesRegex(longrun.ControllerError, 'deadline exceeds'):
+        with self.assertRaisesRegex(c.CompletionContractError, 'deadline exceeds') as rejected:
             c.adopt_evaluation(parent, self.contract)
+        self.assertEqual(rejected.exception.status, 'COMPLETION_CONTRACT_ERROR')
+        self.assertEqual(rejected.exception.code, 'SOURCE_DEADLINE_EXCEEDS_PARENT')
         self.assertFalse(any(self.evidence.glob('selected.*')))
 
     def test_restored_job_binds_original_session_and_rejects_changed_origin(self):
@@ -238,8 +240,9 @@ class CompletionTests(unittest.TestCase):
         conflicting = self.evidence / 'selected.isolation.json'
         longrun.atomic_json(conflicting, c.signed(parent, {'version': 1, 'conflict': True}))
         with mock.patch.object(c, 'get_job', return_value=json.loads((self.job_dir / 'status.json').read_text())):
-            with self.assertRaisesRegex(longrun.ControllerError, 'isolation evidence is immutable'):
+            with self.assertRaisesRegex(c.CompletionContractError, 'isolation evidence is immutable') as rejected:
                 c.adopt_evaluation(parent, self.contract)
+            self.assertEqual(rejected.exception.code, 'ISOLATION_EVIDENCE_IMMUTABLE')
             self.assertFalse((self.evidence / 'selected.jobs.json').exists())
             self.assertFalse((self.evidence / 'selected.candidate.json').exists())
             conflicting.unlink()
@@ -249,13 +252,77 @@ class CompletionTests(unittest.TestCase):
         parent = copy.deepcopy(self.contract)
         parent['run_id'] = 'parent'
         parent['protocol_hash'] = 'f' * 64
-        with self.assertRaises(longrun.ControllerError):
+        with self.assertRaises(c.CompletionContractError) as rejected:
             c.adopt_evaluation(parent, self.contract)
+        self.assertEqual(rejected.exception.code, 'SCIENTIFIC_CONTRACT_MISMATCH')
         parent['protocol_hash'] = self.contract['protocol_hash']
         self.job_state('RUNNING')
         with mock.patch.object(c, 'get_job', return_value=json.loads((self.job_dir / 'status.json').read_text())):
-            with self.assertRaises(longrun.ControllerError):
+            with self.assertRaises(c.EvidenceError) as rejected:
                 c.adopt_evaluation(parent, self.contract)
+        self.assertEqual(rejected.exception.status, 'EVALUATION_PENDING')
+        self.assertEqual(rejected.exception.code, 'EVALUATION_PENDING')
+        self.assertNotIsInstance(rejected.exception, c.CompletionContractError)
+
+    def test_selection_of_earlier_expired_contract_preserves_certification(self):
+        self.seal()
+        parent = copy.deepcopy(self.contract)
+        parent['run_id'] = 'parent'
+        parent['deadline'] = iso(240)
+        parent['candidate_manifest'] = 'selected.candidate.json'
+        parent['completion'].update(jobs_manifest='selected.jobs.json', result='selected.score.json',
+                                    receipt='selected.receipt.json', isolation='selected.isolation.json')
+        source_files = {name: (self.evidence / name).read_bytes() for name in
+                        ('evaluation.jobs.json', 'candidate.manifest.json', 'final.score.json',
+                         'isolation.attestation.json', 'completion.receipt.json')}
+        with mock.patch.object(c, 'utc_now', return_value=iso(120)), \
+                mock.patch.object(c, 'get_job', return_value=json.loads((self.job_dir / 'status.json').read_text())):
+            receipt = c.adopt_evaluation(parent, self.contract)
+        self.assertEqual(receipt['status'], 'COMPLETED')
+        for name, original in source_files.items():
+            self.assertEqual((self.evidence / name).read_bytes(), original)
+
+    def test_selection_does_not_reclassify_invalid_signature_as_contract_error(self):
+        self.seal()
+        result = longrun.read_json(self.evidence / 'final.score.json')
+        result['scientific_score'] = 99
+        longrun.atomic_json(self.evidence / 'final.score.json', result)
+        parent = copy.deepcopy(self.contract)
+        parent['run_id'] = 'parent'
+        parent['candidate_manifest'] = 'selected.candidate.json'
+        parent['completion'].update(jobs_manifest='selected.jobs.json', result='selected.score.json',
+                                    receipt='selected.receipt.json', isolation='selected.isolation.json')
+        with mock.patch.object(c, 'get_job', return_value=json.loads((self.job_dir / 'status.json').read_text())):
+            with self.assertRaises(c.EvidenceError) as rejected:
+                c.adopt_evaluation(parent, self.contract)
+        self.assertNotIsInstance(rejected.exception, c.CompletionContractError)
+        self.assertFalse(any(self.evidence.glob('selected.*')))
+
+    def test_selection_rejects_changed_trust_boundary_with_stable_code(self):
+        parent = copy.deepcopy(self.contract)
+        parent['completion']['training'] = False
+        with self.assertRaises(c.CompletionContractError) as rejected:
+            c.adopt_evaluation(parent, self.contract)
+        self.assertEqual(rejected.exception.code, 'TRUST_BOUNDARY_MISMATCH')
+        self.assertFalse(any(self.evidence.glob('selected.*')))
+
+    def test_extended_deadline_does_not_relax_required_seed_contract(self):
+        self.seal()
+        parent = copy.deepcopy(self.contract)
+        parent['deadline'] = iso(120)
+        parent['required_seeds'] = ['0', '1']
+        with self.assertRaises(c.CompletionContractError) as rejected:
+            c.adopt_evaluation(parent, self.contract)
+        self.assertEqual(rejected.exception.code, 'SCIENTIFIC_CONTRACT_MISMATCH')
+
+    def test_selection_rejects_invalid_private_directory_with_stable_code(self):
+        self.evidence.chmod(0o755)
+        try:
+            with self.assertRaises(c.CompletionContractError) as rejected:
+                c.adopt_evaluation(self.contract, self.contract)
+        finally:
+            self.evidence.chmod(0o700)
+        self.assertEqual(rejected.exception.code, 'INVALID_TRUST_BOUNDARY')
 
     def test_nonfinite_and_boolean_scores_are_rejected(self):
         for value in (None, True, float('nan'), float('inf'), float('-inf')):
@@ -358,8 +425,18 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual((self.evidence / 'completion.receipt.json').read_bytes(), before)
         changed = copy.deepcopy(self.jobs)
         changed[0]['job_id'] = 'replacement'
-        with self.assertRaises(longrun.ControllerError):
+        with self.assertRaises(c.CompletionContractError) as rejected:
             c.register_jobs(self.contract, changed)
+        self.assertEqual(rejected.exception.code, 'JOB_BINDING_IMMUTABLE')
+
+    def test_conflicting_certified_result_has_stable_contract_code(self):
+        self.seal()
+        original = (self.evidence / 'final.score.json').read_bytes()
+        self.rows = self.make_rows(.6)
+        with self.assertRaises(c.CompletionContractError) as rejected:
+            c.write_score_result(self.contract, .6, self.rows)
+        self.assertEqual(rejected.exception.code, 'RESULT_IMMUTABLE')
+        self.assertEqual((self.evidence / 'final.score.json').read_bytes(), original)
 
     def test_raw_seed_score_must_equal_bound_result_file(self):
         rows = copy.deepcopy(self.rows)

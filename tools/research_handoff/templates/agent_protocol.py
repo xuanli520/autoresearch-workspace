@@ -51,6 +51,19 @@ def turn_credit(*, credited_seconds: float, credit_evidence: str, **fields: Any)
          credit_evidence=credit_evidence, **fields)
 
 
+def completion_contract_error(*, failure_evidence: str, failure_evidence_sha256: str,
+                              **fields: Any) -> None:
+    """Pause deterministic close-out errors without discarding audited credit.
+
+    Evidence must be a hashed host artifact in this turn's directory. Emit any
+    independent ``turn.credit`` report and exit within the original deadlines.
+    """
+    emit('turn.failed', **{**fields, 'reason': 'completion_contract_error',
+         'failure_class': 'contract', 'retryable': False,
+         'failure_evidence': failure_evidence,
+         'failure_evidence_sha256': failure_evidence_sha256})
+
+
 def compact(summary: str) -> None:
     """Persist the summary through the controller, then exit the current turn."""
     emit('context.compact', summary=summary)

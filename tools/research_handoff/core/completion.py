@@ -58,6 +58,14 @@ class EvidenceError(ControllerError):
         self.status, self.code = status, code
 
 
+class CompletionContractError(ControllerError):
+    status = "COMPLETION_CONTRACT_ERROR"
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def fail(status: str, code: str, message: str) -> NoReturn:
     raise EvidenceError(status, code, message)
 
@@ -428,7 +436,8 @@ def register_jobs(contract: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[
             existing = read_json(path)
             verify_signed(contract, existing)
             if {k: v for k, v in existing.items() if k != "signature"} != payload:
-                raise ControllerError("original scoring IDs are frozen; do not replace or resubmit")
+                raise CompletionContractError("JOB_BINDING_IMMUTABLE",
+                                              "original scoring IDs are frozen; do not replace or resubmit")
         else:
             atomic_json(path, signed(contract, payload))
     return payload
@@ -436,23 +445,33 @@ def register_jobs(contract: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[
 
 def adopt_evaluation(contract: dict[str, Any], source_contract: dict[str, Any]) -> dict[str, Any]:
     """Bind an already certified experiment to the research run that selected it."""
-    trust_boundary(contract)
-    trust_boundary(source_contract)
+    try:
+        trust_boundary(contract)
+        trust_boundary(source_contract)
+    except EvidenceError:
+        raise
+    except ControllerError as exc:
+        raise CompletionContractError("INVALID_TRUST_BOUNDARY", str(exc)) from exc
     for name in ("task_id", "candidate_root", "stage", "score_expectation", "metric", "direction",
                  "required_seeds", "protocol_hash"):
         if contract[name] != source_contract[name]:
-            raise ControllerError("selected experiment belongs to a different scientific contract")
+            raise CompletionContractError("SCIENTIFIC_CONTRACT_MISMATCH",
+                                          "selected experiment belongs to a different scientific contract")
     # The trusted parent may be extended by an authorized amendment. An
     # experiment certified under an earlier deadline still satisfies that
     # parent, but its original contract/receipt must remain unchanged.
     if timestamp(source_contract["deadline"]) > timestamp(contract["deadline"]):
-        raise ControllerError("selected experiment deadline exceeds the research run deadline")
+        raise CompletionContractError("SOURCE_DEADLINE_EXCEEDS_PARENT",
+                                      "selected experiment deadline exceeds the research run deadline")
     for name in ("evidence_root", "signing_key", "data_hash", "evaluator_hash", "training", "private_roots"):
         if contract["completion"][name] != source_contract["completion"][name]:
-            raise ControllerError("selected experiment has a different trust boundary")
+            raise CompletionContractError("TRUST_BOUNDARY_MISMATCH",
+                                          "selected experiment has a different trust boundary")
     receipt = issue_receipt(source_contract, live=True)
     if receipt["status"] != "COMPLETED":
-        raise ControllerError("only a fully certified experiment can be selected")
+        issue = next(iter(receipt.get("issues", [])), {})
+        fail(receipt["status"], issue.get("code", "SOURCE_NOT_CERTIFIED"),
+             issue.get("message", "only a fully certified experiment can be selected"))
     root = contract["completion"]["evidence_root"]
     ledger = read_json(within(root, source_contract["completion"]["jobs_manifest"]))
     source_manifest = read_json(within(root, source_contract["candidate_manifest"]))
@@ -461,10 +480,11 @@ def adopt_evaluation(contract: dict[str, Any], source_contract: dict[str, Any]) 
     # no frozen jobs or manifest behind and another source can still be selected.
     isolation = check_isolation(source_contract)
     if isolation["protected_roots_hash"] != digest(protected_roots(contract, ledger["jobs"])):
-        raise ControllerError("selected experiment does not protect the research run's private roots")
+        raise CompletionContractError("PRIVATE_ROOTS_MISMATCH",
+                                      "selected experiment does not protect the research run's private roots")
     target_manifest = within(root, contract["candidate_manifest"])
     if target_manifest.exists() and read_json(target_manifest) != source_manifest:
-        raise ControllerError("selected candidate manifest is immutable")
+        raise CompletionContractError("CANDIDATE_MANIFEST_IMMUTABLE", "selected candidate manifest is immutable")
     target_isolation = within(root, contract["completion"]["isolation"])
     payload = {k: v for k, v in isolation.items() if k != "signature"}
     payload.update(**identity(contract), contract_hash=digest(contract),
@@ -473,7 +493,7 @@ def adopt_evaluation(contract: dict[str, Any], source_contract: dict[str, Any]) 
         existing = read_json(target_isolation)
         verify_signed(contract, existing)
         if {k: v for k, v in existing.items() if k != "signature"} != payload:
-            raise ControllerError("selected isolation evidence is immutable")
+            raise CompletionContractError("ISOLATION_EVIDENCE_IMMUTABLE", "selected isolation evidence is immutable")
     register_jobs(contract, ledger["jobs"])
     atomic_json(target_manifest, source_manifest)
     if not target_isolation.exists():
@@ -621,7 +641,7 @@ def write_score_result(contract: dict[str, Any], scientific_score: int | float,
             existing = read_json(path)
             verify_signed(contract, existing)
             if any(existing.get(k) != payload[k] for k in payload if k != "generated_at"):
-                raise ControllerError("final scientific result is immutable")
+                raise CompletionContractError("RESULT_IMMUTABLE", "final scientific result is immutable")
             return existing
         atomic_json(path, signed(contract, payload))
     return payload

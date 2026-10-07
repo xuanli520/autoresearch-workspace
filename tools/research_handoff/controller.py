@@ -34,7 +34,7 @@ from gpu_wait import (INFRASTRUCTURE_REASONS, close_gpu_wait, gpu_infrastructure
                       observe_gpu_state)
 from processes import boot_id, pid_matches, process_start_ticks, scope_members, signal_identity, terminate_scope
 from cleanup import cleanup_task
-from credit import partial_report, validate_evidence, validate_intervals
+from credit import checked_file, partial_report, validate_evidence, validate_intervals
 from docker_network import bridge_preflight
 from completion import (COMPLETION_FAILURES, contract_for_run, diagnostic_receipt, digest,
     evidence_heartbeat, inspect_evaluation, issue_receipt, timestamp, trust_boundary, validate_receipt, within)
@@ -88,7 +88,9 @@ def persist_exit(run_dir: Path, state: dict[str, Any]) -> int:
               'exit_code': code, 'stop_reason': state['stop_reason'], 'resume_required': state['resume_required'],
               'target_reached_at_stop': state.get('target_reached_at_stop'),
               'target_reached': view['target_reached'], 'budget': view,
-              'completion': state.get('completion')}
+              'completion': state.get('completion'),
+              'failure_class': state.get('turn', {}).get('failure_class'),
+              'failure': state.get('failure')}
     atomic_json(run_dir / 'attempts' / f"{state['attempt']:06d}" / 'exit.json', result)
     atomic_json(run_dir / 'exit.json', result)
     return code
@@ -705,7 +707,8 @@ class LongRunController:
                         'excluded_seconds': turn['gpu_wait']['excluded_seconds']})
                     self.event('turn.gpu_state', turn=turn['number'], request=value,
                                waiting=waiting, excluded_seconds=gpu_wait_seconds(turn, time.monotonic()))
-                    if value['state'] == 'UNKNOWN' and value.get('reconciling') is not True:
+                    if (value['state'] == 'UNKNOWN' and value.get('reconciling') is not True
+                            and self.pending_reason not in {'completion_contract_error', 'deterministic_evidence_failure'}):
                         self.pending_reason = 'gpu_unknown'
             if kind == 'context.usage' or kind == 'heartbeat' and 'used_tokens' in value:
                 apply_context_usage(self.state, value.get('used_tokens'), generation=value.get('generation'),
@@ -721,6 +724,8 @@ class LongRunController:
                 self.state['context']['state'] = 'COMPACTION_REQUIRED'
                 atomic_json(self.run_dir / 'context/pending-summary.json', value)
             if kind == 'turn.completed':
+                if self.pending_reason in {'completion_contract_error', 'deterministic_evidence_failure'}:
+                    raise ControllerError('turn.completed cannot replace a nonretryable failure')
                 if type(value.get('credit')) is not bool:
                     raise ControllerError('turn.completed requires boolean credit')
                 if self.config['budget']['credit_policy'] == 'reported':
@@ -738,9 +743,13 @@ class LongRunController:
                     raise ControllerError('partial credit requires explicit policy, finite seconds and evidence')
                 self.partial_credit = value
             if kind == 'turn.failed':
+                if self.pending_reason in {'completion_contract_error', 'deterministic_evidence_failure'}:
+                    raise ControllerError('turn.failed cannot replace a nonretryable failure')
                 retryable = value.get('retryable', True)
                 if type(retryable) is not bool:
                     raise ControllerError('turn.failed retryable must be boolean')
+                if value.get('reason') == 'completion_contract_error' and retryable:
+                    raise ControllerError('completion contract failure must be nonretryable')
                 infrastructure = value.get('reason') in INFRASTRUCTURE_REASONS
                 if infrastructure:
                     if value.get('failure_class') != 'infrastructure':
@@ -749,19 +758,26 @@ class LongRunController:
                     self.state['failure'] = value
                     self.pending_reason = value['reason']
                 elif not retryable:
-                    if value.get('reason') != 'deterministic_evidence_failure':
-                        raise ControllerError('nonretryable failure requires an explicit evidence failure reason')
-                    path = Path(value.get('failure_evidence', '')).resolve(strict=True)
-                    if (not path.is_relative_to(Path(self.state['turn']['dir']).resolve())
-                            or sha256(path) != value.get('failure_evidence_sha256')):
-                        raise ControllerError('failure evidence must match the current turn artifact')
+                    if value.get('reason') not in {'deterministic_evidence_failure', 'completion_contract_error'}:
+                        raise ControllerError('nonretryable failure requires an explicit evidence or contract reason')
+                    if (value['reason'] == 'completion_contract_error'
+                            and value.get('failure_class') != 'contract'):
+                        raise ControllerError('completion contract failure requires contract failure_class')
+                    artifact_hash = value.get('failure_evidence_sha256')
+                    if (not isinstance(value.get('failure_evidence'), str) or not value['failure_evidence'].strip()
+                            or not isinstance(artifact_hash, str) or len(artifact_hash) != 64
+                            or any(c not in '0123456789abcdef' for c in artifact_hash)):
+                        raise ControllerError('failure evidence requires a current turn path and SHA-256')
+                    checked_file(value['failure_evidence'], self.state['turn']['dir'], artifact_hash)
                     self.result = value
                     self.state['failure'] = value
-                    self.pending_reason = 'deterministic_evidence_failure'
+                    self.record_method_summary(value)
+                    self.pending_reason = value['reason']
                 else:
                     self.pending_reason = 'agent_reported_failure'
         except (ControllerError, TypeError, OSError, ValueError) as exc:
-            self.pending_reason = 'invalid_agent_event'
+            if self.pending_reason not in {'completion_contract_error', 'deterministic_evidence_failure'}:
+                self.pending_reason = 'invalid_agent_event'
             self.event('agent.event_rejected', error=str(exc))
 
     def ingest_output(self) -> None:
@@ -866,7 +882,11 @@ class LongRunController:
                 if view['hard_reached']:
                     reason = 'hard_limit'
                 else:
-                    reason = self.pending_reason
+                    # A contract failure can be followed by audited credit.
+                    # Let the adapter finish its close-out under the unchanged
+                    # worker, heartbeat and run deadlines before consuming it.
+                    reason = (None if self.pending_reason == 'completion_contract_error'
+                              and self.process.poll() is None else self.pending_reason)
 
             # Drain a worker that has already closed its stdout before applying
             # the context guard. This preserves a completed turn whose final
@@ -926,7 +946,8 @@ class LongRunController:
                 except subprocess.TimeoutExpired:
                     terminate_scope(turn['token'], 0)
                     self.process.wait(timeout=2)
-                self.ingest_output()
+                while self.offset < (Path(turn['dir']) / 'stdout.log').stat().st_size:
+                    self.ingest_output()
                 return self.finish_turn(reason)
             time.sleep(min(cfg['heartbeat']['interval_seconds'], max(.01, turn['deadline_monotonic']-now)))
 
@@ -949,6 +970,9 @@ class LongRunController:
         )
         observed_reason = reason or self.pending_reason
         if reason == 'context_window' and self.pending_reason is not None:
+            observed_reason = self.pending_reason
+        if (self.pending_reason == 'completion_contract_error'
+                and observed_reason in {'turn_timeout', 'heartbeat_stale', 'target_reached'}):
             observed_reason = self.pending_reason
         if observed_reason is None and code != 0:
             observed_reason = gpu_infrastructure_reason(turn)
@@ -1009,12 +1033,16 @@ class LongRunController:
                        hard_reached=post_close_view['hard_reached'])
         reason = final.reason
         turn.update(status='COMPLETED' if final.completed else (
-            'FAILED' if reason == 'deterministic_evidence_failure' else 'STOPPED'), ended_at=utc_now(), returncode=code,
+            'FAILED' if reason in {'deterministic_evidence_failure', 'completion_contract_error'} else 'STOPPED'), ended_at=utc_now(), returncode=code,
                     reason=reason, elapsed_seconds=elapsed, credited=final.credit,
                     credited_seconds=(final.reported_seconds if final.reported_seconds is not None else elapsed) if final.credit else 0,
                     target_reached=post_close_view['target_reached'], result=self.result)
         if reason in INFRASTRUCTURE_REASONS:
             turn['failure_class'] = 'infrastructure'
+        elif reason == 'completion_contract_error' or self.result.get('reason') == 'completion_contract_error':
+            turn['failure_class'] = 'contract'
+        elif reason == 'deterministic_evidence_failure':
+            turn['failure_class'] = 'evidence'
         if final.partial_credit:
             turn['partial_credit'] = self.partial_credit
         if partial_error:
@@ -1117,7 +1145,7 @@ class LongRunController:
                     if self.wait_retry_backoff():
                         continue
                     return
-                self.state.update(status='PAUSED' if reason in INFRASTRUCTURE_REASONS else 'FAILED',
+                self.state.update(status='PAUSED' if reason in INFRASTRUCTURE_REASONS | {'completion_contract_error'} else 'FAILED',
                                   stop_reason=reason, resume_required=True)
                 return
 

@@ -85,6 +85,21 @@ class TurnOutcomeTests(unittest.TestCase):
         turn_outcome(worker=worker, result=result)
         self.assertEqual((worker, result), before)
 
+    def test_completion_contract_failure_retains_only_audited_partial_credit(self):
+        args = dict(reason='completion_contract_error', returncode=70,
+                    credit_policy='reported', result={'credit': True, 'credited_seconds': 6.0},
+                    allow_partial_credit=True, observed_seconds=6.0,
+                    retryable_reasons=frozenset({'completion_contract_error'}))
+        without_evidence = turn_outcome(**args)
+        self.assertFalse(without_evidence.credit or without_evidence.retry_pending)
+        audited = turn_outcome(**args, partial_report={'credited_seconds': 5.0})
+        self.assertEqual(audited.reason, 'completion_contract_error')
+        self.assertTrue(audited.partial_credit and audited.credit)
+        self.assertFalse(audited.completed or audited.retry_pending)
+        invalid = turn_outcome(**{**args, 'reason': 'deterministic_evidence_failure'},
+                               partial_report={'credited_seconds': 5.0})
+        self.assertFalse(invalid.credit or invalid.retry_pending)
+
 
 class DurableDeadlineTests(unittest.TestCase):
     def test_summary_and_completion_grace_survive_serialization(self):

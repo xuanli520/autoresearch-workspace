@@ -110,7 +110,7 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(scope_members(s['turn']['token']))
 
     def test_completion_missing_gets_no_credit_and_obeys_hard_deadline(self):
-        self.init(PREAMBLE+'time.sleep(.05)', budget={'window_seconds':.05,'hard_limit_seconds':.25},
+        self.init(PREAMBLE+'time.sleep(.05)', budget={'window_seconds':.05,'hard_limit_seconds':1.5},
                   turn={'seconds':.2})
         r=self.invoke('run','--run-id','test','--no-guard')
         self.assertEqual(r.returncode,3)
@@ -252,6 +252,140 @@ raise SystemExit(70)
         self.assertIn('Original Harbor permission traceback', (self.run/'turns/000001/stderr.log').read_text())
         events = [json.loads(line) for line in (self.run/'events.jsonl').read_text().splitlines()]
         self.assertFalse(any(item['event']=='turn.retry_scheduled' for item in events))
+
+    def test_completion_contract_error_pauses_after_late_audited_credit(self):
+        code = PREAMBLE + """from pathlib import Path
+from datetime import datetime
+import hashlib
+td=Path(os.environ['AUTORESEARCH_TURN_DIR'])
+evidence=td/'feedback.json'
+evidence.write_text(json.dumps({'verified_score':.5}))
+failure=td/'completion-error.json'
+failure.write_text(json.dumps({'failure_class':'contract','failure_code':'DEADLINE_BINDING_MISMATCH'}))
+emit('turn.failed',reason='completion_contract_error',retryable=False,failure_class='contract',
+     failure_code='DEADLINE_BINDING_MISMATCH',
+     method_summary='Training and scoring finished; completion contract rejected the result.',
+     failure_evidence=str(failure),failure_evidence_sha256=hashlib.sha256(failure.read_bytes()).hexdigest())
+time.sleep(.15)
+start=datetime.fromisoformat(json.loads((td/'worker-start.json').read_text())['at']).timestamp()
+report={'version':1,'run_id':'test','turn':int(os.environ['AUTORESEARCH_TURN']),
+        'credited_seconds':.03,'intervals':[[start+.02,start+.05]],
+        'evidence':[{'path':str(evidence),'sha256':hashlib.sha256(evidence.read_bytes()).hexdigest()}]}
+path=td/'audited-credit.json'
+path.write_text(json.dumps(report))
+emit('turn.credit',credited_seconds=.03,credit_evidence=str(path),
+     credit_evidence_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+raise SystemExit(70)
+"""
+        self.init(code, budget={'window_seconds':.02,'hard_limit_seconds':3,
+                               'credit_policy':'reported','allow_partial_credit':True})
+        result=self.invoke('run','--run-id','test','--no-guard')
+        self.assertEqual(result.returncode,0,result.stderr)
+        state=self.read()
+        self.assertEqual(state['status'],'PAUSED')
+        self.assertEqual(state['stop_reason'],'completion_contract_error')
+        self.assertEqual(state['turn']['number'],1)
+        self.assertEqual(state['turn']['failure_class'],'contract')
+        self.assertTrue(state['resume_required'])
+        self.assertAlmostEqual(state['budget']['active_seconds'],.03,places=4)
+        exited=json.loads((self.run/'turns/000001/exit.json').read_text())
+        self.assertEqual(exited['reason'],'completion_contract_error')
+        self.assertEqual(exited['returncode'],70)
+        self.assertTrue(exited['credited'])
+        self.assertEqual(exited['result']['failure_code'],'DEADLINE_BINDING_MISMATCH')
+        self.assertEqual(exited['failure_class'],'contract')
+        run_exit=json.loads((self.run/'exit.json').read_text())
+        self.assertEqual(run_exit['failure_class'],'contract')
+        self.assertEqual(run_exit['failure']['failure_code'],'DEADLINE_BINDING_MISMATCH')
+        self.assertEqual(longrun.epoch(state['budget']['hard_deadline_at'])-
+                         longrun.epoch(state['budget']['started_at']),3)
+        events=[json.loads(line) for line in (self.run/'events.jsonl').read_text().splitlines()]
+        self.assertFalse(any(item['event']=='turn.retry_scheduled' for item in events))
+
+    def test_nonretryable_failure_artifact_requires_current_turn_regular_hashed_file(self):
+        td=self.base/'turn'
+        td.mkdir()
+        outside=self.base/'outside.json'
+        outside.write_text('{}')
+        artifact=td/'failure.json'
+        artifact.write_text('{}')
+        link=td/'link.json'
+        link.symlink_to(artifact)
+        for path, digest, failure_class, retryable in (
+                (outside,controller.sha256(outside),'contract',False),
+                (link,controller.sha256(artifact),'contract',False),
+                (artifact,'f'*64,'contract',False),
+                (artifact,None,'contract',False),
+                (artifact,controller.sha256(artifact),'infrastructure',False),
+                (artifact,controller.sha256(artifact),'contract',True)):
+            with self.subTest(path=path,digest=digest,failure_class=failure_class,retryable=retryable):
+                supervisor=controller.LongRunController.__new__(controller.LongRunController)
+                supervisor.state={'turn':{'number':1,'dir':str(td)},'context':{'generation':1}}
+                supervisor.config={}
+                supervisor.pending_reason=None
+                supervisor.event=mock.Mock()
+                event={'autoresearch':'turn.failed','generation':1,'reason':'completion_contract_error',
+                       'failure_class':failure_class,'retryable':retryable,
+                       'failure_evidence':str(path),'failure_evidence_sha256':digest}
+                supervisor.ingest_line(json.dumps(event).encode())
+                self.assertEqual(supervisor.pending_reason,'invalid_agent_event')
+                self.assertNotIn('failure',supervisor.state)
+
+    def test_later_events_cannot_turn_contract_failure_into_a_retry(self):
+        supervisor=controller.LongRunController.__new__(controller.LongRunController)
+        supervisor.state={'turn':{'number':1},'context':{'generation':1}}
+        supervisor.config={'budget':{'allow_partial_credit':True}}
+        supervisor.pending_reason='completion_contract_error'
+        supervisor.result={'reason':'completion_contract_error'}
+        supervisor.event=mock.Mock()
+        for event in ({'autoresearch':'turn.completed','credit':True},
+                      {'autoresearch':'turn.failed','reason':'episode_interrupted'},
+                      {'autoresearch':'turn.credit','credited_seconds':-1}):
+            with self.subTest(event=event):
+                supervisor.ingest_line(json.dumps({**event,'generation':1}).encode())
+                self.assertEqual(supervisor.pending_reason,'completion_contract_error')
+                self.assertEqual(supervisor.result,{'reason':'completion_contract_error'})
+
+    def test_completion_contract_failure_hang_obeys_existing_turn_timeout(self):
+        code=PREAMBLE+"""from pathlib import Path
+import hashlib
+path=Path(os.environ['AUTORESEARCH_TURN_DIR'])/'completion-error.json'
+path.write_text('{}')
+emit('turn.failed',reason='completion_contract_error',retryable=False,failure_class='contract',
+     failure_evidence=str(path),failure_evidence_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+time.sleep(5)
+"""
+        self.init(code,budget={'window_seconds':.1,'hard_limit_seconds':2},turn={'seconds':.25})
+        result=self.invoke('run','--run-id','test','--no-guard')
+        self.assertEqual(result.returncode,0,result.stderr)
+        state=self.read()
+        self.assertEqual(state['status'],'PAUSED')
+        self.assertEqual(state['turn']['reason'],'completion_contract_error')
+        self.assertEqual(state['turn']['number'],1)
+        self.assertFalse(state['turn']['credited'])
+        self.assertEqual(state['budget']['active_seconds'],0)
+        self.assertLess(state['budget']['runtime_seconds'],1)
+
+    def test_completion_contract_failure_hang_never_extends_run_deadline(self):
+        code=PREAMBLE+"""from pathlib import Path
+import hashlib
+path=Path(os.environ['AUTORESEARCH_TURN_DIR'])/'completion-error.json'
+path.write_text('{}')
+emit('turn.failed',reason='completion_contract_error',retryable=False,failure_class='contract',
+     failure_evidence=str(path),failure_evidence_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+time.sleep(5)
+"""
+        self.init(code,budget={'window_seconds':.1,'hard_limit_seconds':.45},turn={'seconds':.45})
+        result=self.invoke('run','--run-id','test','--no-guard')
+        self.assertEqual(result.returncode,3,result.stderr)
+        state=self.read()
+        self.assertEqual(state['status'],'EXPIRED')
+        self.assertEqual(state['stop_reason'],'hard_limit')
+        self.assertEqual(state['turn']['failure_class'],'contract')
+        self.assertEqual(state['turn']['number'],1)
+        self.assertEqual(state['retry']['used'],0)
+        self.assertEqual(state['budget']['active_seconds'],0)
+        self.assertLess(state['budget']['runtime_seconds'],1)
 
     def test_retry_backoff_longer_than_stale_limit_keeps_guard_alive(self):
         marker = self.base/'backoff-fail-once'

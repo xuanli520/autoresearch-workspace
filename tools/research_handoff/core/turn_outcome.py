@@ -84,7 +84,7 @@ def compute_turn_outcome(
     completed = final_reason == "turn_completed"
     retry_pending = (
         final_reason in retryable_reasons
-        and final_reason not in INFRASTRUCTURE_REASONS
+        and final_reason not in INFRASTRUCTURE_REASONS | {"completion_contract_error", "deterministic_evidence_failure"}
         and not stop_requested
         and not hard_reached
         and not target_reached
@@ -92,7 +92,7 @@ def compute_turn_outcome(
     )
     partial = (
         not completed and bool(partial_report) and allow_partial_credit and cleanup_ok
-        and final_reason in retryable_reasons | {"operator_stop", "hard_limit", "context_window"}
+        and final_reason in retryable_reasons | {"operator_stop", "hard_limit", "context_window", "completion_contract_error"}
     )
     credit = credit_policy == "running" or (completed and result.get("credit") is True) or partial
     if final_reason in {

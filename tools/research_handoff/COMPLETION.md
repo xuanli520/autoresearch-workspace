@@ -27,6 +27,8 @@
 
 原 run 经明确授权通过官方 `amend` 延期后，可信 `adopt_evaluation` 可选用截止早于或等于当前父合同截止的已完整认证评分；科学字段和可信边界仍须一致，晚于父合同的评分截止拒绝。原评分合同、receipt、request/job/origin 与原截止不改写，选用后的隔离证据记录来源合同及 receipt 哈希。这不授权延期，也不使迟到或未完成评分有效。
 
+`CompletionContractError(ControllerError)` 明确标识确定性的收尾合同冲突，`status` 固定为 `COMPLETION_CONTRACT_ERROR`，`code` 区分科学协议、可信边界、来源截止越界和不可覆盖的目标证据。重新调用研究模型不能解决这些冲突；控制器应保留已完成研究记账并停止自动重试。未认证来源、签名、hash、seed、reload 或评分状态失败仍使用 `EvidenceError` 和原科学失败状态，不会被改写为合同错误。
+
 ## 状态和凭证
 
 正常流为 `RUNNING -> FINALIZING -> COMPLETED`。完成门失败会写明确终态：`INCOMPLETE_FINAL_SCORE`、`EVALUATION_PENDING`、`EVALUATION_FAILED`、`EVALUATION_UNKNOWN`、`FINAL_SCORE_INVALID`、`CANDIDATE_BINDING_MISMATCH`、`PROTOCOL_BINDING_MISMATCH`、`COMPLETION_RECEIPT_MISSING` 或 `EXPIRED`。只有 receipt、job、seed、reload、hash 和隔离检查全部通过才会进入 `COMPLETED`。

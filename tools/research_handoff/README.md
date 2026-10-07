@@ -84,6 +84,10 @@ python3 -B controller.py --state-dir ./smoke-state doctor --run-id smoke-01
 
 显式启用 `budget.allow_partial_credit: true`（仅限 `reported`）后，失败或超时轮可另记研究信用，轮次失败原因和分数保持真实。可信宿主适配器的 cleanup hook 在回收资源后写 `turn_dir/partial-credit.json`：`version:1`、`run_id`、`turn`、`intervals:[[UTC_epoch_start,UTC_epoch_end]]`、`credited_seconds`、`evidence:[{path,sha256}]`。控制器核对本轮身份、区间边界、不重叠、总秒数及可信宿主原件哈希；报告不能超过 worker runtime。可用 `turn.credit` 提前提供该报告路径/哈希，但清理完成后仍重新验证。原生会话审计可复用 `core/research_time.py`，由题目回调核对真实 GPU 反馈；未结束工具调用、排队、安装和故障等排除区间必须留证，信用不代表完整评分闭环。
 
+科学收尾适配器应在 `adopt_evaluation()` 之前用 `core.credit.persist_report()` 保存去重、裁剪到本轮执行区间及剩余有效预算的时间证据，不预留虚拟的最后一秒。该函数同时冻结宿主证据并写 `effective-time.json` 和 `partial-credit.json`；cleanup 不应覆盖已有凭证。预算达到目标与科学 receipt 是否通过分别记录。
+
+确定性合同不兼容由 `CompletionContractError` 表达，适配器发送 `completion_contract_error` helper 或 `turn.failed` 事件，声明 `reason: completion_contract_error`、`failure_class: contract`、`retryable: false`，并提供当前轮宿主失败证据及 SHA-256。控制器在原轮、心跳和 run 截止内等待适配器退出，清理后验证独立 partial credit，随后 `PAUSED`，不会自动调用模型重试；合同失败和真实科学分数保留。签名、评分或哈希认证失败仍为 `deterministic_evidence_failure`，不能由该合同分类获得信用。
+
 已停止且确认 controller/guard/worker 均回收的 run，可通过 `amend` 切换不可变发布、配置和历史信用审计。命令需要当前 `--expected-config-sha256`、`--expected-turn` 及非空授权理由；身份、起点、目标和上下文不变，旧配置、状态、原始 exit 不覆盖，修订收据保存在 `amendments/NNNNNN/`。历史审计只补原零信用且未调整过的轮次，拒绝重计。截止修改须有明确用户授权；默认上限仍为 12h，显式例外可启用 `allow_extended_hard_limit`，最高 72h。72h 仅为显式授权后的工具上界，实际运行受用户指定的绝对截止约束，首次起点不能重置。截止延期（包括原预算尚未到期时）须传入 `--extend-expired-budget`，仅允许已完全回收、目标未完成的 run 延长至未来且晚于旧截止；该操作不增加历史信用，保留首次起点、目标、旧状态/exit 和修订收据。EXPIRED 修订后为 PAUSED，仍须显式 `start --resume`。已达成目标的 COMPLETED 不可延期。
 
 存储迁移须有明确授权，保持所有run/root绝对路径，用独立数据卷或bind mount承接新设备，并在原设备保留完整旧副本。`amend --storage-migration-source <旧副本根>` 对新 `storage.data_mount` 下的run和研究root逐文件校验内容、权限、归属及符号链接，并核验原设备和上轮cleanup；失败不修改状态。此操作保存旧/新设备与目录清单hash，不允许同时改截止或添加历史信用。路径、科学合同、上下文和有效预算仍保持原值；迁移后显式doctor/start --resume。
@@ -220,6 +224,7 @@ python3 -B controller.py --remote connection.json start --run-id trial-01 --resu
 | `heartbeat_stale` | stdout 是否持续产生协议心跳；普通日志不续命 |
 | `context_usage_missing` / `invalid_agent_event` | 查事件 generation、总 token、会话 ID，修适配器 |
 | `completion_missing` | 没收到可信 `turn.completed` / boolean credit，退出 0 不足以证明完整轮 |
+| `completion_contract_error` | 确定性科学收尾合同不兼容；查当前轮失败原件、错误码和独立时间凭证，修复后显式接管，不自动续轮 |
 | `WAITING_COMPACTION` | 仅在关闭自动压缩或不可恢复故障时出现；查 pending-summary、原日志，提交当前 generation 的摘要 |
 | `cleanup_incomplete` | 查 cleanup.log/receipt；外部资源确认回收前不继续 |
 | `storage_limit` / `storage_changed` | 查 run 字节数、剩余空间、实际挂载；不自动删历史证据 |
