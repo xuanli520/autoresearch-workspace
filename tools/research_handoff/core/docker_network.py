@@ -150,6 +150,69 @@ def egress_rules(addresses: Iterable[str]) -> str:
     return "\n".join([*rules, "reject", "}", "}"])
 
 
+def dedicated_build_forwarding(config: dict[str, Any], *,
+                               runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> dict[str, Any]:
+    """Restore package-source access only for a named dedicated default bridge.
+
+    Rules remain behind DOCKER-USER and match the bridge plus its exact subnet.
+    This never changes shared chain policies, sysctls or daemon configuration.
+    Runtime Agent egress is independently restricted in its network namespace.
+    """
+    config = validate_network_config(config)
+    name = config["bridge_interface"]
+    if not config["enabled"] or not config["repair_forwarding"] or not name or name == "docker0":
+        raise ValueError("build forwarding requires an explicitly authorized dedicated bridge")
+
+    def run(argv):
+        return runner(argv, capture_output=True, text=True, timeout=15, check=False)
+
+    inspected = run(["docker", "--host", config["docker_host"], "network", "inspect", "bridge"])
+    if inspected.returncode:
+        raise ValueError("cannot inspect dedicated build bridge")
+    rows = json.loads(inspected.stdout)
+    if len(rows) != 1 or rows[0].get("Driver") != "bridge":
+        raise ValueError("one dedicated bridge is required")
+    network = rows[0]
+    if network.get("Options", {}).get("com.docker.network.bridge.name", "docker0") != name:
+        raise ValueError("build bridge identity mismatch")
+    ipv4 = [row for row in network["IPAM"]["Config"]
+            if ipaddress.ip_network(row["Subnet"]).version == 4]
+    if len(ipv4) != 1:
+        raise ValueError("one dedicated IPv4 subnet is required")
+    subnet = str(ipaddress.ip_network(ipv4[0]["Subnet"]))
+    if run(["sysctl", "-n", "net.ipv4.ip_forward"]).stdout.strip() != "1":
+        raise ValueError("host forwarding is disabled; shared sysctl was not changed")
+    inspected_link = run(["ip", "-j", "-d", "link", "show", "dev", name])
+    links = json.loads(inspected_link.stdout) if not inspected_link.returncode else []
+    if len(links) != 1 or links[0].get("linkinfo", {}).get("info_kind") != "bridge" or "UP" not in links[0].get("flags", []):
+        raise ValueError("dedicated build interface must be an existing UP bridge")
+    comment = "research-handoff:build:" + name
+    rules = [("nat", "POSTROUTING", ["-s", subnet, "!", "-o", name,
+                                    "-m", "comment", "--comment", comment, "-j", "MASQUERADE"])]
+    for protocol, ports in [("udp", "53"), ("tcp", "53,80,443")]:
+        rules.append(("filter", "FORWARD", ["-i", name, "-s", subnet, "!", "-o", name,
+                     "-p", protocol, "-m", "multiport", "--dports", ports,
+                     "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED",
+                     "-m", "comment", "--comment", comment, "-j", "ACCEPT"]))
+    rules.append(("filter", "FORWARD", ["-o", name, "-d", subnet,
+                  "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
+                  "-m", "comment", "--comment", comment, "-j", "ACCEPT"]))
+    added = []
+    for table, chain, rule in rules:
+        prefix = ["sudo", "-n", "iptables", "-w", "5", "-t", table]
+        checked = run([*prefix, "-C", chain, *rule])
+        if checked.returncode not in (0, 1):
+            raise ValueError("cannot inspect dedicated build forwarding")
+        if checked.returncode == 1:
+            applied = run([*prefix, "-A", chain, *rule])
+            if applied.returncode:
+                raise ValueError("could not restore dedicated build forwarding")
+            added.append({"table": table, "chain": chain, "rule": rule})
+    return {"ok": True, "interface": name, "subnet": subnet, "network_id": network["Id"],
+            "added_rules": added, "shared_policies_changed": False,
+            "daemon_restarted": False, "allowed_build_ports": [53, 80, 443]}
+
+
 def bridge_preflight(config: dict[str, Any], *, repair: bool = False, repair_forwarding: bool = False,
                      restore_default_forwarding: bool = False,
                      runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> dict[str, Any]:

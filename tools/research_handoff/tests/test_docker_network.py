@@ -3,7 +3,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from tools.research_handoff.core.docker_network import bridge_preflight, egress_rules, model_forwarding, validate_network_config
+from tools.research_handoff.core.docker_network import bridge_preflight, dedicated_build_forwarding, egress_rules, model_forwarding, validate_network_config
 
 
 class BridgeTests(unittest.TestCase):
@@ -183,6 +183,71 @@ class ForwardingTests(unittest.TestCase):
             model_forwarding(self.config, 'docker0', '172.17.0.0/16',
                              restore_default_forwarding=True, runner=self.runner)
         self.assertFalse(any('-I' in cmd or '-A' in cmd for cmd in self.commands))
+
+
+class DedicatedBuildForwardingTests(unittest.TestCase):
+    def setUp(self):
+        self.commands, self.present = [], set()
+        self.config = {'enabled': True, 'repair_forwarding': True,
+                       'bridge_interface': 'research0',
+                       'docker_host': 'unix:///mnt/data/docker.sock'}
+        self.network = {'Driver': 'bridge', 'Id': 'dedicated-id',
+                        'Options': {'com.docker.network.bridge.name': 'research0'},
+                        'IPAM': {'Config': [{'Subnet': '10.10.0.0/24'}]}}
+
+    def runner(self, argv, **kwargs):
+        self.commands.append(argv)
+        if argv[0] == 'docker':
+            output, code = json.dumps([self.network]), 0
+        elif argv[0] == 'sysctl':
+            output, code = '1\n', 0
+        elif argv[0] == 'ip':
+            output, code = json.dumps([{'flags': ['UP'], 'linkinfo': {'info_kind': 'bridge'}}]), 0
+        else:
+            table, action, chain = argv[6:9]
+            key = (table, chain, tuple(argv[9:]))
+            if action == '-C':
+                code = 0 if key in self.present else 1
+            else:
+                self.assertEqual(action, '-A')
+                self.present.add(key)
+                code = 0
+            output = ''
+        return subprocess.CompletedProcess(argv, code, output, '')
+
+    def test_build_access_is_scoped_and_idempotent(self):
+        result = dedicated_build_forwarding(self.config, runner=self.runner)
+        self.assertEqual(len(result['added_rules']), 4)
+        self.assertEqual(result['allowed_build_ports'], [53, 80, 443])
+        for row in result['added_rules']:
+            self.assertIn('research0', row['rule'])
+            self.assertIn('10.10.0.0/24', row['rule'])
+        self.assertIn('--dports', result['added_rules'][1]['rule'])
+        self.assertIn('53,80,443', result['added_rules'][2]['rule'])
+        self.assertIn('RELATED,ESTABLISHED', result['added_rules'][3]['rule'])
+        again = dedicated_build_forwarding(self.config, runner=self.runner)
+        self.assertEqual(again['added_rules'], [])
+        self.assertFalse(any('-I' in cmd or '-F' in cmd or '-P' in cmd or 'systemctl' in cmd
+                             for cmd in self.commands))
+
+    def test_explicit_scope_is_required_before_mutation(self):
+        for changes in ({'enabled': False}, {'repair_forwarding': False},
+                        {'bridge_interface': 'docker0'}, {'bridge_interface': 'other0'}):
+            self.commands.clear()
+            with self.assertRaises(ValueError):
+                dedicated_build_forwarding({**self.config, **changes}, runner=self.runner)
+            self.assertFalse(any(cmd[0] == 'sudo' for cmd in self.commands))
+
+    def test_forwarding_disabled_is_reported_without_sysctl_change(self):
+        original = self.runner
+        def disabled(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[0] == 'sysctl':
+                result.stdout = '0\n'
+            return result
+        with self.assertRaisesRegex(ValueError, 'disabled'):
+            dedicated_build_forwarding(self.config, runner=disabled)
+        self.assertFalse(any(cmd[0] == 'sudo' for cmd in self.commands))
 
 
 if __name__ == '__main__':
