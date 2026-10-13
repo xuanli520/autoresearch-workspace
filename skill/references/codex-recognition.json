@@ -1,0 +1,169 @@
+{
+  "schema_version": "codex-skill-recognition.v1",
+  "checked_at": "2026-10-13T10:59:22.017055+08:00",
+  "codex_version": "codex-cli 0.162.0-alpha.2",
+  "scope": "仅套件格式、路由、合成边界测试与本机技能发现；不是题包科学或平台验收",
+  "discovery": {
+    "method": "本机 codex app-server --stdio；initialize 后调用 skills/list(cwds=[仓库根], forceReload=true)，未创建研究线程或模型回合",
+    "link": ".agents/skills/autoresearch-package-suite",
+    "target": "../../skill",
+    "before_count": 0,
+    "after_count": 10,
+    "errors": [],
+    "skills": [
+      {
+        "name": "autoresearch-package-final-audit",
+        "path": "skill/autoresearch-package-final-audit/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "e40fe9eccc4952cfd46422ff7e795128e25644433629725195684ba9ae71c89f"
+      },
+      {
+        "name": "autoresearch-package-finalize",
+        "path": "skill/autoresearch-package-finalize/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "f3bf18478c75f469b93b0abfaebd2bbaffd0af27098db6c61e383254442f3127"
+      },
+      {
+        "name": "autoresearch-package-layer-a-structure",
+        "path": "skill/layers/autoresearch-package-layer-a-structure/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "609be003212fece40e02baafda76a9a07e178d355ece6b63a2f2e4b86b8cf75e"
+      },
+      {
+        "name": "autoresearch-package-layer-b-contract",
+        "path": "skill/layers/autoresearch-package-layer-b-contract/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "815d4ad9ecd203664e4082b341508d887600cfc191390c4075b6869648a136d6"
+      },
+      {
+        "name": "autoresearch-package-layer-c-environment",
+        "path": "skill/layers/autoresearch-package-layer-c-environment/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "d1b8a852e87448ca1ed90a788a80d62731ca5b5da96a638295a679b9a10e605d"
+      },
+      {
+        "name": "autoresearch-package-layer-d-verifier",
+        "path": "skill/layers/autoresearch-package-layer-d-verifier/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "982b6624ef92f0a4f3637323472e0569d088e3a9155031b94c8588e8db55e50f"
+      },
+      {
+        "name": "autoresearch-package-layer-e-evidence",
+        "path": "skill/layers/autoresearch-package-layer-e-evidence/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "b4340ff6d3983e0d574fe84b9b1755ef98c915efbf3ec155d164ae4123a9b7e8"
+      },
+      {
+        "name": "autoresearch-package-layer-f-expert",
+        "path": "skill/layers/autoresearch-package-layer-f-expert/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "6607d34e63affe81cff7cfb9022590bd7a7e6a9cc2f11d04faec4c3a75706735"
+      },
+      {
+        "name": "autoresearch-package-layer-g-isolation",
+        "path": "skill/layers/autoresearch-package-layer-g-isolation/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "eba833c8e9adcf41ec1fa1fdea82ee82add503588d99ae8bc28ecdd1ffb868ad"
+      },
+      {
+        "name": "autoresearch-package-layer-h-freeze",
+        "path": "skill/layers/autoresearch-package-layer-h-freeze/SKILL.md",
+        "scope": "repo",
+        "enabled": true,
+        "sha256": "a622533942909a12de9ef9c15db27cec8a20bac1fc74668946312832962d9592"
+      }
+    ]
+  },
+  "quick_validate": {
+    "validator": "skill-creator/scripts/quick_validate.py",
+    "validator_sha256": "ee6dba90f44d37171c5a6edb8095979c54919ff6822c1a907afca2e78c48738c",
+    "environment": "uv run --with pyyaml --no-project 的隔离环境；未改动仓库依赖",
+    "results": [
+      {
+        "path": "skill/autoresearch-package-final-audit/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/autoresearch-package-finalize/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-a-structure/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-b-contract/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-c-environment/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-d-verifier/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-e-evidence/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-f-expert/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-g-isolation/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      },
+      {
+        "path": "skill/layers/autoresearch-package-layer-h-freeze/SKILL.md",
+        "exit_code": 0,
+        "output": "Skill is valid!"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "command": "python3 -B skill/scripts/test_pre_run.py",
+      "exit_code": 0,
+      "tests": 24
+    },
+    {
+      "command": "python3 -B skill/scripts/test_review_contract.py",
+      "exit_code": 0,
+      "tests": 16
+    },
+    {
+      "command": "python3 -B skill/scripts/review_contract.py routes",
+      "exit_code": 0,
+      "route_count": 9
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "known_limits": [
+    "官方 OpenAI 文档本次连接超时/失败；自动发现结论由所列本机版本 skills/list 实测支持。",
+    "现有对话的技能目录可能尚未刷新；刷新技能列表或新建会话后使用名称调用，也可直接读取 SKILL.md。",
+    "历史验证目录已在后续提交中移除；未恢复或覆盖，历史材料可从 b7caae7 查询。"
+  ]
+}

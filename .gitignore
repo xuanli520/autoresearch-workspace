@@ -24,6 +24,13 @@
 !/skill/**/*.json
 !/skill/**/*.py
 
+# Repository-scoped Codex discovery; keep the suite source under skill/.
+!/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/autoresearch-package-suite
+
 # Reusable materials and QA skill documentation/scripts
 /materials/*
 !/materials/README.md

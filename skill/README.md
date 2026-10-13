@@ -4,7 +4,9 @@
 
 ## 加载与使用
 
-十个入口均有真实 `SKILL.md` 与 YAML frontmatter，可独立加载；套件位于仓库根目录 `skill/`，不安装到个人目录。Codex只自动发现已注册skills根，未注册时在请求中给出下列实际文件路径并要求读取；不能以本README替代加载。入口共享套件级references/scripts，移动或安装须保留整套相对布局，不仅复制单个skill文件。
+十个入口均有真实 `SKILL.md` 与 YAML frontmatter，可独立加载；源文件位于仓库根目录 `skill/`。仓库级发现入口 `.agents/skills/autoresearch-package-suite` 是指向 `../../skill` 的符号链接；本机 Codex 的 `skills/list` 已实测识别全部十个入口（`scope=repo`、`enabled=true`、无错误），不安装到个人目录。入口共享套件级references/scripts，移动或安装须保留整套相对布局，不仅复制单个skill文件。
+
+可直接用 `$autoresearch-package-finalize`、`$autoresearch-package-layer-e-evidence` 或 `$autoresearch-package-final-audit` 调用相应入口。现有会话若尚未刷新技能列表，可刷新列表或新建会话；按实际路径读取仍可使用，不能以本README替代加载。
 
 - “读取 `skill/autoresearch-package-finalize/SKILL.md`，用 autoresearch-package-finalize 整理这个已过 G03 的题目，来源为 `<题目路径>`，在新的 `<候选路径>` 整理，审查输出放 `<私有包外路径>`。”
 - “读取 `skill/layers/autoresearch-package-layer-e-evidence/SKILL.md`，对 `<包路径>` 跑第 E 层只读审核，台账 `<路径>`，上游报告 `<路径>`，报告写包外。”
@@ -39,6 +41,7 @@
 ## 文件清单
 
 ```text
+.agents/skills/autoresearch-package-suite -> ../../skill
 skill/
   README.md
   autoresearch-package-finalize/SKILL.md
@@ -46,7 +49,6 @@ skill/
   layers/autoresearch-package-layer-{a..h}-*/SKILL.md
   references/      # 条款、目标清单、Schema、路由、QA桥接、待授权核验
   scripts/         # check_package.py、review_contract.py、阶段边界单测
-  verification/    # 只读实包dry-run、独立行为检验、命令与误报修正
 ```
 
 这些控制材料是专家私有，不属于solver公开资源，不自动进入标准交付包。真实题包副本只能按目标正式白名单生成；台账、QA报告和冻结索引通常保留包外，三目录内只放正式合同允许成员。原件/旧包/失败证据不覆盖、不删除。
@@ -67,4 +69,4 @@ python3 -B skill/scripts/review_contract.py final --root "$PACKAGE" --reports "$
 
 Python≥3.9可运行套件脚本；官方TOML检查需已有Python≥3.11。脚本只读源文件并打印JSON，不自动创建/修改题包或台账、不读取模型对象、不执行候选。测试夹具全部在 `$TMPDIR/zcode-scratch/autoresearch-package-skills/` 下创建并自动清理。
 
-实际验证结果、限制、真实缺口与误报修正见 [验证记录](verification/README.md)。需后续决策的只有是否注册到个人skills根，以及具体题目的动态核验/长跑授权；本次不注册、不执行这些操作。
+当前格式、链接和 Codex 自动识别检查见 [识别记录](references/codex-recognition.json)。历史实包 dry-run 记录保存在 Git 提交 `b7caae7` 的 `skill/verification/`；当前精简版不包含该目录，不将历史回执当作当前验证结果。具体题目的动态核验和长跑仍需另行授权。
