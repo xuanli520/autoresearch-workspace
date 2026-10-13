@@ -14,6 +14,7 @@
 !/notes/
 !/ops/
 !/tools/
+!/extensions/
 
 # Reusable materials and QA skill documentation/scripts
 /materials/*
@@ -116,6 +117,37 @@
 !/tools/research_handoff/templates/public_docker_network.service.in
 !/tools/research_handoff/templates/public_docker_network.timer.in
 
+# g03-conductor: Python core, examples (CPU fake task), README.
+!/tools/g03_conductor/
+/tools/g03_conductor/*
+!/tools/g03_conductor/*.py
+!/tools/g03_conductor/*.md
+!/tools/g03_conductor/examples/
+/tools/g03_conductor/examples/*
+!/tools/g03_conductor/examples/*.py
+!/tools/g03_conductor/examples/*.md
+!/tools/g03_conductor/examples/*.yaml
+!/tools/g03_conductor/examples/fake_task/
+/tools/g03_conductor/examples/fake_task/*
+!/tools/g03_conductor/examples/fake_task/*.py
+!/tools/g03_conductor/examples/fake_task/baseline/
+!/tools/g03_conductor/examples/fake_task/data/
+!/tools/g03_conductor/examples/fake_task/methods/
+
+# g03-conductor pi extension (TS shell, guard, mock-API harness).
+/extensions/*
+!/extensions/g03-conductor/
+/extensions/g03-conductor/*
+!/extensions/g03-conductor/index.ts
+!/extensions/g03-conductor/README.md
+!/extensions/g03-conductor/guard/
+/extensions/g03-conductor/guard/*
+!/extensions/g03-conductor/guard/index.ts
+!/extensions/g03-conductor/test/
+/extensions/g03-conductor/test/*
+!/extensions/g03-conductor/test/harness.mjs
+!/extensions/g03-conductor/test/run.sh
+
 # Never allow generated files, tests, or credentials through the allowlist.
 **/__pycache__/
 **/*.py[cod]
@@ -135,6 +167,10 @@
 /tools/research_handoff/tests/fixtures/*
 !/tools/research_handoff/tests/fixtures/__init__.py
 !/tools/research_handoff/tests/fixtures/batch_adapter.py
+!/tools/g03_conductor/tests/
+/tools/g03_conductor/tests/*
+!/tools/g03_conductor/tests/conftest.py
+!/tools/g03_conductor/tests/test_*.py
 **/.env
 **/.env.*
 **/api_key.txt

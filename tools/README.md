@@ -7,6 +7,7 @@
 - [gpu_monitor](gpu_monitor/README.md)：跨题只读监控、官方长时间 Agent 聚合轮询、定向停止，以及活动登记表 `tasks.json` 的归档维护。全量轮询命令：`python3 tools/gpu_monitor/monitor.py watch --view agents --interval 60 --max-hours 12`。
 - [gpu_scheduler](gpu_scheduler/README.md)：数据盘持久请求账本、截止准入、队首预约/回填、owner 公平调度与同卡共享；默认 `submit` 阻塞，官方 SDK 透传状态，控制器按 `WAITING_GPU` 记录轮内等待。已启动执行只对账不重跑；RAM/CPU 生产 cgroup 强制合同与 GPU 显存/CU 预约分别声明。
 - [GPU 调度器正确使用指南](gpu_scheduler/USAGE.md)：新旧版本核对、冻结 request/deadline、阻塞调用与事件透传、基础设施分类、查询/取消、画像及接入验收；GPU 操作前必读。
+- [g03_conductor](g03_conductor/README.md)：出题前 G03 准备的确定性编排器（Python 账本与判定，加 [pi 扩展](../extensions/g03-conductor/README.md)）。只产出专家侧 G02/G03 证据和 `comparison_summary.json`，不是正式双 Agent 长跑，产物不能当 best_method；GPU 只走 gpu_scheduler 阻塞 submit。
 - [GPU 调度器更新记录](gpu_scheduler/CHANGELOG.md)与[公共运维入口](../ops/gpu_scheduler/README.md)：本次重大变更、测试/上传范围、实际部署状态和授权边界。上传 release 不等于安装部署。
 
 先核对对应题目进展清单中的授权、协议、资源和原截止。工具安装、组件生成或读取文档都不构成新的实验授权。当前任务写入活动登记表；已完成、过期或被替代条目及时归档，历史证据保留。

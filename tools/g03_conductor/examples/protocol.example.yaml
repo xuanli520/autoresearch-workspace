@@ -1,0 +1,58 @@
+# g03-conductor protocol.yaml 模板（S0 由主会话起草，经 g03_propose(kind=protocol) 提交；S2 自动冻结）。
+# 相对路径均相对题目私有区根目录（--root）。占位符见 tools/g03_conductor/README.md §协议。
+task_id: my_task                       # 必须等于 init --task-id
+metric:
+  name: hidden_lpips
+  direction: minimize                  # maximize | minimize
+  score_formula: "(B - value) / (B - U)"   # 仅展示；conductor 固定用线性归一化 (value-B)/(U-B)
+U:
+  value: 0.10                          # 归一化锚点 U（可达上界）
+  basis: "论文表 3 同协议最优结果 0.10；在看到任何 Reference 结果前确定"   # 事前依据，必填
+margin_sigma: 1                        # 筛选余量 m：筛选需 Δ ≥ (3+m)σ_B
+K: 2                                   # 正式确认上限
+max_protocol_revisions: 1              # 固定 1（类型 C 修订上限）
+seeds:
+  dev: [101, 102, 103]                 # S1/S1.5 诊断与预检
+  screen: [201, 202, 203]              # S4 筛选
+  formal_pool:                         # 第 k 次确认用第 k 组；三组互不重叠
+    - [20260911, 20260912, 20260913, 20260914, 20260915]
+    - [20260921, 20260922, 20260923, 20260924, 20260925]
+budget_per_run:                        # Baseline 与候选完全相同；只增不减
+  max_runtime_seconds: 3600            # 单次 train+score 上限（gpu_scheduler ≤ 43200）
+  epochs: 12
+diag_budget_multipliers: [2]           # S1 训练充分性诊断：加倍预算对照
+data:
+  eval_manifest:
+    path: data/eval.manifest.json
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"   # 必须与实际文件/目录哈希一致
+paths:
+  private: .                           # 必须等于 --root
+  starter: ../starter                  # 公开 Starter；私有区不得在其内
+  scorer: [scorer]                     # 评分器（锁定）；可为列表
+  baseline: baseline                   # Baseline 方法目录（S1 后固定）
+commands:                              # argv 列表；{method_dir} 指向 base 或候选/冻结候选
+  cwd: "{private}"
+  train: ["{python}", "scorer/train.py", "--method-dir", "{method_dir}", "--seed", "{seed}",
+          "--epochs", "{budget.epochs}", "--out", "{out_dir}"]
+  checkpoint: "model.pt"               # 相对 {out_dir} 的 glob，必须恰好匹配 1 个文件
+  score: ["{python}", "scorer/score.py", "--checkpoint", "{checkpoint}", "--data", "{data.eval_manifest}",
+          "--out", "{score_out}"]       # 评分器写 JSON：{metric_key: 数值, 其他质量字段...}
+result:
+  metric_key: lpips
+  rescore_tolerance: 1.0e-6            # 正式运行独立重载复评分的允许差
+aggregate_quality_gate:                # 可选：正式组均值质量门（B 与 R 均须通过）
+  rule: "五轮平均 PSNR >= 27.0 且 SSIM >= 0.78"
+  checks:
+    - {field: psnr_db, op: ">=", value: 27.0}
+    - {field: ssim, op: ">=", value: 0.78}
+validity_declarations:                 # 协议声明，原样进入 summary.validity
+  train_from_initialization: true
+gpu_spec_template:                     # executor=gpu_scheduler 时必填；request_id/command/cwd/deadline 由 conductor 生成
+  owner: my_task/g03
+  job_class: my_task-g03-v1
+  memory_mib: 20000
+  compute_units: 50
+  cpu_cores: 8
+  ram_mib: 16384
+  memory_max_mib: 16384
+  memory_high_mib: 14745

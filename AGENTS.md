@@ -12,6 +12,8 @@
 
 涉及题包校验、双 Agent 长跑、监护或接管时，必须执行 [统一长跑与题包验收规范](双Agent长跑与题目包验收规范.md)；原部署手册仅保留跳转；涉及脚本/目录维护时阅读 [脚本与目录治理](notes/长程Agent脚本与目录治理.md)；冻结与交付时阅读 [最终打包与交付闭环](notes/最终打包与交付闭环.md)。这些是通用执行手册，不替代本题最新授权与真实运行记录。
 
+涉及出题前 G02/G03 准备（Baseline 诊断、可行性预检、正式配对与判定）时，优先使用 [g03_conductor](tools/g03_conductor/README.md)：阶段、统计和停止只由其 Python 账本决定，LLM 不得推进或跳过阶段；它只产出专家侧证据，不替代正式双 Agent 长跑，也不产出 best_method。接入真实 GPU 前同样遵循下方 GPU 调度规则与本题授权。
+
 涉及 GPU 提交、等待、对账或接入变更时，必须阅读 [GPU 调度器正确使用指南](tools/gpu_scheduler/USAGE.md) 与 [接口 README](tools/gpu_scheduler/README.md)，并从 [公共 ops 进展清单](ops/gpu_scheduler/进展清单.md) 核对实际部署/客户端/控制器版本及授权。已上传 release 不等于已部署；不得只换客户端向旧服务调用新协议，也不得因文档更新安装或切换服务。
 
 ## 2. 交付目标
