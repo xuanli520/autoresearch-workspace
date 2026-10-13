@@ -1,0 +1,1744 @@
+{
+  "schema_version": "package-ledger.v1",
+  "mode": "pre_run",
+  "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+  "ledger_scope": "retrospective_read_only_dry_run; not original preparation or new frozen launch",
+  "items": [
+    {
+      "id": "A01",
+      "layer": "A",
+      "target": "optimization_evidence/comparison_summary.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/专家作业说明文档.md",
+          "sha256": "d752f3f5e6d47f9d6451ca29b8a5b3816e8c4c5fccedac825a7e6e95a4dfe101",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "A02",
+      "layer": "A",
+      "target": "workspace",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "历史目录可读不等于本次目标白名单与阶段清单已冻结。",
+      "sources": [
+        {
+          "path": "workspace",
+          "sha256": null,
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence",
+          "sha256": null,
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence",
+          "sha256": null,
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "在新候选包外建立 delivery-checklist.json；只读审查台账不能冒充原制作过程。",
+      "authorization_required": false
+    },
+    {
+      "id": "A03",
+      "layer": "A",
+      "target": "optimization_evidence/训练证据说明.md",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "本次新目标材料映射、转换动作和原件保留计划尚未提供。",
+      "sources": [
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "30fa94bf4c6ff266fb15ffcf2b40b73bfdc559a77477d0e80928ad0c0d9be40f",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/archive-manifest.json",
+          "sha256": "516c63a93a83315a89e81a495a5d5b97e4808dac4efd2ad34a00d9bdf29a9181",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "在包外建立 material-map.json，逐文件记录原样保留或派生映射，不修改原件。",
+      "authorization_required": false
+    },
+    {
+      "id": "A04",
+      "layer": "A",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "30fa94bf4c6ff266fb15ffcf2b40b73bfdc559a77477d0e80928ad0c0d9be40f",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "A05",
+      "layer": "A",
+      "target": "expert_evidence",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [],
+      "action": null,
+      "authorization_required": false,
+      "external_review_target": "@review/qa-ledger.json"
+    },
+    {
+      "id": "A06",
+      "layer": "A",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "b062184da2c928f653ba284e18d75bd10aa0cbd59ff61219b0b40bc02c644c1d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "976f6b56257ae3ef8fb86a347336ec1c480435aded993243112b328f72687fcd",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "B01",
+      "layer": "B",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "八标题完整只支持结构，所缺工作流子项不能由标题自动通过。",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "在新候选题面补清平台真实 anytime/最近有效提交和成功运行口径，沿当前解析器核对；不改变科学协议。",
+      "authorization_required": false
+    },
+    {
+      "id": "B02",
+      "layer": "B",
+      "target": "workspace/harbor_task/task.toml",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/provider/offline_gpu.py",
+          "sha256": "cecb0248004898a327b5bcd20da4916c4ad92430f5f1c6df3f38a37ede66ae3b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "B03",
+      "layer": "B",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "B04",
+      "layer": "B",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false,
+      "external_review_sources": [
+        {
+          "path": "@review/official-statistics.json",
+          "sha256": "3bf8fc9862b5680104058c6fc4dac806922fa394af0c41408271922669e6918b",
+          "origin_run": "existing-frozen-evidence",
+          "version": "historical-current-package"
+        }
+      ]
+    },
+    {
+      "id": "B05",
+      "layer": "B",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/Dockerfile",
+          "sha256": "1a05fd946447136c2153afb1a9033779e211c2013406866d7748fc549ede49d3",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "B06",
+      "layer": "B",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "C01",
+      "layer": "C",
+      "target": "workspace/harbor_task/environment/Dockerfile",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "现有成功构建或复用记录不足以证明默认依赖在干净目标环境自包含可冷构建。",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/environment/Dockerfile",
+          "sha256": "1a05fd946447136c2153afb1a9033779e211c2013406866d7748fc549ede49d3",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/Dockerfile",
+          "sha256": "fad0d9c121c4f1864886dbcf3ace7a3f2c46d536cb88a4968d855aaa6d0d3763",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/build-result.json",
+          "sha256": "bd7c521aa903af32ac14a59f291c51be3c3f7f4374522c2f0d92f1595f8d9c8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "只在新候选补准确依赖来源/digest/构建入口；必要干净构建按核验单另行授权，不运行本题代码。",
+      "authorization_required": false
+    },
+    {
+      "id": "C02",
+      "layer": "C",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/public_assets/dev/manifest.json",
+          "sha256": "a0f35a2b9ef8b07cdf7167aa12ff371864e5b4990fab5c3394db751c188f7fb5",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "C03",
+      "layer": "C",
+      "target": "optimization_evidence/训练证据说明.md",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "30fa94bf4c6ff266fb15ffcf2b40b73bfdc559a77477d0e80928ad0c0d9be40f",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_104729/result.json",
+          "sha256": "f4c6beae8cebc0b8cf6e77074dcfb3651049bff838249db980aa95ff8faf6e31",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/starter/method.py",
+          "sha256": "83812e0569ddc976b5521442b57a151f004e4a3f827bda46132feb43ce60be54",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "C04",
+      "layer": "C",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "当前长程正式研究拟采用的科学硬件/完整反馈profile尚未明确。",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "在冻结运行声明选择有完整科学反馈的已有目标profile；若无符合原协议目标，退回接入准备，不搬用5090质量reward。",
+      "authorization_required": false
+    },
+    {
+      "id": "C05",
+      "layer": "C",
+      "target": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "目录字符串与专家说明不能代替实际挂载设备及完整运行时根核验。",
+      "sources": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/专家作业说明文档.md",
+          "sha256": "d752f3f5e6d47f9d6451ca29b8a5b3816e8c4c5fccedac825a7e6e95a4dfe101",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "补实际findmnt/daemon/containerd/TMPDIR/cache/cgroup回执并绑定当前宿主和provider版本。",
+      "authorization_required": false
+    },
+    {
+      "id": "C06",
+      "layer": "C",
+      "target": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+      "required_stage": "pre_run",
+      "status": "不通过",
+      "reason": "直接legacy GPU注入反证；旧成功Trial不能替代ManagedDockerEnvironment gpu_attachment=cdi回执。",
+      "sources": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/docker-compose.yaml",
+          "sha256": "ae0a9564ae205c71cc1e5eda2ae2886dc72eae9018d30d9b170464877a8d6f14",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "保留历史回执，只在新版本按官方provider准备CDI主/Verifier并留OCI/inspect、void环境、唯一GPU UUID及新CUDA进程初始化探针；需另行授权动态核验。",
+      "authorization_required": true
+    },
+    {
+      "id": "D01",
+      "layer": "D",
+      "target": "workspace/harbor_task/tests/test.sh",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/tests/test.sh",
+          "sha256": "e9e46df4fb15a555ba93466f27829b443789c3a200791a7e9b202317b49a71ce",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "D02",
+      "layer": "D",
+      "target": "workspace/harbor_task/tests/verifier.py",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/test.sh",
+          "sha256": "e9e46df4fb15a555ba93466f27829b443789c3a200791a7e9b202317b49a71ce",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "D03",
+      "layer": "D",
+      "target": "workspace/harbor_task/tests/verifier.py",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "底层分类存在，外部聚合及rankable/基础设施复试语义尚需完整映射。",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/public_assets/runtime/grade.py",
+          "sha256": "5e6b3523aa01ec82714733a10d5f3e730cbf3e6a19083cde8972920135db6b0d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "补失败分类对照表，引用各真实结果与控制器消费字段，不改历史错误状态。",
+      "authorization_required": false
+    },
+    {
+      "id": "D04",
+      "layer": "D",
+      "target": "workspace/harbor_task/tests/hidden_assets",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/tests/hidden_assets",
+          "sha256": null,
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/provider/prepare_verifier.py",
+          "sha256": "9d83b30fbec28bdb656df7bf9c2599be9ad47acf761cc50ae44bc0b54b095ea7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/private_assets.py",
+          "sha256": "aedbe88e95c591d0ada5b0a1cc5611c64fdae322e0c4971311ce03577dfe3eae",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "D05",
+      "layer": "D",
+      "target": "workspace/harbor_task/tests/Dockerfile",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/tests/Dockerfile",
+          "sha256": "fad0d9c121c4f1864886dbcf3ace7a3f2c46d536cb88a4968d855aaa6d0d3763",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "D06",
+      "layer": "D",
+      "target": "workspace/harbor_task/instruction.md",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "需明确35%只是allocator口径还是题面要求的GPU硬cap，现有材料不能承诺物理显存硬隔离。",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "7ee72c8f2daeeff8649de9468e0689cb1fe22d959d25fa392f2d5d19f6fdb923",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/public_assets/runtime/paired_eval.py",
+          "sha256": "3b2759f4a4c13d6cec5ac9906d5c07a24f2ca7f7132bd3a4446a73f0f7ae450d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/provider/offline_gpu.py",
+          "sha256": "cecb0248004898a327b5bcd20da4916c4ad92430f5f1c6df3f38a37ede66ae3b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "在新候选明确可强制资源契约；若要求硬cap，提供不可覆盖provider越限阻止/终止证据，不只引用PyTorch设置。",
+      "authorization_required": true
+    },
+    {
+      "id": "E01",
+      "layer": "E",
+      "target": "optimization_evidence/baseline_runs/seed_104729/result.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_104729/result.json",
+          "sha256": "f4c6beae8cebc0b8cf6e77074dcfb3651049bff838249db980aa95ff8faf6e31",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_104729/result.json",
+          "sha256": "76411399491b2a0673c47db17f5d3cc3429516e557c4ffe497be41317faece6c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_130363/result.json",
+          "sha256": "117f9b361f5da22ddb4fd17b9a850d852b1c61db4eba10a90fad89f330d6bcf6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_130363/result.json",
+          "sha256": "7c0adae657ff2c0131cb007e9fba185351822b0c462609f3a6f559e5e6b022bc",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_155921/result.json",
+          "sha256": "bf7ee28444faa17807984ec1afbeb2b7cf0cbf3a42d240f9b532f9778adb9f8a",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_155921/result.json",
+          "sha256": "1bef7712eede79c5eeb4618f28868d6df786e9577d2692910c4f5b0d18ad93b6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_181081/result.json",
+          "sha256": "52f12bc927d2828b0dceb6894c4ea0e97c5898b6a569c975d69e5f9484cb4cd2",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_181081/result.json",
+          "sha256": "13cdef7065d3746dbc202e6a0940b56604881479cf0cc01898b3c4d6e4fbcb7c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_206369/result.json",
+          "sha256": "d2c02112a2d2ebba8d46f95dfcdb894be400c1928b3e18e5468f945de0a31eff",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_206369/result.json",
+          "sha256": "3bc4da3d5181d3ad63548213fc19760ae4b90dd4bf173980f0756ebd56a46a60",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "E02",
+      "layer": "E",
+      "target": "optimization_evidence/baseline_runs/seed_104729/result.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_104729/result.json",
+          "sha256": "f4c6beae8cebc0b8cf6e77074dcfb3651049bff838249db980aa95ff8faf6e31",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_104729/result.json",
+          "sha256": "76411399491b2a0673c47db17f5d3cc3429516e557c4ffe497be41317faece6c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_130363/result.json",
+          "sha256": "117f9b361f5da22ddb4fd17b9a850d852b1c61db4eba10a90fad89f330d6bcf6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_130363/result.json",
+          "sha256": "7c0adae657ff2c0131cb007e9fba185351822b0c462609f3a6f559e5e6b022bc",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_155921/result.json",
+          "sha256": "bf7ee28444faa17807984ec1afbeb2b7cf0cbf3a42d240f9b532f9778adb9f8a",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_155921/result.json",
+          "sha256": "1bef7712eede79c5eeb4618f28868d6df786e9577d2692910c4f5b0d18ad93b6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_181081/result.json",
+          "sha256": "52f12bc927d2828b0dceb6894c4ea0e97c5898b6a569c975d69e5f9484cb4cd2",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_181081/result.json",
+          "sha256": "13cdef7065d3746dbc202e6a0940b56604881479cf0cc01898b3c4d6e4fbcb7c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_206369/result.json",
+          "sha256": "d2c02112a2d2ebba8d46f95dfcdb894be400c1928b3e18e5468f945de0a31eff",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_206369/result.json",
+          "sha256": "3bc4da3d5181d3ad63548213fc19760ae4b90dd4bf173980f0756ebd56a46a60",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "E03",
+      "layer": "E",
+      "target": "optimization_evidence/baseline_runs/seed_104729/run.log",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_104729/run.log",
+          "sha256": "dc0f48a9f8fd6e61ecccf6f3ad8ae02ea0977150d4a91d796da068eb653772ca",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_104729/run.log",
+          "sha256": "dc0f48a9f8fd6e61ecccf6f3ad8ae02ea0977150d4a91d796da068eb653772ca",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_130363/run.log",
+          "sha256": "9d8b596526d0e8d47fcedcbdce37694ae17ed38e74126cf5ecec667079dd4da8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_130363/run.log",
+          "sha256": "9d8b596526d0e8d47fcedcbdce37694ae17ed38e74126cf5ecec667079dd4da8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_155921/run.log",
+          "sha256": "a8c6375414535621eea97a94a9deabc2b631590c7bbe87d9d176d52608255d8c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_155921/run.log",
+          "sha256": "a8c6375414535621eea97a94a9deabc2b631590c7bbe87d9d176d52608255d8c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_181081/run.log",
+          "sha256": "32c433aa81bca9d53533179ac451f2449138d0884dcb504c759d4ce2f2c0f529",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_181081/run.log",
+          "sha256": "32c433aa81bca9d53533179ac451f2449138d0884dcb504c759d4ce2f2c0f529",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_206369/run.log",
+          "sha256": "167afeb02f47bf74819ad79173f84b4ac4080065c19db8d4628c722d212740be",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_206369/run.log",
+          "sha256": "167afeb02f47bf74819ad79173f84b4ac4080065c19db8d4628c722d212740be",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "E04",
+      "layer": "E",
+      "target": "optimization_evidence/baseline_runs/seed_104729/result.json",
+      "required_stage": "pre_run",
+      "status": "不适用",
+      "reason": "任务非训练，无独立训练checkpoint适用性。",
+      "sources": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_104729/result.json",
+          "sha256": "f4c6beae8cebc0b8cf6e77074dcfb3651049bff838249db980aa95ff8faf6e31",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_104729/result.json",
+          "sha256": "76411399491b2a0673c47db17f5d3cc3429516e557c4ffe497be41317faece6c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_130363/result.json",
+          "sha256": "117f9b361f5da22ddb4fd17b9a850d852b1c61db4eba10a90fad89f330d6bcf6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_130363/result.json",
+          "sha256": "7c0adae657ff2c0131cb007e9fba185351822b0c462609f3a6f559e5e6b022bc",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_155921/result.json",
+          "sha256": "bf7ee28444faa17807984ec1afbeb2b7cf0cbf3a42d240f9b532f9778adb9f8a",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_155921/result.json",
+          "sha256": "1bef7712eede79c5eeb4618f28868d6df786e9577d2692910c4f5b0d18ad93b6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_181081/result.json",
+          "sha256": "52f12bc927d2828b0dceb6894c4ea0e97c5898b6a569c975d69e5f9484cb4cd2",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_181081/result.json",
+          "sha256": "13cdef7065d3746dbc202e6a0940b56604881479cf0cc01898b3c4d6e4fbcb7c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_206369/result.json",
+          "sha256": "d2c02112a2d2ebba8d46f95dfcdb894be400c1928b3e18e5468f945de0a31eff",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_206369/result.json",
+          "sha256": "3bc4da3d5181d3ad63548213fc19760ae4b90dd4bf173980f0756ebd56a46a60",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "E05",
+      "layer": "E",
+      "target": "optimization_evidence/baseline_runs/seed_104729/result.json",
+      "required_stage": "pre_run",
+      "status": "不适用",
+      "reason": "任务非训练；固定预训练资源另由公开数据/模型指纹核对。",
+      "sources": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_104729/result.json",
+          "sha256": "f4c6beae8cebc0b8cf6e77074dcfb3651049bff838249db980aa95ff8faf6e31",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_104729/result.json",
+          "sha256": "76411399491b2a0673c47db17f5d3cc3429516e557c4ffe497be41317faece6c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_130363/result.json",
+          "sha256": "117f9b361f5da22ddb4fd17b9a850d852b1c61db4eba10a90fad89f330d6bcf6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_130363/result.json",
+          "sha256": "7c0adae657ff2c0131cb007e9fba185351822b0c462609f3a6f559e5e6b022bc",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_155921/result.json",
+          "sha256": "bf7ee28444faa17807984ec1afbeb2b7cf0cbf3a42d240f9b532f9778adb9f8a",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_155921/result.json",
+          "sha256": "1bef7712eede79c5eeb4618f28868d6df786e9577d2692910c4f5b0d18ad93b6",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_181081/result.json",
+          "sha256": "52f12bc927d2828b0dceb6894c4ea0e97c5898b6a569c975d69e5f9484cb4cd2",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_181081/result.json",
+          "sha256": "13cdef7065d3746dbc202e6a0940b56604881479cf0cc01898b3c4d6e4fbcb7c",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_206369/result.json",
+          "sha256": "d2c02112a2d2ebba8d46f95dfcdb894be400c1928b3e18e5468f945de0a31eff",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_206369/result.json",
+          "sha256": "3bc4da3d5181d3ad63548213fc19760ae4b90dd4bf173980f0756ebd56a46a60",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "E06",
+      "layer": "E",
+      "target": "optimization_evidence/comparison_summary.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false,
+      "external_review_sources": [
+        {
+          "path": "@review/official-statistics.json",
+          "sha256": "3bf8fc9862b5680104058c6fc4dac806922fa394af0c41408271922669e6918b",
+          "origin_run": "existing-frozen-evidence",
+          "version": "historical-current-package"
+        }
+      ]
+    },
+    {
+      "id": "E07",
+      "layer": "E",
+      "target": "optimization_evidence/comparison_summary.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "30fa94bf4c6ff266fb15ffcf2b40b73bfdc559a77477d0e80928ad0c0d9be40f",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "F01",
+      "layer": "F",
+      "target": "expert_evidence/专家作业说明文档.md",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/专家作业说明文档.md",
+          "sha256": "d752f3f5e6d47f9d6451ca29b8a5b3816e8c4c5fccedac825a7e6e95a4dfe101",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "F02",
+      "layer": "F",
+      "target": "expert_evidence/expert_annotation.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/expert_annotation.json",
+          "sha256": "787e80e13aaaf65447764f58ea636bc3bbf02e9a730ee7d83535e0bddfb1d81b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "F03",
+      "layer": "F",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/scientific_time_attribution.json",
+          "sha256": "12159c7eb574b72218843d06658a2ec7e1818300a41ce226ae5dd48438cb5061",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "F04",
+      "layer": "F",
+      "target": "expert_evidence/trajectory_codex.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "b062184da2c928f653ba284e18d75bd10aa0cbd59ff61219b0b40bc02c644c1d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "976f6b56257ae3ef8fb86a347336ec1c480435aded993243112b328f72687fcd",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/best_method/method.py",
+          "sha256": "66c5c158b336c9feec90be12b8bc0b0e18d5e9fec3afc44b50ff00fc7fcbe1cb",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "F05",
+      "layer": "F",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "G01",
+      "layer": "G",
+      "target": "workspace/harbor_task/environment/Dockerfile",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/environment/Dockerfile",
+          "sha256": "1a05fd946447136c2153afb1a9033779e211c2013406866d7748fc549ede49d3",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/.dockerignore",
+          "sha256": "5b5fd1dac4c4979cc118a36afdc455eca28e90c55f411e5660f6f35c03b2a7c9",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "G02",
+      "layer": "G",
+      "target": "workspace/harbor_task/environment/Dockerfile",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/environment/Dockerfile",
+          "sha256": "1a05fd946447136c2153afb1a9033779e211c2013406866d7748fc549ede49d3",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/public-image-audit.json",
+          "sha256": "70d982a3b4c1c34ac91904a46ce780e9bab2d90341f0f71cfbba0f60899c4f27",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "G03",
+      "layer": "G",
+      "target": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "G04",
+      "layer": "G",
+      "target": "workspace/harbor_task/environment",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/environment",
+          "sha256": null,
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task",
+          "sha256": null,
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/environment/.dockerignore",
+          "sha256": "5b5fd1dac4c4979cc118a36afdc455eca28e90c55f411e5660f6f35c03b2a7c9",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "G05",
+      "layer": "G",
+      "target": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "G06",
+      "layer": "G",
+      "target": "workspace/harbor_task/tests/verifier.py",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/tests/verifier.py",
+          "sha256": "4f0d304d73ccacb355a5a03a77ce4a458ce5a4f679979f97ddedb8996c0f55f8",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/tests/Dockerfile",
+          "sha256": "fad0d9c121c4f1864886dbcf3ace7a3f2c46d536cb88a4968d855aaa6d0d3763",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "H01",
+      "layer": "H",
+      "target": "expert_evidence/revision_evidence/r8/harbor/build-result.json",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "当前版本完整PublicDev/Starter科学反馈链路与运行声明需逐项绑定，NOP不能代替。",
+      "sources": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/build-result.json",
+          "sha256": "bd7c521aa903af32ac14a59f291c51be3c3f7f4374522c2f0d92f1595f8d9c8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "只读映射已有同版完整链路；缺项保留需授权核验，不重跑B/R或训练。",
+      "authorization_required": true
+    },
+    {
+      "id": "H02",
+      "layer": "H",
+      "target": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/reward.json",
+          "sha256": "1a1a0233ad5f3469fbead45813f2a631c537b93d40e99ef74fbdd09770acd80d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/trial.log",
+          "sha256": "5868e519b78e4f2f267470e411fb5e62ab85729eb3642ffbddd64e569930f993",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/test-stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "H03",
+      "layer": "H",
+      "target": "workspace/harbor_task/task.toml",
+      "required_stage": "pre_run",
+      "status": "通过",
+      "reason": "",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/reward.json",
+          "sha256": "1a1a0233ad5f3469fbead45813f2a631c537b93d40e99ef74fbdd09770acd80d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": null,
+      "authorization_required": false
+    },
+    {
+      "id": "H04",
+      "layer": "H",
+      "target": "workspace/harbor_task/task.toml",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "本次digest证明当前原件，不等同完成新的freeze release。",
+      "sources": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/archive-manifest.json",
+          "sha256": "516c63a93a83315a89e81a495a5d5b97e4808dac4efd2ad34a00d9bdf29a9181",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "在新候选包外冻结全清单及带时区时间，登记变更影响，不热改旧包。",
+      "authorization_required": false
+    },
+    {
+      "id": "H05",
+      "layer": "H",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "缺本次授权/版本/双流/资源/时间/接管/证据七类可引用配置；不造新run_id或重置历史截止。",
+      "sources": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "建立包外新冻结配置引用并写launch_authorization=NOT_GRANTED；对接当前research_handoff/gpu_scheduler/gpu_monitor版本。",
+      "authorization_required": false
+    },
+    {
+      "id": "H06",
+      "layer": "H",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "pre_run",
+      "status": "证据不足",
+      "reason": "历史运行本身不能证明当前工具版本全部故障处理合同已就绪。",
+      "sources": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "b062184da2c928f653ba284e18d75bd10aa0cbd59ff61219b0b40bc02c644c1d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "976f6b56257ae3ef8fb86a347336ec1c480435aded993243112b328f72687fcd",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "只读引用未变工具现行公共验收及本题薄配置；新适配缺动态验收列需授权步骤。",
+      "authorization_required": true
+    },
+    {
+      "id": "H07",
+      "layer": "H",
+      "target": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+      "required_stage": "pre_run",
+      "status": "不通过",
+      "reason": "当前长程准入必达项未满足。",
+      "sources": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "origin_run": null,
+          "version": "historical-current-package",
+          "reason": "审查已核对真实内容；此项综合证据可能跨运行，未冒填唯一运行ID。"
+        }
+      ],
+      "action": "回退C/H，保存旧证据；CDI与当前冻结配置补齐后只重审受影响层/终审，不重跑科学。",
+      "authorization_required": false
+    }
+  ],
+  "layers": {},
+  "pending_long_run": [],
+  "stage_bridge": {
+    "historical_long_run_state": "HISTORICAL_COMPLETED_EVIDENCE_PRESENT",
+    "official_qa16_18_21_original_report": null,
+    "reason": "本轮方法复用与来源核对；未运行官方完整人工QA，不伪造其结论。",
+    "new_run_outputs": "NOT_RUN; no new launch authorized"
+  },
+  "schema_mapping": {
+    "status": "VALID_MEASUREMENT + all64 condition complete/quality_valid→valid measurement completed",
+    "task_type": "inference_only + training NOT_APPLICABLE→non_training"
+  }
+}

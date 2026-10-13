@@ -1,0 +1,328 @@
+{
+  "schema_version": "package-layer-review.v1",
+  "mode": "pre_run",
+  "layer": "A",
+  "package_digest": "66295f12d0d090e45a9401d3992abcbeef0783ece6ab479797eea4aa5f5c3018",
+  "definition": {
+    "deliverables": [
+      "三目录现状清点",
+      "已有材料/缺口/来源台账"
+    ],
+    "acceptance": [
+      "按requirements-map固定ID全项读内容，不能由存在/关键词签通过",
+      "原件不改不执行；dynamic缺口保留需授权状态；上游不足不可放行"
+    ],
+    "risks": []
+  },
+  "checks": [
+    {
+      "id": "A01",
+      "status": "通过",
+      "clause": "references/requirements-map.md A01（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "/status,/seeds,/protocol_id"
+        },
+        {
+          "path": "expert_evidence/专家作业说明文档.md",
+          "sha256": "457a5b46fc0530946d1cdf85d1dd9519ca71f72d1deb3ed96ed60f1f1d9910e4",
+          "locator": "Baseline/Reference、自验范围与限制"
+        }
+      ],
+      "fact": "输入为历史已完成专家包；逐 seed 原件、G03 汇总、源码身份与本次只读授权范围可追溯。本次未创建新发布或覆盖原件。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "A02",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md A02（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace",
+          "sha256": null,
+          "locator": "inventory: harbor_task, reference"
+        },
+        {
+          "path": "expert_evidence",
+          "sha256": null,
+          "locator": "inventory: summary, annotation, trajectories, best_method, private historical evidence"
+        },
+        {
+          "path": "optimization_evidence",
+          "sha256": null,
+          "locator": "inventory: baseline_runs, reference_runs, comparison_summary, training evidence"
+        }
+      ],
+      "fact": "根目录严格只有 workspace、expert_evidence、optimization_evidence，workspace 只有 harbor_task/reference；无 AppleDouble。原包没有本次整理要求的必/选/阶段/来源逐项交付清单。",
+      "reason": "历史目录可读不等于本次目标白名单与阶段清单已冻结。",
+      "action": "在新候选包外建立 delivery-checklist.json；只读审查台账不能冒充原制作过程。",
+      "recheck": "逐项 required/optional/conditional/required_stage、目标路径和来源映射。"
+    },
+    {
+      "id": "A03",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md A03（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "逐 seed 原件来源与路径"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/runtime-source-manifest.json",
+          "sha256": "f5b6df42c225b9f851fd35173a56af596c90a1647e5d62015672d0fc53dcd247",
+          "locator": "文件与版本绑定"
+        }
+      ],
+      "fact": "原包已按三目录整理；本次只读盘点确认其现状，但未发生新副本 source→target 转化，不能补签历史初始化。",
+      "reason": "本次新目标材料映射、转换动作和原件保留计划尚未提供。",
+      "action": "在包外建立 material-map.json，逐文件记录原样保留或派生映射，不修改原件。",
+      "recheck": "本题现状映射及所有转换的源/目标哈希。"
+    },
+    {
+      "id": "A04",
+      "status": "通过",
+      "clause": "references/requirements-map.md A04（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "历史结果/限制/来源索引"
+        },
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "已知限制及缺失元数据"
+        }
+      ],
+      "fact": "本次审核将当前 CDI、目标白名单/材料映射、数据盘、模型故障与新启动配置缺口逐项列入包外报告；历史 null 不反推补造。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "A05",
+      "status": "通过",
+      "clause": "references/requirements-map.md A05（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "@review/qa-ledger.json",
+          "sha256": "58c98064bff3a5ce6bc84322bc66fea5613a8230c8239ac0eb1367578fbfdf10",
+          "locator": "/items；审查结束前真实哈希刷新"
+        }
+      ],
+      "fact": "本次新建的包外 qa-ledger 只登记实际审查状态和真实文件哈希、版本、来源；它是 retrospective dry-run ledger，不声称源包原有初始化完整。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "A06",
+      "status": "通过",
+      "clause": "references/requirements-map.md A06（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "/agent_execution,/best_method"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "4a346c5aee6c5f54781bcc701af7a2ce542da0f95d89b6593dbf1e1a59e22cfb",
+          "locator": "/rounds"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "fbbd20444a367817a3c3f4f72a02ed80be1d4dd90dbfbd84b2b5cc11bd746e9e",
+          "locator": "/rounds"
+        }
+      ],
+      "fact": "历史两轨迹和 best_method 已真实存在，保留其真值并核来源；本次没有把它们改为 NOT_RUN，也不为新的未授权长跑填轮数、时长或 run_id。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    }
+  ],
+  "conclusion": "证据不足",
+  "risks": [],
+  "upstream": [],
+  "skill": {
+    "path": "layers/autoresearch-package-layer-a-structure/SKILL.md",
+    "sha256": "d67c7f61aea75d923965d6540b779877d4ba039e35e18c63a63bc0d3c8e3553c"
+  },
+  "source_basis": [
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/requirements-map.md",
+      "sha256": "71d009731b52e1b77e59e70a820eba9060ba4d7295f624cefeee31b412f59ce2",
+      "locator": "逐ID条款全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/audit-protocol.md",
+      "sha256": "b1e973ef8311b6739d506739e529278ef4100ffe17b651d6008319133e49aaf6",
+      "locator": "完整共用审核合同"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/schemas-and-status.md",
+      "sha256": "d3c13d79db48407c333bcddad16aadc1c4267ac80d478069de70c5a5c34958eb",
+      "locator": "完整状态/Schema口径"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/official-qa-bridge.md",
+      "sha256": "27ab2e951a5b2f0e83b393809946b177bac09405578e61462152b8fa5d9a4947",
+      "locator": "方法复用/阶段桥接"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md",
+      "sha256": "8e26ea0d396ecc600874f3a8f9ffd00d304035ecfddfe5d11860b0aa75d987f3",
+      "locator": "当前官方QA方法全文；未宣称完成官方全21项报告"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md",
+      "sha256": "e1ad68530be94c2cfe59ee146a7dd37c614eae537ff85cbda3e7147c0c150d76",
+      "locator": "B01–B08方法全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/baseline-review-method.md",
+      "sha256": "15f996157d18b17209d0640bec24e2c39711fbac682ee7eaac830c7a7a8a568c",
+      "locator": "训练预算/公平性方法"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/submission-format.md",
+      "sha256": "1e49f4a8eb2b9842a225ac6d6efb1b1ad6b557ea14ff1da32bfa42b6170f75a6",
+      "locator": "三目录/result/model/NOP"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/harbor-harness.md",
+      "sha256": "ae7878890146f026970eee053fc3591a6db4966fc859b40f68343bb63fb41b20",
+      "locator": "H01–H06"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/exposure-manifest.md",
+      "sha256": "7f4bba67d2acd2e7732409d04bce76422c0935987eb8a9f42c9e992641929a69",
+      "locator": "最终Agent面/层与探针"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/content_gates.py",
+      "sha256": "baab33a3c4b51b30b93d3136398295673e814b5de67de06a6ce98999c664d29c",
+      "locator": "assess_improvement实际函数接口/源码"
+    }
+  ],
+  "commands": [
+    "cat materials/autoresearch-package-skills/autoresearch-package-finalize/SKILL.md materials/autoresearch-package-skills/layers/*/SKILL.md materials/autoresearch-package-skills/autoresearch-package-final-audit/SKILL.md",
+    "cat materials/autoresearch-package-skills/references/{requirements-map,audit-protocol,schemas-and-status,official-qa-bridge}.md",
+    "python3 -B materials/autoresearch-package-skills/scripts/check_package.py --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --mode pre_run",
+    "python3 -B materials/autoresearch-package-skills/scripts/review_contract.py layer --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --report /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/auto0861/layer-A.json"
+  ],
+  "evidence_roots": [
+    "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch"
+  ],
+  "local_conclusion": "证据不足",
+  "generated_at": "2026-10-12T14:49:38.292582+08:00",
+  "ledger_delta": [
+    {
+      "id": "A01",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "/status,/seeds,/protocol_id"
+        },
+        {
+          "path": "expert_evidence/专家作业说明文档.md",
+          "sha256": "457a5b46fc0530946d1cdf85d1dd9519ca71f72d1deb3ed96ed60f1f1d9910e4",
+          "locator": "Baseline/Reference、自验范围与限制"
+        }
+      ]
+    },
+    {
+      "id": "A02",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "workspace",
+          "sha256": null,
+          "locator": "inventory: harbor_task, reference"
+        },
+        {
+          "path": "expert_evidence",
+          "sha256": null,
+          "locator": "inventory: summary, annotation, trajectories, best_method, private historical evidence"
+        },
+        {
+          "path": "optimization_evidence",
+          "sha256": null,
+          "locator": "inventory: baseline_runs, reference_runs, comparison_summary, training evidence"
+        }
+      ]
+    },
+    {
+      "id": "A03",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "逐 seed 原件来源与路径"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/runtime-source-manifest.json",
+          "sha256": "f5b6df42c225b9f851fd35173a56af596c90a1647e5d62015672d0fc53dcd247",
+          "locator": "文件与版本绑定"
+        }
+      ]
+    },
+    {
+      "id": "A04",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "历史结果/限制/来源索引"
+        },
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "已知限制及缺失元数据"
+        }
+      ]
+    },
+    {
+      "id": "A05",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "@review/qa-ledger.json",
+          "sha256": "58c98064bff3a5ce6bc84322bc66fea5613a8230c8239ac0eb1367578fbfdf10",
+          "locator": "/items；审查结束前真实哈希刷新"
+        }
+      ]
+    },
+    {
+      "id": "A06",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "/agent_execution,/best_method"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "4a346c5aee6c5f54781bcc701af7a2ce542da0f95d89b6593dbf1e1a59e22cfb",
+          "locator": "/rounds"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "fbbd20444a367817a3c3f4f72a02ed80be1d4dd90dbfbd84b2b5cc11bd746e9e",
+          "locator": "/rounds"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "schema_version": "package-review-contract.v1",
+  "read_only": true,
+  "package_digest": "bb69dd738c28e82bf7b917a41a60fc76e245042b1ff05abb3ef5fe8174243e16",
+  "reports": [
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-A.json",
+      "issues": [
+        "缺层报告"
+      ],
+      "conclusion": "证据不足"
+    },
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-B.json",
+      "issues": [
+        "缺层报告"
+      ],
+      "conclusion": "证据不足"
+    },
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-C.json",
+      "issues": [
+        "缺层报告"
+      ],
+      "conclusion": "证据不足"
+    },
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-D.json",
+      "issues": [
+        "缺层报告"
+      ],
+      "conclusion": "证据不足"
+    },
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-E.json",
+      "sha256": "ea49fcca23c60cfce4cafaf51dc50b9d6d662f13c8270e937391ee504c968df8",
+      "layer": "E",
+      "issues": [],
+      "conclusion": "不通过"
+    },
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-F.json",
+      "sha256": "3c4e05076fa8e50916f6991933f70d3d4647e82f6f0f4ababf60830ea757d9f4",
+      "layer": "F",
+      "issues": [],
+      "conclusion": "证据不足"
+    },
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-G.json",
+      "issues": [
+        "缺层报告"
+      ],
+      "conclusion": "证据不足"
+    },
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-H.json",
+      "sha256": "4df9641727b2960e817309f6699a27f856bb134a365e407f9c25d6966eed7c95",
+      "layer": "H",
+      "issues": [],
+      "conclusion": "证据不足"
+    }
+  ],
+  "contract_valid": false,
+  "deterministic_contradictions": [],
+  "layers_allow_admission": false,
+  "final_semantic_admission": null,
+  "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+}

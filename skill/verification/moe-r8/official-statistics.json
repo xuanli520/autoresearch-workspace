@@ -1,0 +1,164 @@
+{
+  "schema_version": "package-statistics-review.v1",
+  "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+  "method": {
+    "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/content_gates.py",
+    "sha256": "baab33a3c4b51b30b93d3136398295673e814b5de67de06a6ce98999c664d29c",
+    "function": "assess_improvement(comparison, assessment)"
+  },
+  "source_results": [
+    {
+      "path": "optimization_evidence/baseline_runs/seed_104729/result.json",
+      "sha256": "f4c6beae8cebc0b8cf6e77074dcfb3651049bff838249db980aa95ff8faf6e31",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/reference_runs/seed_104729/result.json",
+      "sha256": "76411399491b2a0673c47db17f5d3cc3429516e557c4ffe497be41317faece6c",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/baseline_runs/seed_130363/result.json",
+      "sha256": "117f9b361f5da22ddb4fd17b9a850d852b1c61db4eba10a90fad89f330d6bcf6",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/reference_runs/seed_130363/result.json",
+      "sha256": "7c0adae657ff2c0131cb007e9fba185351822b0c462609f3a6f559e5e6b022bc",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/baseline_runs/seed_155921/result.json",
+      "sha256": "bf7ee28444faa17807984ec1afbeb2b7cf0cbf3a42d240f9b532f9778adb9f8a",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/reference_runs/seed_155921/result.json",
+      "sha256": "1bef7712eede79c5eeb4618f28868d6df786e9577d2692910c4f5b0d18ad93b6",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/baseline_runs/seed_181081/result.json",
+      "sha256": "52f12bc927d2828b0dceb6894c4ea0e97c5898b6a569c975d69e5f9484cb4cd2",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/reference_runs/seed_181081/result.json",
+      "sha256": "13cdef7065d3746dbc202e6a0940b56604881479cf0cc01898b3c4d6e4fbcb7c",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/baseline_runs/seed_206369/result.json",
+      "sha256": "d2c02112a2d2ebba8d46f95dfcdb894be400c1928b3e18e5468f945de0a31eff",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    },
+    {
+      "path": "optimization_evidence/reference_runs/seed_206369/result.json",
+      "sha256": "3bc4da3d5181d3ad63548213fc19760ae4b90dd4bf173980f0756ebd56a46a60",
+      "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+    }
+  ],
+  "summary_source": {
+    "path": "optimization_evidence/comparison_summary.json",
+    "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+    "locator": "/baseline_mean,/reference_mean,/baseline_sample_std,/reference_sample_std,/seeds"
+  },
+  "assessment": {
+    "direction": "minimize",
+    "evaluation_mode": "stochastic",
+    "threshold_basis": "规范格式§2.5 / requirements-map E06；Δ>=3σB, ddof=1, Reference归一化[0.15,0.8]",
+    "same_protocol": true,
+    "quality_valid": true,
+    "declared_run_count": 5,
+    "upper_bound": 0,
+    "formal_seeds": [
+      104729,
+      130363,
+      155921,
+      181081,
+      206369
+    ]
+  },
+  "result": {
+    "status": "pass",
+    "computed": {
+      "baseline_mean": 66.90167496352775,
+      "reference_mean": 47.295830494990454,
+      "baseline_sample_std": 0.5243861924838515,
+      "reference_sample_std": 0.19749193645702448,
+      "improvement": 19.6058444685373,
+      "run_count": 5,
+      "sigma_multiplier": 37.38817831123778,
+      "three_sigma_baseline": 1.5731585774515546,
+      "normalized_score": 0.2930546130455726
+    },
+    "failures": [],
+    "missing": [],
+    "warnings": [],
+    "actions": []
+  },
+  "writeback_to_frozen_evidence": false,
+  "input": {
+    "comparison": {
+      "direction": "minimize",
+      "paired_runs": [
+        {
+          "seed": 104729,
+          "baseline": 66.88666566802087,
+          "reference": 47.19190782862732,
+          "baseline_valid": true,
+          "reference_valid": true
+        },
+        {
+          "seed": 130363,
+          "baseline": 66.36898144555069,
+          "reference": 47.05529896262937,
+          "baseline_valid": true,
+          "reference_valid": true
+        },
+        {
+          "seed": 155921,
+          "baseline": 67.74174190977035,
+          "reference": 47.56196903205539,
+          "baseline_valid": true,
+          "reference_valid": true
+        },
+        {
+          "seed": 181081,
+          "baseline": 66.57180160014008,
+          "reference": 47.25295013691835,
+          "baseline_valid": true,
+          "reference_valid": true
+        },
+        {
+          "seed": 206369,
+          "baseline": 66.93918419415678,
+          "reference": 47.417026514721854,
+          "baseline_valid": true,
+          "reference_valid": true
+        }
+      ],
+      "baseline_mean": 66.90167496352775,
+      "reference_mean": 47.295830494990454,
+      "baseline_sample_std": 0.5243861924838515,
+      "reference_sample_std": 0.19749193645702448
+    },
+    "assessment": {
+      "direction": "minimize",
+      "evaluation_mode": "stochastic",
+      "threshold_basis": "规范格式§2.5 / requirements-map E06；Δ>=3σB, ddof=1, Reference归一化[0.15,0.8]",
+      "same_protocol": true,
+      "quality_valid": true,
+      "declared_run_count": 5,
+      "upper_bound": 0,
+      "formal_seeds": [
+        104729,
+        130363,
+        155921,
+        181081,
+        206369
+      ]
+    }
+  },
+  "replay_command": "python3 -B materials/autoresearch-package-skills/verification/recompute_statistics.py --review materials/autoresearch-package-skills/verification/moe-r8/official-statistics.json"
+}

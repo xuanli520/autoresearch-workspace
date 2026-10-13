@@ -1,0 +1,19 @@
+{
+  "schema_version": "package-review-contract.v1",
+  "read_only": true,
+  "package_digest": "bb69dd738c28e82bf7b917a41a60fc76e245042b1ff05abb3ef5fe8174243e16",
+  "reports": [
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-E.json",
+      "sha256": "ea49fcca23c60cfce4cafaf51dc50b9d6d662f13c8270e937391ee504c968df8",
+      "layer": "E",
+      "issues": [],
+      "conclusion": "不通过"
+    }
+  ],
+  "contract_valid": true,
+  "deterministic_contradictions": [],
+  "layers_allow_admission": false,
+  "final_semantic_admission": null,
+  "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+}

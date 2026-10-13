@@ -16,6 +16,14 @@
 !/tools/
 !/extensions/
 
+# G03-to-long-run package skill suite: documentation, checks, and audit records only.
+!/skill/
+/skill/**
+!/skill/**/
+!/skill/**/*.md
+!/skill/**/*.json
+!/skill/**/*.py
+
 # Reusable materials and QA skill documentation/scripts
 /materials/*
 !/materials/README.md
@@ -154,6 +162,8 @@
 **/tests/
 **/test_*.py
 **/*_test.py
+!/skill/scripts/test_pre_run.py
+!/skill/scripts/test_review_contract.py
 !/tools/gpu_monitor/tests/
 /tools/gpu_monitor/tests/*
 !/tools/gpu_monitor/tests/*.py

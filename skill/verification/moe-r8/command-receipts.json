@@ -1,0 +1,480 @@
+{
+  "schema_version": "package-validation-receipts.v1",
+  "scripts": [
+    {
+      "path": "scripts/check_package.py",
+      "sha256": "957056e22d834e45292017b1526c008d905bfea40734fdd36bd5eb299e2302a8"
+    },
+    {
+      "path": "scripts/review_contract.py",
+      "sha256": "711bfc2aeb4fb7989d913ff539627ff1df16544d0be3d1a27bc10b8273560ead"
+    }
+  ],
+  "receipts": [
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/check_package.py",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--mode",
+        "pre_run",
+        "--ledger",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/qa-ledger.json"
+      ],
+      "started_at": "2026-10-12T14:56:37.206543+08:00",
+      "finished_at": "2026-10-12T14:56:40.088861+08:00",
+      "exit_code": 0,
+      "result": {
+        "snapshot": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "summary": {
+          "status": "OBSERVATIONS_ONLY",
+          "finding_counts": {
+            "证据不足": 10
+          },
+          "admission_decision": null
+        },
+        "findings": [
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/baseline_runs/seed_104729/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/baseline_runs/seed_130363/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/baseline_runs/seed_155921/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/baseline_runs/seed_181081/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/baseline_runs/seed_206369/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/reference_runs/seed_104729/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/reference_runs/seed_130363/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/reference_runs/seed_155921/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/reference_runs/seed_181081/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          },
+          {
+            "check": "E02",
+            "layer": "E",
+            "status": "证据不足",
+            "clause": "用户任务§5 E；官方QA references/submission-format.md§2",
+            "path": "optimization_evidence/reference_runs/seed_206369/result.json",
+            "detail": "运行状态采用其他schema；需在台账映射真实状态语义，不自动判失败。"
+          }
+        ]
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-A.json"
+      ],
+      "started_at": "2026-10-12T14:56:40.088875+08:00",
+      "finished_at": "2026-10-12T14:56:41.639190+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-A.json",
+            "sha256": "0a706a42cc442fb2cd96fb063aa342e284c6400954bed5f6ebb03570b95fea9b",
+            "layer": "A",
+            "issues": [],
+            "conclusion": "证据不足"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-B.json"
+      ],
+      "started_at": "2026-10-12T14:56:41.639203+08:00",
+      "finished_at": "2026-10-12T14:56:42.837077+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-B.json",
+            "sha256": "fe49db7c937cdbe3562f3a176c94d4d850b5e01b4930562855c9db4eb26e7637",
+            "layer": "B",
+            "issues": [],
+            "conclusion": "证据不足"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-C.json"
+      ],
+      "started_at": "2026-10-12T14:56:42.837093+08:00",
+      "finished_at": "2026-10-12T14:56:44.030633+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-C.json",
+            "sha256": "7df188253063c638191a8f9c4e24e6cf626c0670061e20f629982702ea9e6fd0",
+            "layer": "C",
+            "issues": [],
+            "conclusion": "不通过"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-D.json"
+      ],
+      "started_at": "2026-10-12T14:56:44.030649+08:00",
+      "finished_at": "2026-10-12T14:56:45.220010+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-D.json",
+            "sha256": "62c5c79060966a2a3e9adaec1033337eb1d6410013e4f3c6293d4fd8ff6c764c",
+            "layer": "D",
+            "issues": [],
+            "conclusion": "证据不足"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-E.json"
+      ],
+      "started_at": "2026-10-12T14:56:45.220023+08:00",
+      "finished_at": "2026-10-12T14:56:46.452409+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-E.json",
+            "sha256": "61aab1aeb36b39d9baf12db269e77b622c0f3ff6cb84fe7dca4e5ee9110e9efc",
+            "layer": "E",
+            "issues": [],
+            "conclusion": "证据不足"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-F.json"
+      ],
+      "started_at": "2026-10-12T14:56:46.452431+08:00",
+      "finished_at": "2026-10-12T14:56:47.678180+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-F.json",
+            "sha256": "07e0b0b70a8f1e0b51bcb9ce2cccbc2cda7b11ad7123ca570a08c8b1743ccae1",
+            "layer": "F",
+            "issues": [],
+            "conclusion": "证据不足"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-G.json"
+      ],
+      "started_at": "2026-10-12T14:56:47.678197+08:00",
+      "finished_at": "2026-10-12T14:56:48.894205+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-G.json",
+            "sha256": "c20a615c91374858dc8bfba7c9a03c596e0f305e7304176607ce6579531416f6",
+            "layer": "G",
+            "issues": [],
+            "conclusion": "证据不足"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "layer",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--report",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-H.json"
+      ],
+      "started_at": "2026-10-12T14:56:48.894223+08:00",
+      "finished_at": "2026-10-12T14:56:50.102027+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-H.json",
+            "sha256": "4c0275e20e010eee696e1c8d12704b50874333f3912b924b90e2d1bc2d97ed5f",
+            "layer": "H",
+            "issues": [],
+            "conclusion": "不通过"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/review_contract.py",
+        "final",
+        "--root",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+        "--reports",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8",
+        "--mode",
+        "pre_run"
+      ],
+      "started_at": "2026-10-12T14:56:50.102044+08:00",
+      "finished_at": "2026-10-12T14:56:51.367934+08:00",
+      "exit_code": 0,
+      "result": {
+        "schema_version": "package-review-contract.v1",
+        "read_only": true,
+        "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+        "reports": [
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-A.json",
+            "sha256": "0a706a42cc442fb2cd96fb063aa342e284c6400954bed5f6ebb03570b95fea9b",
+            "layer": "A",
+            "issues": [],
+            "conclusion": "证据不足"
+          },
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-B.json",
+            "sha256": "fe49db7c937cdbe3562f3a176c94d4d850b5e01b4930562855c9db4eb26e7637",
+            "layer": "B",
+            "issues": [],
+            "conclusion": "证据不足"
+          },
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-C.json",
+            "sha256": "7df188253063c638191a8f9c4e24e6cf626c0670061e20f629982702ea9e6fd0",
+            "layer": "C",
+            "issues": [],
+            "conclusion": "不通过"
+          },
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-D.json",
+            "sha256": "62c5c79060966a2a3e9adaec1033337eb1d6410013e4f3c6293d4fd8ff6c764c",
+            "layer": "D",
+            "issues": [],
+            "conclusion": "证据不足"
+          },
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-E.json",
+            "sha256": "61aab1aeb36b39d9baf12db269e77b622c0f3ff6cb84fe7dca4e5ee9110e9efc",
+            "layer": "E",
+            "issues": [],
+            "conclusion": "证据不足"
+          },
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-F.json",
+            "sha256": "07e0b0b70a8f1e0b51bcb9ce2cccbc2cda7b11ad7123ca570a08c8b1743ccae1",
+            "layer": "F",
+            "issues": [],
+            "conclusion": "证据不足"
+          },
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-G.json",
+            "sha256": "c20a615c91374858dc8bfba7c9a03c596e0f305e7304176607ce6579531416f6",
+            "layer": "G",
+            "issues": [],
+            "conclusion": "证据不足"
+          },
+          {
+            "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-H.json",
+            "sha256": "4c0275e20e010eee696e1c8d12704b50874333f3912b924b90e2d1bc2d97ed5f",
+            "layer": "H",
+            "issues": [],
+            "conclusion": "不通过"
+          }
+        ],
+        "contract_valid": true,
+        "deterministic_contradictions": [],
+        "layers_allow_admission": false,
+        "final_semantic_admission": null,
+        "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+      }
+    }
+  ]
+}

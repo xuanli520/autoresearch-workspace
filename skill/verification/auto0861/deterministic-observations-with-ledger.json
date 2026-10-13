@@ -1,0 +1,18 @@
+{
+  "schema_version": "package-check.v1",
+  "generated_at": "2026-10-12T06:56:35.844184+00:00",
+  "read_only": true,
+  "mode": "pre_run",
+  "snapshot": {
+    "file_count": 441,
+    "bytes": 178331640,
+    "sha256": "66295f12d0d090e45a9401d3992abcbeef0783ece6ab479797eea4aa5f5c3018",
+    "algorithm": "sha256(UTF-8 JSON sorted [[relative_path,bytes,file_sha256]], ensure_ascii=false,separators=(',',':'))"
+  },
+  "findings": [],
+  "summary": {
+    "status": "OBSERVATIONS_ONLY",
+    "finding_counts": {},
+    "admission_decision": null
+  }
+}

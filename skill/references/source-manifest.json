@@ -1,0 +1,214 @@
+{
+  "schema_version": "package-source-manifest.v1",
+  "read_at": "2026-10-12T14:29:10.472655+08:00",
+  "timezone": "Asia/Shanghai",
+  "precedence": "用户任务 > 现行工作区 > 正式格式/官方QA > 示例；source drift重审受影响项",
+  "sources": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "b3fc0e607e26a698baa7c971f9fb5a5fdae5ee42731c567241393c7d772860b6",
+      "bytes": 15262,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "AutoResearch出题全流程指引.md",
+      "sha256": "e8b030a578ebab915b11251fdb6b77667781a3f019876dc9779ee8c6696285ad",
+      "bytes": 51582,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "双Agent长跑与题目包验收规范.md",
+      "sha256": "6898fe53a6a97b4bbff6ffba5deb5eb45d9384945fb1469ba6bbf0cf01272e60",
+      "bytes": 23942,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "notes/最终打包与交付闭环.md",
+      "sha256": "92da5bdd98e9da9c41ebcfba08a9a34109a1ea0799685b630d0bb6d2f956d681",
+      "bytes": 18511,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "notes/长程Agent脚本与目录治理.md",
+      "sha256": "f2d4326f63fe71fb22d987df8466bb3641a36cba51b86f8e116701b20f9724a6",
+      "bytes": 18065,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "notes/项目预热与交付速查.md",
+      "sha256": "52c6efbe43aaaaf0376e6e6017019d748ba5a411f32132c27b348e1a96843b55",
+      "bytes": 6734,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/规范格式/规范格式.md",
+      "sha256": "d517d61bc770fd74e5a5d4fb1221a257da2b9c37882fdcd7e23033337709d042",
+      "bytes": 7441,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/AutoResearch 项目培训/AutoResearch 项目培训.md",
+      "sha256": "ddf6d128e29fa6c518d681cc3a5bd0163757e5d740c446e8c76e1e27085008eb",
+      "bytes": 7231,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/AutoResearch 专家线下标注教程/AutoResearch 专家线下标注教程.md",
+      "sha256": "d8a9eb008fb8d3f469f5d0de441490d16bd79c1cf054a8fa92eb9eb4c8f9b942",
+      "bytes": 58208,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/AutoResearch 专家线下标注教程/AutoResearch 专家线下标注教程｜PCA 双镜像对齐版.md",
+      "sha256": "3e4fbf34788d489dc67d99982459f41dfebb0ce632559e7dc438189e5ebf2ffe",
+      "bytes": 73280,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md",
+      "sha256": "8e26ea0d396ecc600874f3a8f9ffd00d304035ecfddfe5d11860b0aa75d987f3",
+      "bytes": 8181,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/docker-path-contract.md",
+      "sha256": "1745a3267a85d7a2dac6158da85b20e7c0eb6f73e401668f4c97231cf11ac80d",
+      "bytes": 7890,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/exposure-manifest.md",
+      "sha256": "7f4bba67d2acd2e7732409d04bce76422c0935987eb8a9f42c9e992641929a69",
+      "bytes": 1717,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/harbor-harness.md",
+      "sha256": "ae7878890146f026970eee053fc3591a6db4966fc859b40f68343bb63fb41b20",
+      "bytes": 10367,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/implementation-policy.md",
+      "sha256": "8bf21e9a975f62444768b3664ba7f40b437c801f1eecaf56ab0808cd32edc6ad",
+      "bytes": 8551,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/implementation-report.md",
+      "sha256": "2e7298f57f00611855a294d5caa5a1c6ff45d58b69cd0d7a3e3dbfdf9f8cbe63",
+      "bytes": 10661,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/precheck-policy.md",
+      "sha256": "4c84074aa9214f5a6070f038ea1b084d30cd947abac3f4510c1b149432d5550c",
+      "bytes": 314,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/qa-spec.md",
+      "sha256": "7a26bce4dde9283b2f3a289659b93f8a7120096059bebc4306d7514609e5475a",
+      "bytes": 12855,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/report-schema.md",
+      "sha256": "10ff4bbcb2ddf77fd2f5a8b985ff72b7b49b87a11da682f49a6ee687998853fd",
+      "bytes": 2026,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/research-quality.md",
+      "sha256": "3304e93def3129922fe7544bca7fd6a778aa6df1270aa9259ee1ee6ef71d0724",
+      "bytes": 6962,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/source-alignment.md",
+      "sha256": "9cd48cee3720f8ece81c6bb13c814b87545d86d55209df160d82c1c1ee870e4c",
+      "bytes": 5633,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/references/submission-format.md",
+      "sha256": "1e49f4a8eb2b9842a225ac6d6efb1b1ad6b557ea14ff1da32bfa42b6170f75a6",
+      "bytes": 9912,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/audit_collection.py",
+      "sha256": "7e6ab90759c4beb3a864ee2bf592918d14090aa366421f195ff07ce0abfbe94c",
+      "bytes": 18594,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/audit_task.py",
+      "sha256": "c9f59b4f1f8e13f94c16bc1b2b66e7192805ada89b624186ea71fa24c6f43e91",
+      "bytes": 90873,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/content_gates.py",
+      "sha256": "baab33a3c4b51b30b93d3136398295673e814b5de67de06a6ce98999c664d29c",
+      "bytes": 19027,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/docker_paths.py",
+      "sha256": "6ad984082d6f55386f57279d8798e1aa06bd2440ad129e6ae12e404157eda13f",
+      "bytes": 26059,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/harbor_review.py",
+      "sha256": "639e7502a00b0d74867ad13e19a576a0c3471656b3f25f3a59ac691b7177ca6e",
+      "bytes": 25685,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/implementation_review.py",
+      "sha256": "909f4b439f6273f39798a94985e512f9d563a6c036c8f9f545200ae9dc21eacb",
+      "bytes": 40831,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/submission_format.py",
+      "sha256": "039517b860a87ae562ac90190476692bc2991e5e86d1fa0f494c515def4ea8b5",
+      "bytes": 43606,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md",
+      "sha256": "e1ad68530be94c2cfe59ee146a7dd37c614eae537ff85cbda3e7147c0c150d76",
+      "bytes": 10917,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/baseline-review-method.md",
+      "sha256": "15f996157d18b17209d0640bec24e2c39711fbac682ee7eaac830c7a7a8a568c",
+      "bytes": 11267,
+      "role": "normative_or_official_read_only"
+    },
+    {
+      "path": "/Users/jiangmoyan/.codex/skills/.system/skill-creator/SKILL.md",
+      "sha256": "6656e54755638e8efcf275a472b9672eaa8a9a1b9e59dc210e275b03b59e1e66",
+      "role": "creation_workflow"
+    }
+  ],
+  "examples_read_only": [
+    {
+      "path": "autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007",
+      "file_snapshot_sha256": "66295f12d0d090e45a9401d3992abcbeef0783ece6ab479797eea4aa5f5c3018"
+    },
+    {
+      "path": "7686036039178538762/返修交付_20261006-r8/7686036039178538762",
+      "file_snapshot_sha256": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4"
+    },
+    {
+      "path": "7686036040872415002/交付压缩包",
+      "scope": "manifest/index/README only"
+    }
+  ],
+  "source_locations": "requirements-map.md条款定位；官方scripts全文读取，未复制实现"
+}

@@ -1,0 +1,457 @@
+{
+  "schema_version": "package-layer-review.v1",
+  "mode": "pre_run",
+  "layer": "H",
+  "package_digest": "503fea801fdaa2bea3a02fcef871ace8621baba2424f7d2db801bc90daaaf8a4",
+  "definition": {
+    "deliverables": [
+      "当前NOP与完整链路",
+      "冻结运行声明/版本/工具故障与P1–P7"
+    ],
+    "acceptance": [
+      "按requirements-map固定ID全项读内容，不能由存在/关键词签通过",
+      "原件不改不执行；dynamic缺口保留需授权状态；上游不足不可放行"
+    ],
+    "risks": [
+      "历史成功路径不满足当前CDI合同"
+    ]
+  },
+  "checks": [
+    {
+      "id": "H01",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H01（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/build-result.json",
+          "sha256": "bd7c521aa903af32ac14a59f291c51be3c3f7f4374522c2f0d92f1595f8d9c8b",
+          "locator": "构建命令与结果"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "locator": "正常完成/separate/rewards"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "当前/历史验证范围"
+        }
+      ],
+      "fact": "当前包保存构建、NOP/Verifier reward与正常退出回收；r8 5090当前完整分支为公开/私有64条件质量integration；历史4090完整科学评分不能直接变成当前5090科学链路。",
+      "reason": "当前版本完整PublicDev/Starter科学反馈链路与运行声明需逐项绑定，NOP不能代替。",
+      "action": "只读映射已有同版完整链路；缺项保留需授权核验，不重跑B/R或训练。",
+      "recheck": "同版本构建、Starter完整公开反馈、可信reward、退出/回收及protocol/hardware一致证据。"
+    },
+    {
+      "id": "H02",
+      "status": "通过",
+      "clause": "references/requirements-map.md H02（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "locator": "/agent/name,/environment"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "locator": "/finished_at,/exception_info,/verifier_environment_mode,/verifier_result/rewards"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/reward.json",
+          "sha256": "1a1a0233ad5f3469fbead45813f2a631c537b93d40e99ef74fbdd09770acd80d",
+          "locator": "全部数值与native result逐值相等"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/trial.log",
+          "sha256": "5868e519b78e4f2f267470e411fb5e62ab85729eb3642ffbddd64e569930f993",
+          "locator": "同Trial非空"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/test-stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "locator": "实际Verifier调用与结果"
+        }
+      ],
+      "fact": "当前保存Trial agent=nop，构建/Trial正常结束，独立Verifier实际产出有限数值reward；同Trial config/result/reward/非空日志逐值对账。r8 integration只证明Harbor+质量，不宣称科学时延或官方Hidden验收。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "H03",
+      "status": "通过",
+      "clause": "references/requirements-map.md H03（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "locator": "native字段/separate/artifacts"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "locator": "H05 task/provider/verifier配置"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "locator": "H06 same Trial"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/reward.json",
+          "sha256": "1a1a0233ad5f3469fbead45813f2a631c537b93d40e99ef74fbdd09770acd80d",
+          "locator": "H04有效数值"
+        }
+      ],
+      "fact": "按官方Harbor H01–H06方法核目录/Hidden、目标字段、双context/artifacts、真实reward、已有Job配置与NOP同Trial；历史接入材料支持该版本原路径的真实性，现行CDI不符仍以C06/P4阻塞。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "H04",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H04（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "locator": "task version"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/archive-manifest.json",
+          "sha256": "516c63a93a83315a89e81a495a5d5b97e4808dac4efd2ad34a00d9bdf29a9181",
+          "locator": "原始文件sha256/版本"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "locator": "历史冻结依据"
+        }
+      ],
+      "fact": "当前内容可按完整文件清单摘要绑定；既有runtime/archive manifest与版本/时间记录可复核。但新长程前最终白名单/空目录权限/新冻结时间及source drift台账没有完整形成。",
+      "reason": "本次digest证明当前原件，不等同完成新的freeze release。",
+      "action": "在新候选包外冻结全清单及带时区时间，登记变更影响，不热改旧包。",
+      "recheck": "目标白名单、权限/空目录、source manifest、package digest与报告绑定。"
+    },
+    {
+      "id": "H05",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H05（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "/agent_execution/历史run身份"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "locator": "已有历史Job/Trial provider"
+        }
+      ],
+      "fact": "既有双流研究信息和scheduler身份属于历史真实运行；当前新冻结运行声明七类/两份配置与ManagedDockerEnvironment CDI未就绪。",
+      "reason": "缺本次授权/版本/双流/资源/时间/接管/证据七类可引用配置；不造新run_id或重置历史截止。",
+      "action": "建立包外新冻结配置引用并写launch_authorization=NOT_GRANTED；对接当前research_handoff/gpu_scheduler/gpu_monitor版本。",
+      "recheck": "两份配置校验回执、原截止/资源/停止与接管合同。"
+    },
+    {
+      "id": "H06",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H06（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "两模型真实运行/来源"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "b062184da2c928f653ba284e18d75bd10aa0cbd59ff61219b0b40bc02c644c1d",
+          "locator": "真实轮次/失败"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "976f6b56257ae3ef8fb86a347336ec1c480435aded993243112b328f72687fcd",
+          "locator": "真实轮次/失败"
+        }
+      ],
+      "fact": "历史双模型确有实际轨迹和工具使用/评分；本次未取得当前受管工具版本与双模型STOP/超时/失联/上下文恢复/定向外部清理的完整兼容性验收索引。",
+      "reason": "历史运行本身不能证明当前工具版本全部故障处理合同已就绪。",
+      "action": "只读引用未变工具现行公共验收及本题薄配置；新适配缺动态验收列需授权步骤。",
+      "recheck": "工具版本hash、双模型调用/编辑/评分与定向故障/停止回执。"
+    },
+    {
+      "id": "H07",
+      "status": "不通过",
+      "clause": "references/requirements-map.md H07（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "locator": "legacy GPU实际回执"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "locator": "当前GPU资源/版本"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "历史运行与当前边界"
+        }
+      ],
+      "fact": "P1科学证据可挂接且历史产物真实；P4存在已确认legacy GPU注入反证，P2/P3/P5/P6/P7尚有本次准入缺口。历史H06通过不覆盖当前CDI。",
+      "reason": "当前长程准入必达项未满足。",
+      "action": "回退C/H，保存旧证据；CDI与当前冻结配置补齐后只重审受影响层/终审，不重跑科学。",
+      "recheck": "P1–P7及全局一致性复审。"
+    }
+  ],
+  "conclusion": "不通过",
+  "risks": [
+    "历史legacy GPU与现CDI不符",
+    "本次新启动配置未冻结"
+  ],
+  "upstream": [
+    {
+      "layer": "G",
+      "path": "@review/layer-G.json",
+      "sha256": "c20a615c91374858dc8bfba7c9a03c596e0f305e7304176607ce6579531416f6",
+      "conclusion": "证据不足"
+    }
+  ],
+  "skill": {
+    "path": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+    "sha256": "cdfea611f05996275b06f3755f65357dda2bf2d36f7b37632cc861584594ea45"
+  },
+  "source_basis": [
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/requirements-map.md",
+      "sha256": "71d009731b52e1b77e59e70a820eba9060ba4d7295f624cefeee31b412f59ce2",
+      "locator": "逐ID条款全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/audit-protocol.md",
+      "sha256": "b1e973ef8311b6739d506739e529278ef4100ffe17b651d6008319133e49aaf6",
+      "locator": "完整共用审核合同"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/schemas-and-status.md",
+      "sha256": "d3c13d79db48407c333bcddad16aadc1c4267ac80d478069de70c5a5c34958eb",
+      "locator": "完整状态/Schema口径"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/official-qa-bridge.md",
+      "sha256": "27ab2e951a5b2f0e83b393809946b177bac09405578e61462152b8fa5d9a4947",
+      "locator": "方法复用/阶段桥接"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md",
+      "sha256": "8e26ea0d396ecc600874f3a8f9ffd00d304035ecfddfe5d11860b0aa75d987f3",
+      "locator": "当前官方QA方法全文；未宣称完成官方全21项报告"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md",
+      "sha256": "e1ad68530be94c2cfe59ee146a7dd37c614eae537ff85cbda3e7147c0c150d76",
+      "locator": "B01–B08方法全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/baseline-review-method.md",
+      "sha256": "15f996157d18b17209d0640bec24e2c39711fbac682ee7eaac830c7a7a8a568c",
+      "locator": "训练预算/公平性方法"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/submission-format.md",
+      "sha256": "1e49f4a8eb2b9842a225ac6d6efb1b1ad6b557ea14ff1da32bfa42b6170f75a6",
+      "locator": "三目录/result/model/NOP"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/harbor-harness.md",
+      "sha256": "ae7878890146f026970eee053fc3591a6db4966fc859b40f68343bb63fb41b20",
+      "locator": "H01–H06"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/exposure-manifest.md",
+      "sha256": "7f4bba67d2acd2e7732409d04bce76422c0935987eb8a9f42c9e992641929a69",
+      "locator": "最终Agent面/层与探针"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/content_gates.py",
+      "sha256": "baab33a3c4b51b30b93d3136398295673e814b5de67de06a6ce98999c664d29c",
+      "locator": "assess_improvement实际函数接口/源码"
+    }
+  ],
+  "commands": [
+    "cat materials/autoresearch-package-skills/autoresearch-package-finalize/SKILL.md materials/autoresearch-package-skills/layers/*/SKILL.md materials/autoresearch-package-skills/autoresearch-package-final-audit/SKILL.md",
+    "cat materials/autoresearch-package-skills/references/{requirements-map,audit-protocol,schemas-and-status,official-qa-bridge}.md",
+    "python3 -B materials/autoresearch-package-skills/scripts/check_package.py --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762 --mode pre_run",
+    "python3 -B materials/autoresearch-package-skills/scripts/review_contract.py layer --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/7686036039178538762/返修交付_20261006-r8/7686036039178538762 --report /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/moe-r8/layer-H.json"
+  ],
+  "evidence_roots": [
+    "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch"
+  ],
+  "local_conclusion": "不通过",
+  "generated_at": "2026-10-12T14:49:41.663487+08:00",
+  "ledger_delta": [
+    {
+      "id": "H01",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/build-result.json",
+          "sha256": "bd7c521aa903af32ac14a59f291c51be3c3f7f4374522c2f0d92f1595f8d9c8b",
+          "locator": "构建命令与结果"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "locator": "正常完成/separate/rewards"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "当前/历史验证范围"
+        }
+      ]
+    },
+    {
+      "id": "H02",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "locator": "/agent/name,/environment"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "locator": "/finished_at,/exception_info,/verifier_environment_mode,/verifier_result/rewards"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/reward.json",
+          "sha256": "1a1a0233ad5f3469fbead45813f2a631c537b93d40e99ef74fbdd09770acd80d",
+          "locator": "全部数值与native result逐值相等"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/trial.log",
+          "sha256": "5868e519b78e4f2f267470e411fb5e62ab85729eb3642ffbddd64e569930f993",
+          "locator": "同Trial非空"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/test-stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "locator": "实际Verifier调用与结果"
+        }
+      ]
+    },
+    {
+      "id": "H03",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "locator": "native字段/separate/artifacts"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "locator": "H05 task/provider/verifier配置"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/result.json",
+          "sha256": "55b40d83815609b080adc2e2131c52f614732f48b0602da029223fe887198aea",
+          "locator": "H06 same Trial"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/verifier/reward.json",
+          "sha256": "1a1a0233ad5f3469fbead45813f2a631c537b93d40e99ef74fbdd09770acd80d",
+          "locator": "H04有效数值"
+        }
+      ]
+    },
+    {
+      "id": "H04",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "locator": "task version"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/archive-manifest.json",
+          "sha256": "516c63a93a83315a89e81a495a5d5b97e4808dac4efd2ad34a00d9bdf29a9181",
+          "locator": "原始文件sha256/版本"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "b5f34bb62f21787b485baba88a32b345c3883a09c79f2237aae00a64f00463e7",
+          "locator": "历史冻结依据"
+        }
+      ]
+    },
+    {
+      "id": "H05",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "/agent_execution/历史run身份"
+        },
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/jobs/moe-r8-h06-rtx5090-nop-attempt7/task__qwC6rm9/config.json",
+          "sha256": "57191af92184fb39a9512ce08386b5e845f31f421498de99dd88cb34328b8f8b",
+          "locator": "已有历史Job/Trial provider"
+        }
+      ]
+    },
+    {
+      "id": "H06",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "两模型真实运行/来源"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "b062184da2c928f653ba284e18d75bd10aa0cbd59ff61219b0b40bc02c644c1d",
+          "locator": "真实轮次/失败"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "976f6b56257ae3ef8fb86a347336ec1c480435aded993243112b328f72687fcd",
+          "locator": "真实轮次/失败"
+        }
+      ]
+    },
+    {
+      "id": "H07",
+      "status": "不通过",
+      "evidence": [
+        {
+          "path": "expert_evidence/revision_evidence/r8/harbor/ownership/health/task__qwc6rm9__env.start.json",
+          "sha256": "9eef6fedda6997aa51bacf0f812fa7abb6018124c775baa0bda3222f78f2e085",
+          "locator": "legacy GPU实际回执"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "016c6abd612e66b7758ec56a58f2cf96849c4b2a0a0d2533420879f6f6650d6d",
+          "locator": "当前GPU资源/版本"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "f6842bfdcb8d475ec3883950c5d9912ad27c76658f4566b759b8c96e97256110",
+          "locator": "历史运行与当前边界"
+        }
+      ]
+    }
+  ]
+}

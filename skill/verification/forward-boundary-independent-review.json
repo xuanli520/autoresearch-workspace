@@ -1,0 +1,99 @@
+{
+  "schema_version": "package-forward-independent-review.v1",
+  "reviewed_at": "2026-10-12T15:00:37.992330+08:00",
+  "scope": "独立全文读取主/层E/层F/终审及共用协议后，只读审查已有前向夹具与准确argv回执；本轮不再次运行已通过夹具。",
+  "checks": [
+    {
+      "check": "actual_skill_current_hash",
+      "path": "autoresearch-package-finalize/SKILL.md",
+      "match": true
+    },
+    {
+      "check": "actual_skill_current_hash",
+      "path": "layers/autoresearch-package-layer-e-evidence/SKILL.md",
+      "match": true
+    },
+    {
+      "check": "actual_skill_current_hash",
+      "path": "layers/autoresearch-package-layer-f-expert/SKILL.md",
+      "match": true
+    },
+    {
+      "check": "actual_skill_current_hash",
+      "path": "autoresearch-package-final-audit/SKILL.md",
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "pending.json",
+      "expected": true,
+      "actual": true,
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "illegal.json",
+      "expected": false,
+      "actual": false,
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "contract-E.json",
+      "expected": true,
+      "actual": true,
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "contract-F.json",
+      "expected": true,
+      "actual": true,
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "contract-H-unresolved.json",
+      "expected": true,
+      "actual": true,
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "contract-bypass-F.json",
+      "expected": false,
+      "actual": false,
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "contract-illegal-E.json",
+      "expected": false,
+      "actual": false,
+      "match": true
+    },
+    {
+      "check": "expected_boundary",
+      "file": "final-contract.json",
+      "expected": false,
+      "actual": false,
+      "match": true
+    },
+    {
+      "check": "not_run_no_F_failure",
+      "actual": 0,
+      "match": true
+    },
+    {
+      "check": "required_reload_remains_missing",
+      "actual": 6,
+      "match": true
+    }
+  ],
+  "conclusion": "通过",
+  "limits": [
+    "仅合成阶段/调用边界，不鉴定日志或模型真实性",
+    "未启动或动态核验题包",
+    "不允许用合成COMPLETE/非空载荷当科学证据"
+  ]
+}

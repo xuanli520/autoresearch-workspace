@@ -1,0 +1,444 @@
+{
+  "schema_version": "package-suite-validation.v1",
+  "completed_at": "2026-10-12T15:06:12.127554+08:00",
+  "timezone": "Asia/Shanghai",
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "materials/autoresearch-package-skills/scripts/test_pre_run.py"
+      ],
+      "started_at": "2026-10-12T15:06:11.740612+08:00",
+      "ended_at": "2026-10-12T15:06:11.974590+08:00",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "test_artifact_hash_and_path_tamper_rejected (__main__.PreRunTests) ... ok\ntest_bad_layer_types_are_reported_not_crash (__main__.PreRunTests) ... ok\ntest_delivery_tests_hidden_assets_must_be_empty (__main__.PreRunTests) ... ok\ntest_external_symlink_is_not_followed (__main__.PreRunTests) ... ok\ntest_global_pending_consistency (__main__.PreRunTests) ... ok\ntest_hash_is_stable_and_read_only (__main__.PreRunTests) ... ok\ntest_historical_rounds_are_not_forgery (__main__.PreRunTests) ... ok\ntest_historical_rounds_conflict_with_pending_ledger (__main__.PreRunTests) ... ok\ntest_ledger_digest_outside_package (__main__.PreRunTests) ... ok\ntest_ledger_path_escape (__main__.PreRunTests) ... ok\ntest_model_training_enforces_artifact (__main__.PreRunTests) ... ok\ntest_not_run_positive_duration_or_zero_is_false_measurement (__main__.PreRunTests) ... ok\ntest_pending_cannot_claim_typical_round_or_reload (__main__.PreRunTests) ... ok\ntest_pending_cannot_prepopulate_best_method (__main__.PreRunTests) ... ok\ntest_pending_is_allowed (__main__.PreRunTests) ... ok\ntest_pending_validation_cannot_claim_best_passed (__main__.PreRunTests) ... ok\ntest_post_run_cannot_hide_score (__main__.PreRunTests) ... ok\ntest_post_run_id_cannot_hide_different_target (__main__.PreRunTests) ... ok\ntest_pre_submit_rejects_pending (__main__.PreRunTests) ... ok\ntest_private_hidden_allowed_public_hidden_rejected (__main__.PreRunTests) ... ok\ntest_real_missing_is_not_allowed (__main__.PreRunTests) ... ok\ntest_strict_json_nan_duplicate_and_overflow (__main__.PreRunTests) ... ok\ntest_structure_permissions_change_separate_digest (__main__.PreRunTests) ... ok\ntest_untrusted_schema_types_do_not_crash (__main__.PreRunTests) ... ok\n\n----------------------------------------------------------------------\nRan 24 tests in 0.199s\n\nOK\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "materials/autoresearch-package-skills/scripts/test_review_contract.py"
+      ],
+      "started_at": "2026-10-12T15:06:11.974607+08:00",
+      "ended_at": "2026-10-12T15:06:12.079852+08:00",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "test_actual_evidence_changed (__main__.ReviewContractTests) ... ok\ntest_complete_coverage_and_current_hash (__main__.ReviewContractTests) ... ok\ntest_deterministic_missing_cannot_be_hidden_by_reports (__main__.ReviewContractTests) ... ok\ntest_empty_source_commands_locator_rejected (__main__.ReviewContractTests) ... ok\ntest_escape_evidence_rejected (__main__.ReviewContractTests) ... ok\ntest_minimal_fake_upstream_rejected (__main__.ReviewContractTests) ... ok\ntest_missing_check_cannot_pass (__main__.ReviewContractTests) ... ok\ntest_missing_repair_fields_rejected (__main__.ReviewContractTests) ... ok\ntest_missing_skill_receipt_cannot_pass (__main__.ReviewContractTests) ... ok\ntest_pass_without_evidence_rejected (__main__.ReviewContractTests) ... ok\ntest_pre_submit_cannot_reuse_pre_run_upstream (__main__.ReviewContractTests) ... ok\ntest_repeated_layer_cannot_fill_final_slots (__main__.ReviewContractTests) ... ok\ntest_stale_package_cannot_reuse (__main__.ReviewContractTests) ... ok\ntest_upstream_missing_is_insufficient (__main__.ReviewContractTests) ... ok\ntest_verified_upstream_is_required (__main__.ReviewContractTests) ... ok\ntest_waiting_only_allowed_in_postrun_layer (__main__.ReviewContractTests) ... ok\n\n----------------------------------------------------------------------\nRan 16 tests in 0.071s\n\nOK\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "materials/autoresearch-package-skills/scripts/review_contract.py",
+        "routes"
+      ],
+      "started_at": "2026-10-12T15:06:12.079867+08:00",
+      "ended_at": "2026-10-12T15:06:12.109005+08:00",
+      "exit_code": 0,
+      "stdout": "{\n  \"schema_version\": \"package-routing-receipt.v1\",\n  \"suite\": \"/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills\",\n  \"routes\": [\n    {\n      \"layer\": \"A\",\n      \"path\": \"layers/autoresearch-package-layer-a-structure/SKILL.md\",\n      \"checks\": [\n        \"A01\",\n        \"A02\",\n        \"A03\",\n        \"A04\",\n        \"A05\",\n        \"A06\"\n      ],\n      \"sha256\": \"d67c7f61aea75d923965d6540b779877d4ba039e35e18c63a63bc0d3c8e3553c\"\n    },\n    {\n      \"layer\": \"B\",\n      \"path\": \"layers/autoresearch-package-layer-b-contract/SKILL.md\",\n      \"checks\": [\n        \"B01\",\n        \"B02\",\n        \"B03\",\n        \"B04\",\n        \"B05\",\n        \"B06\"\n      ],\n      \"sha256\": \"a3491f4d7be384715330a7e253a2908fd3e2228765c73c3a3268a9d805bfa5fb\"\n    },\n    {\n      \"layer\": \"C\",\n      \"path\": \"layers/autoresearch-package-layer-c-environment/SKILL.md\",\n      \"checks\": [\n        \"C01\",\n        \"C02\",\n        \"C03\",\n        \"C04\",\n        \"C05\",\n        \"C06\"\n      ],\n      \"sha256\": \"28c37a80edb7a17cbc4ad03594c30c52a7fee7c5935d585b042aba4f10ca42c1\"\n    },\n    {\n      \"layer\": \"D\",\n      \"path\": \"layers/autoresearch-package-layer-d-verifier/SKILL.md\",\n      \"checks\": [\n        \"D01\",\n        \"D02\",\n        \"D03\",\n        \"D04\",\n        \"D05\",\n        \"D06\"\n      ],\n      \"sha256\": \"26242f232a19800d086af0c766d94ed46e8ba49d3d104503cba055b966545ce4\"\n    },\n    {\n      \"layer\": \"E\",\n      \"path\": \"layers/autoresearch-package-layer-e-evidence/SKILL.md\",\n      \"checks\": [\n        \"E01\",\n        \"E02\",\n        \"E03\",\n        \"E04\",\n        \"E05\",\n        \"E06\",\n        \"E07\"\n      ],\n      \"sha256\": \"4e83d70bd05ed7540b71e4b108411edf5d1e80b846317864499ac9264856e874\"\n    },\n    {\n      \"layer\": \"F\",\n      \"path\": \"layers/autoresearch-package-layer-f-expert/SKILL.md\",\n      \"checks\": [\n        \"F01\",\n        \"F02\",\n        \"F03\",\n        \"F04\",\n        \"F05\"\n      ],\n      \"sha256\": \"e001b5dfe3001000d05cdd86765b5616497e7416ce50c2874dbd8c5c4b70053f\"\n    },\n    {\n      \"layer\": \"G\",\n      \"path\": \"layers/autoresearch-package-layer-g-isolation/SKILL.md\",\n      \"checks\": [\n        \"G01\",\n        \"G02\",\n        \"G03\",\n        \"G04\",\n        \"G05\",\n        \"G06\"\n      ],\n      \"sha256\": \"20f84dafa59c2da29068b7fe54445966e9c3b08b3e9d25b195f4b2210f4394ac\"\n    },\n    {\n      \"layer\": \"H\",\n      \"path\": \"layers/autoresearch-package-layer-h-freeze/SKILL.md\",\n      \"checks\": [\n        \"H01\",\n        \"H02\",\n        \"H03\",\n        \"H04\",\n        \"H05\",\n        \"H06\",\n        \"H07\"\n      ],\n      \"sha256\": \"cdfea611f05996275b06f3755f65357dda2bf2d36f7b37632cc861584594ea45\"\n    },\n    {\n      \"layer\": \"FINAL\",\n      \"path\": \"autoresearch-package-final-audit/SKILL.md\",\n      \"sha256\": \"e40fe9eccc4952cfd46422ff7e795128e25644433629725195684ba9ae71c89f\"\n    }\n  ]\n}\n",
+      "stderr": ""
+    }
+  ],
+  "python_ast_valid": [
+    "scripts/review_contract.py",
+    "scripts/test_pre_run.py",
+    "scripts/check_package.py",
+    "scripts/test_review_contract.py"
+  ],
+  "local_markdown_links": [
+    {
+      "source": "README.md",
+      "target": "verification/README.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-final-audit/SKILL.md",
+      "target": "../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-final-audit/SKILL.md",
+      "target": "../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-final-audit/SKILL.md",
+      "target": "../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-final-audit/SKILL.md",
+      "target": "../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-final-audit/SKILL.md",
+      "target": "../references/skill-routes.json",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-final-audit/SKILL.md",
+      "target": "../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-g-isolation/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-g-isolation/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-g-isolation/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-g-isolation/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-g-isolation/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-e-evidence/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-e-evidence/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-e-evidence/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-e-evidence/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-e-evidence/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-a-structure/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-a-structure/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-a-structure/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-a-structure/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-a-structure/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-f-expert/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-f-expert/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-f-expert/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-f-expert/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-f-expert/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-b-contract/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-b-contract/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-b-contract/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-b-contract/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-b-contract/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-c-environment/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-c-environment/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-c-environment/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-c-environment/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-c-environment/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-d-verifier/SKILL.md",
+      "target": "../../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-d-verifier/SKILL.md",
+      "target": "../../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-d-verifier/SKILL.md",
+      "target": "../../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-d-verifier/SKILL.md",
+      "target": "../../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "layers/autoresearch-package-layer-d-verifier/SKILL.md",
+      "target": "../../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../references/requirements-map.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../references/delivery-checklist.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../references/schemas-and-status.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../references/audit-protocol.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../references/official-qa-bridge.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../references/authorized-verification.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../references/skill-routes.json",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-a-structure/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-b-contract/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-c-environment/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-d-verifier/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-e-evidence/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-f-expert/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-g-isolation/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../layers/autoresearch-package-layer-h-freeze/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "autoresearch-package-finalize/SKILL.md",
+      "target": "../autoresearch-package-final-audit/SKILL.md",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/summary.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/source-manifest.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/summary.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/pending.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/illegal.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/contract-E.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/contract-F.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/contract-illegal-E.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/contract-bypass-F.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/contract-H-unresolved.json",
+      "exists": true
+    },
+    {
+      "source": "verification/forward-test.md",
+      "target": "forward-test/final-contract.json",
+      "exists": true
+    },
+    {
+      "source": "verification/README.md",
+      "target": "auto0861/dry-run-summary.md",
+      "exists": true
+    },
+    {
+      "source": "verification/README.md",
+      "target": "moe-r8/dry-run-summary.md",
+      "exists": true
+    },
+    {
+      "source": "verification/README.md",
+      "target": "interface-review.md",
+      "exists": true
+    },
+    {
+      "source": "verification/README.md",
+      "target": "forward-test.md",
+      "exists": true
+    }
+  ],
+  "source_drift": [],
+  "scope": "只执行套件工具；不执行任何题包代码；报告写新套件verification"
+}

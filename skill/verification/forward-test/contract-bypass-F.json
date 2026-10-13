@@ -1,0 +1,22 @@
+{
+  "schema_version": "package-review-contract.v1",
+  "read_only": true,
+  "package_digest": "bb69dd738c28e82bf7b917a41a60fc76e245042b1ff05abb3ef5fe8174243e16",
+  "reports": [
+    {
+      "path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/layer-F-bypass.json",
+      "sha256": "70ebc81874e70050b651d6db5ad253bdd853b0484606bd74bcf2f0a508e68a81",
+      "layer": "F",
+      "issues": [
+        "缺前层结论却越层通过",
+        "汇总结论不等于本层逐项与上游的保守判定"
+      ],
+      "conclusion": "证据不足"
+    }
+  ],
+  "contract_valid": false,
+  "deterministic_contradictions": [],
+  "layers_allow_admission": false,
+  "final_semantic_admission": null,
+  "limitation": "仅合同/哈希检查；尚需终审实际核全局一致性、P1–P7和真实事件证据。"
+}

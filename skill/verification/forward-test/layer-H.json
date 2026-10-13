@@ -1,0 +1,168 @@
+{
+  "schema_version": "package-layer-review.v1",
+  "mode": "pre_run",
+  "layer": "H",
+  "package_digest": "bb69dd738c28e82bf7b917a41a60fc76e245042b1ff05abb3ef5fe8174243e16",
+  "skill": {
+    "path": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+    "sha256": "cdfea611f05996275b06f3755f65357dda2bf2d36f7b37632cc861584594ea45"
+  },
+  "source_basis": [
+    {
+      "path": "references/requirements-map.md",
+      "sha256": "71d009731b52e1b77e59e70a820eba9060ba4d7295f624cefeee31b412f59ce2",
+      "locator": "H checks"
+    }
+  ],
+  "commands": [
+    "python3 -B /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/check_package.py --root /var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/package --mode pre_run --ledger /var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/qa-ledger.json; exit=0; output=/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/pending.json; sha256=6ad0a5ea16eda749b2c3033aa9a7772a993f23a5612213c8617038df9c4d6ede"
+  ],
+  "command_receipts": [
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/scripts/check_package.py",
+        "--root",
+        "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/package",
+        "--mode",
+        "pre_run",
+        "--ledger",
+        "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/qa-ledger.json"
+      ],
+      "exit_code": 0,
+      "output_path": "/var/folders/bk/nvp6yjfx7rn86s_pdlxwndqh0000gn/T/zcode-scratch/autoresearch-package-skills/forward-u_dto_bv/review/pending.json",
+      "output_sha256": "6ad0a5ea16eda749b2c3033aa9a7772a993f23a5612213c8617038df9c4d6ede"
+    }
+  ],
+  "definition": {
+    "deliverables": [
+      "合成边界夹具；不得充作正式科研证据"
+    ],
+    "acceptance": [
+      "核待生成边界，严格保留真实缺口"
+    ],
+    "risks": [
+      "夹具不包含可加载真模型"
+    ]
+  },
+  "checks": [
+    {
+      "id": "H01",
+      "status": "证据不足",
+      "clause": "requirements-map.md H01",
+      "evidence": [
+        {
+          "path": "@review/verification-plan.json",
+          "sha256": "23d666ac0e9e84f0a48389a49d864dd91dfc488387fca17c4e8a40ce9ca83e79",
+          "locator": "#status"
+        }
+      ],
+      "fact": "最小合成输入不含当前版本NOP、完整评分与目标工具接入回执",
+      "reason": "COMMAND_UNRESOLVED：无法由实际目标版本与CLI/provider证据得到准确核验命令",
+      "action": "补挂版本/CLI help/源码/现有配置；仅给准确核验单，本轮不执行",
+      "recheck": "真实目标版本与配置/准确argv/同Trial证据"
+    },
+    {
+      "id": "H02",
+      "status": "证据不足",
+      "clause": "requirements-map.md H02",
+      "evidence": [
+        {
+          "path": "@review/verification-plan.json",
+          "sha256": "23d666ac0e9e84f0a48389a49d864dd91dfc488387fca17c4e8a40ce9ca83e79",
+          "locator": "#status"
+        }
+      ],
+      "fact": "最小合成输入不含当前版本NOP、完整评分与目标工具接入回执",
+      "reason": "COMMAND_UNRESOLVED：无法由实际目标版本与CLI/provider证据得到准确核验命令",
+      "action": "补挂版本/CLI help/源码/现有配置；仅给准确核验单，本轮不执行",
+      "recheck": "真实目标版本与配置/准确argv/同Trial证据"
+    },
+    {
+      "id": "H03",
+      "status": "证据不足",
+      "clause": "requirements-map.md H03",
+      "evidence": [
+        {
+          "path": "@review/verification-plan.json",
+          "sha256": "23d666ac0e9e84f0a48389a49d864dd91dfc488387fca17c4e8a40ce9ca83e79",
+          "locator": "#status"
+        }
+      ],
+      "fact": "最小合成输入不含当前版本NOP、完整评分与目标工具接入回执",
+      "reason": "COMMAND_UNRESOLVED：无法由实际目标版本与CLI/provider证据得到准确核验命令",
+      "action": "补挂版本/CLI help/源码/现有配置；仅给准确核验单，本轮不执行",
+      "recheck": "真实目标版本与配置/准确argv/同Trial证据"
+    },
+    {
+      "id": "H04",
+      "status": "证据不足",
+      "clause": "requirements-map.md H04",
+      "evidence": [
+        {
+          "path": "@review/verification-plan.json",
+          "sha256": "23d666ac0e9e84f0a48389a49d864dd91dfc488387fca17c4e8a40ce9ca83e79",
+          "locator": "#status"
+        }
+      ],
+      "fact": "最小合成输入不含当前版本NOP、完整评分与目标工具接入回执",
+      "reason": "COMMAND_UNRESOLVED：无法由实际目标版本与CLI/provider证据得到准确核验命令",
+      "action": "补挂版本/CLI help/源码/现有配置；仅给准确核验单，本轮不执行",
+      "recheck": "真实目标版本与配置/准确argv/同Trial证据"
+    },
+    {
+      "id": "H05",
+      "status": "证据不足",
+      "clause": "requirements-map.md H05",
+      "evidence": [
+        {
+          "path": "@review/verification-plan.json",
+          "sha256": "23d666ac0e9e84f0a48389a49d864dd91dfc488387fca17c4e8a40ce9ca83e79",
+          "locator": "#status"
+        }
+      ],
+      "fact": "最小合成输入不含当前版本NOP、完整评分与目标工具接入回执",
+      "reason": "COMMAND_UNRESOLVED：无法由实际目标版本与CLI/provider证据得到准确核验命令",
+      "action": "补挂版本/CLI help/源码/现有配置；仅给准确核验单，本轮不执行",
+      "recheck": "真实目标版本与配置/准确argv/同Trial证据"
+    },
+    {
+      "id": "H06",
+      "status": "证据不足",
+      "clause": "requirements-map.md H06",
+      "evidence": [
+        {
+          "path": "@review/verification-plan.json",
+          "sha256": "23d666ac0e9e84f0a48389a49d864dd91dfc488387fca17c4e8a40ce9ca83e79",
+          "locator": "#status"
+        }
+      ],
+      "fact": "最小合成输入不含当前版本NOP、完整评分与目标工具接入回执",
+      "reason": "COMMAND_UNRESOLVED：无法由实际目标版本与CLI/provider证据得到准确核验命令",
+      "action": "补挂版本/CLI help/源码/现有配置；仅给准确核验单，本轮不执行",
+      "recheck": "真实目标版本与配置/准确argv/同Trial证据"
+    },
+    {
+      "id": "H07",
+      "status": "证据不足",
+      "clause": "requirements-map.md H07",
+      "evidence": [
+        {
+          "path": "@review/verification-plan.json",
+          "sha256": "23d666ac0e9e84f0a48389a49d864dd91dfc488387fca17c4e8a40ce9ca83e79",
+          "locator": "#status"
+        }
+      ],
+      "fact": "最小合成输入不含当前版本NOP、完整评分与目标工具接入回执",
+      "reason": "COMMAND_UNRESOLVED：无法由实际目标版本与CLI/provider证据得到准确核验命令",
+      "action": "补挂版本/CLI help/源码/现有配置；仅给准确核验单，本轮不执行",
+      "recheck": "真实目标版本与配置/准确argv/同Trial证据"
+    }
+  ],
+  "conclusion": "证据不足",
+  "risks": [
+    "上游报告尚未提供，不能越层放行"
+  ],
+  "upstream": []
+}

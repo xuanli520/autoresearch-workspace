@@ -1,0 +1,457 @@
+{
+  "schema_version": "package-layer-review.v1",
+  "mode": "pre_run",
+  "layer": "H",
+  "package_digest": "66295f12d0d090e45a9401d3992abcbeef0783ece6ab479797eea4aa5f5c3018",
+  "definition": {
+    "deliverables": [
+      "当前NOP与完整链路",
+      "冻结运行声明/版本/工具故障与P1–P7"
+    ],
+    "acceptance": [
+      "按requirements-map固定ID全项读内容，不能由存在/关键词签通过",
+      "原件不改不执行；dynamic缺口保留需授权状态；上游不足不可放行"
+    ],
+    "risks": [
+      "历史成功路径不满足当前CDI合同"
+    ]
+  },
+  "checks": [
+    {
+      "id": "H01",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H01（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/evidence/build-tests.json",
+          "sha256": "a8f3a0f756ed8f20f1bb612e4fe0bc0285b0ebe2d1494430281b5c6c2dd79d9b",
+          "locator": "构建命令与结果"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/result.json",
+          "sha256": "561845bb1f1637836a3bf4be864863f77e78027916bde2597e4e0d4cd20897fd",
+          "locator": "正常完成/separate/rewards"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "当前/历史验证范围"
+        }
+      ],
+      "fact": "当前包保存构建、NOP/Verifier reward与正常退出回收；完整科学B/R及模型重载有真实Trial，但当前版本Starter完整PublicDev构建到回收链路未完整挂接（r5 Starter与r6源码/锚点映射分别保留）。",
+      "reason": "当前版本完整PublicDev/Starter科学反馈链路与运行声明需逐项绑定，NOP不能代替。",
+      "action": "只读映射已有同版完整链路；缺项保留需授权核验，不重跑B/R或训练。",
+      "recheck": "同版本构建、Starter完整公开反馈、可信reward、退出/回收及protocol/hardware一致证据。"
+    },
+    {
+      "id": "H02",
+      "status": "通过",
+      "clause": "references/requirements-map.md H02（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "/agent/name,/environment"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/result.json",
+          "sha256": "561845bb1f1637836a3bf4be864863f77e78027916bde2597e4e0d4cd20897fd",
+          "locator": "/finished_at,/exception_info,/verifier_environment_mode,/verifier_result/rewards"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/verifier/reward.json",
+          "sha256": "ca2fbe3fb287a23ec62698498c8c40a5f624bee4cee29ccb39bbef2e19a29c0b",
+          "locator": "全部数值与native result逐值相等"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/trial.log",
+          "sha256": "5868e519b78e4f2f267470e411fb5e62ab85729eb3642ffbddd64e569930f993",
+          "locator": "同Trial非空"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/verifier/test-stdout.txt",
+          "sha256": "4fc6f9b3ca8e310c764ddc72f658d98872e3b8e4af41c50de7c39f2a80e978a6",
+          "locator": "实际Verifier调用与结果"
+        }
+      ],
+      "fact": "当前保存Trial agent=nop，构建/Trial正常结束，独立Verifier实际产出有限数值reward；同Trial config/result/reward/非空日志逐值对账。本次NOP由submission_source供应专家候选，准确声明所覆盖完整Verifier分支，不把它当Starter完整PublicDev。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "H03",
+      "status": "通过",
+      "clause": "references/requirements-map.md H03（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "native字段/separate/artifacts"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "H05 task/provider/verifier配置"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/result.json",
+          "sha256": "561845bb1f1637836a3bf4be864863f77e78027916bde2597e4e0d4cd20897fd",
+          "locator": "H06 same Trial"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/verifier/reward.json",
+          "sha256": "ca2fbe3fb287a23ec62698498c8c40a5f624bee4cee29ccb39bbef2e19a29c0b",
+          "locator": "H04有效数值"
+        }
+      ],
+      "fact": "按官方Harbor H01–H06方法核目录/Hidden、目标字段、双context/artifacts、真实reward、已有Job配置与NOP同Trial；历史接入材料支持该版本原路径的真实性，现行CDI不符仍以C06/P4阻塞。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "H04",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H04（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "task version"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/runtime-source-manifest.json",
+          "sha256": "f5b6df42c225b9f851fd35173a56af596c90a1647e5d62015672d0fc53dcd247",
+          "locator": "原始文件sha256/版本"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/current-calibration-frozen.json",
+          "sha256": "262d89e2775e0711581dca1031bf0e6d4a1ce17caab440dc5273c740349657e1",
+          "locator": "历史冻结依据"
+        }
+      ],
+      "fact": "当前内容可按完整文件清单摘要绑定；既有runtime/archive manifest与版本/时间记录可复核。但新长程前最终白名单/空目录权限/新冻结时间及source drift台账没有完整形成。",
+      "reason": "本次digest证明当前原件，不等同完成新的freeze release。",
+      "action": "在新候选包外冻结全清单及带时区时间，登记变更影响，不热改旧包。",
+      "recheck": "目标白名单、权限/空目录、source manifest、package digest与报告绑定。"
+    },
+    {
+      "id": "H05",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H05（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "/agent_execution/历史run身份"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "已有历史Job/Trial provider"
+        }
+      ],
+      "fact": "既有双流研究信息和scheduler身份属于历史真实运行；当前新冻结运行声明七类/两份配置与ManagedDockerEnvironment CDI未就绪。",
+      "reason": "缺本次授权/版本/双流/资源/时间/接管/证据七类可引用配置；不造新run_id或重置历史截止。",
+      "action": "建立包外新冻结配置引用并写launch_authorization=NOT_GRANTED；对接当前research_handoff/gpu_scheduler/gpu_monitor版本。",
+      "recheck": "两份配置校验回执、原截止/资源/停止与接管合同。"
+    },
+    {
+      "id": "H06",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md H06（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "两模型真实运行/来源"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "4a346c5aee6c5f54781bcc701af7a2ce542da0f95d89b6593dbf1e1a59e22cfb",
+          "locator": "真实轮次/失败"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "fbbd20444a367817a3c3f4f72a02ed80be1d4dd90dbfbd84b2b5cc11bd746e9e",
+          "locator": "真实轮次/失败"
+        }
+      ],
+      "fact": "历史双模型确有实际轨迹和工具使用/评分；本次未取得当前受管工具版本与双模型STOP/超时/失联/上下文恢复/定向外部清理的完整兼容性验收索引。",
+      "reason": "历史运行本身不能证明当前工具版本全部故障处理合同已就绪。",
+      "action": "只读引用未变工具现行公共验收及本题薄配置；新适配缺动态验收列需授权步骤。",
+      "recheck": "工具版本hash、双模型调用/编辑/评分与定向故障/停止回执。"
+    },
+    {
+      "id": "H07",
+      "status": "不通过",
+      "clause": "references/requirements-map.md H07（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/ownership/reference/private_task__aukukq3__env.inspection",
+          "sha256": "ce3fc7e23c938175337374e9d29d0582e33e5c94928e7ca8d63e7ea14d28aa7e",
+          "locator": "legacy GPU实际回执"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "当前GPU资源/版本"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "历史运行与当前边界"
+        }
+      ],
+      "fact": "P1科学证据可挂接且历史产物真实；P4存在已确认legacy GPU注入反证，P2/P3/P5/P6/P7尚有本次准入缺口。历史H06通过不覆盖当前CDI。",
+      "reason": "当前长程准入必达项未满足。",
+      "action": "回退C/H，保存旧证据；CDI与当前冻结配置补齐后只重审受影响层/终审，不重跑科学。",
+      "recheck": "P1–P7及全局一致性复审。"
+    }
+  ],
+  "conclusion": "不通过",
+  "risks": [
+    "历史legacy GPU与现CDI不符",
+    "本次新启动配置未冻结"
+  ],
+  "upstream": [
+    {
+      "layer": "G",
+      "path": "@review/layer-G.json",
+      "sha256": "5dc54a0b0ddfa36a29f671ae538d6da9f0853c7f4b71fdbf81fa774bb30d95fb",
+      "conclusion": "证据不足"
+    }
+  ],
+  "skill": {
+    "path": "layers/autoresearch-package-layer-h-freeze/SKILL.md",
+    "sha256": "cdfea611f05996275b06f3755f65357dda2bf2d36f7b37632cc861584594ea45"
+  },
+  "source_basis": [
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/requirements-map.md",
+      "sha256": "71d009731b52e1b77e59e70a820eba9060ba4d7295f624cefeee31b412f59ce2",
+      "locator": "逐ID条款全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/audit-protocol.md",
+      "sha256": "b1e973ef8311b6739d506739e529278ef4100ffe17b651d6008319133e49aaf6",
+      "locator": "完整共用审核合同"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/schemas-and-status.md",
+      "sha256": "d3c13d79db48407c333bcddad16aadc1c4267ac80d478069de70c5a5c34958eb",
+      "locator": "完整状态/Schema口径"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/official-qa-bridge.md",
+      "sha256": "27ab2e951a5b2f0e83b393809946b177bac09405578e61462152b8fa5d9a4947",
+      "locator": "方法复用/阶段桥接"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md",
+      "sha256": "8e26ea0d396ecc600874f3a8f9ffd00d304035ecfddfe5d11860b0aa75d987f3",
+      "locator": "当前官方QA方法全文；未宣称完成官方全21项报告"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md",
+      "sha256": "e1ad68530be94c2cfe59ee146a7dd37c614eae537ff85cbda3e7147c0c150d76",
+      "locator": "B01–B08方法全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/baseline-review-method.md",
+      "sha256": "15f996157d18b17209d0640bec24e2c39711fbac682ee7eaac830c7a7a8a568c",
+      "locator": "训练预算/公平性方法"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/submission-format.md",
+      "sha256": "1e49f4a8eb2b9842a225ac6d6efb1b1ad6b557ea14ff1da32bfa42b6170f75a6",
+      "locator": "三目录/result/model/NOP"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/harbor-harness.md",
+      "sha256": "ae7878890146f026970eee053fc3591a6db4966fc859b40f68343bb63fb41b20",
+      "locator": "H01–H06"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/exposure-manifest.md",
+      "sha256": "7f4bba67d2acd2e7732409d04bce76422c0935987eb8a9f42c9e992641929a69",
+      "locator": "最终Agent面/层与探针"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/content_gates.py",
+      "sha256": "baab33a3c4b51b30b93d3136398295673e814b5de67de06a6ce98999c664d29c",
+      "locator": "assess_improvement实际函数接口/源码"
+    }
+  ],
+  "commands": [
+    "cat materials/autoresearch-package-skills/autoresearch-package-finalize/SKILL.md materials/autoresearch-package-skills/layers/*/SKILL.md materials/autoresearch-package-skills/autoresearch-package-final-audit/SKILL.md",
+    "cat materials/autoresearch-package-skills/references/{requirements-map,audit-protocol,schemas-and-status,official-qa-bridge}.md",
+    "python3 -B materials/autoresearch-package-skills/scripts/check_package.py --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --mode pre_run",
+    "python3 -B materials/autoresearch-package-skills/scripts/review_contract.py layer --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --report /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/auto0861/layer-H.json"
+  ],
+  "evidence_roots": [
+    "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch"
+  ],
+  "local_conclusion": "不通过",
+  "generated_at": "2026-10-12T14:49:38.296735+08:00",
+  "ledger_delta": [
+    {
+      "id": "H01",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/evidence/build-tests.json",
+          "sha256": "a8f3a0f756ed8f20f1bb612e4fe0bc0285b0ebe2d1494430281b5c6c2dd79d9b",
+          "locator": "构建命令与结果"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/result.json",
+          "sha256": "561845bb1f1637836a3bf4be864863f77e78027916bde2597e4e0d4cd20897fd",
+          "locator": "正常完成/separate/rewards"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "当前/历史验证范围"
+        }
+      ]
+    },
+    {
+      "id": "H02",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "/agent/name,/environment"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/result.json",
+          "sha256": "561845bb1f1637836a3bf4be864863f77e78027916bde2597e4e0d4cd20897fd",
+          "locator": "/finished_at,/exception_info,/verifier_environment_mode,/verifier_result/rewards"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/verifier/reward.json",
+          "sha256": "ca2fbe3fb287a23ec62698498c8c40a5f624bee4cee29ccb39bbef2e19a29c0b",
+          "locator": "全部数值与native result逐值相等"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/trial.log",
+          "sha256": "5868e519b78e4f2f267470e411fb5e62ab85729eb3642ffbddd64e569930f993",
+          "locator": "同Trial非空"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/verifier/test-stdout.txt",
+          "sha256": "4fc6f9b3ca8e310c764ddc72f658d98872e3b8e4af41c50de7c39f2a80e978a6",
+          "locator": "实际Verifier调用与结果"
+        }
+      ]
+    },
+    {
+      "id": "H03",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "native字段/separate/artifacts"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "H05 task/provider/verifier配置"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/result.json",
+          "sha256": "561845bb1f1637836a3bf4be864863f77e78027916bde2597e4e0d4cd20897fd",
+          "locator": "H06 same Trial"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/verifier/reward.json",
+          "sha256": "ca2fbe3fb287a23ec62698498c8c40a5f624bee4cee29ccb39bbef2e19a29c0b",
+          "locator": "H04有效数值"
+        }
+      ]
+    },
+    {
+      "id": "H04",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "task version"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/runtime-source-manifest.json",
+          "sha256": "f5b6df42c225b9f851fd35173a56af596c90a1647e5d62015672d0fc53dcd247",
+          "locator": "原始文件sha256/版本"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/current-calibration-frozen.json",
+          "sha256": "262d89e2775e0711581dca1031bf0e6d4a1ce17caab440dc5273c740349657e1",
+          "locator": "历史冻结依据"
+        }
+      ]
+    },
+    {
+      "id": "H05",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "/agent_execution/历史run身份"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "已有历史Job/Trial provider"
+        }
+      ]
+    },
+    {
+      "id": "H06",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "两模型真实运行/来源"
+        },
+        {
+          "path": "expert_evidence/trajectory_codex.json",
+          "sha256": "4a346c5aee6c5f54781bcc701af7a2ce542da0f95d89b6593dbf1e1a59e22cfb",
+          "locator": "真实轮次/失败"
+        },
+        {
+          "path": "expert_evidence/trajectory_seed.json",
+          "sha256": "fbbd20444a367817a3c3f4f72a02ed80be1d4dd90dbfbd84b2b5cc11bd746e9e",
+          "locator": "真实轮次/失败"
+        }
+      ]
+    },
+    {
+      "id": "H07",
+      "status": "不通过",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/ownership/reference/private_task__aukukq3__env.inspection",
+          "sha256": "ce3fc7e23c938175337374e9d29d0582e33e5c94928e7ca8d63e7ea14d28aa7e",
+          "locator": "legacy GPU实际回执"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "当前GPU资源/版本"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "历史运行与当前边界"
+        }
+      ]
+    }
+  ]
+}

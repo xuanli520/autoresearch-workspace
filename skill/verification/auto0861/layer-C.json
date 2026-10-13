@@ -1,0 +1,380 @@
+{
+  "schema_version": "package-layer-review.v1",
+  "mode": "pre_run",
+  "layer": "C",
+  "package_digest": "66295f12d0d090e45a9401d3992abcbeef0783ece6ab479797eea4aa5f5c3018",
+  "definition": {
+    "deliverables": [
+      "Docker依赖/数据/Starter",
+      "数据盘/资源/CDI与已有回执"
+    ],
+    "acceptance": [
+      "按requirements-map固定ID全项读内容，不能由存在/关键词签通过",
+      "原件不改不执行；dynamic缺口保留需授权状态；上游不足不可放行"
+    ],
+    "risks": [
+      "历史成功路径不满足当前CDI合同"
+    ]
+  },
+  "checks": [
+    {
+      "id": "C01",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md C01（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/environment/Dockerfile",
+          "sha256": "042f8c03b85fa1a8e90b79f9abe2186b242621ee9234dd8fc2df912f0e2d5076",
+          "locator": "FROM/COPY/依赖安装"
+        },
+        {
+          "path": "workspace/harbor_task/tests/Dockerfile",
+          "sha256": "d9c6cf0bbc6dd838c996861f2b77a3cb7e75251e704f2238cdae151fad05deb0",
+          "locator": "独立Verifier context/依赖"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/evidence/build-tests.json",
+          "sha256": "a8f3a0f756ed8f20f1bb612e4fe0bc0285b0ebe2d1494430281b5c6c2dd79d9b",
+          "locator": "已有构建命令/结果"
+        }
+      ],
+      "fact": "采用 harbor-environment-v1，Agent context=environment，Verifier context=tests；已有真实构建/复用镜像记录。公开镜像被复用，包内未见其当前原生干净冷构建完整日志。",
+      "reason": "现有成功构建或复用记录不足以证明默认依赖在干净目标环境自包含可冷构建。",
+      "action": "只在新候选补准确依赖来源/digest/构建入口；必要干净构建按核验单另行授权，不运行本题代码。",
+      "recheck": "干净构建命令、完整日志、镜像digest与当前版本绑定。"
+    },
+    {
+      "id": "C02",
+      "status": "通过",
+      "clause": "references/requirements-map.md C02（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "cb18f1d23af6eaf4742fec33f9668ff5df1e3949c985fb3833b2d85114f39eec",
+          "locator": "Task Setting/Hard Boundaries"
+        },
+        {
+          "path": "workspace/harbor_task/environment/public_assets/manifest.json",
+          "sha256": "9767cf26df061181794187a98fca8075641d41bd62bc5bbf7e5468d139409693",
+          "locator": "数据版本/指纹"
+        },
+        {
+          "path": "workspace/harbor_task/tests/formal_score.py",
+          "sha256": "289ac94d6d0e08e5f03de998a339146e84f7599fc0a081f1b9d6ba045db83587",
+          "locator": "训练资源/公开与私有评分数据读取"
+        }
+      ],
+      "fact": "公开数据的训练/Dev语义与评分调用链一致，版本/数据哈希保留；正式训练只供 train pairs，Dev不进入训练。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "C03",
+      "status": "通过",
+      "clause": "references/requirements-map.md C03（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "Baseline来源/预算/质量/seed"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/result.json",
+          "sha256": "9f7ae6f5eae2ae0cf588bf7b7d0b0b574aa7d3b097c0bb54c7273769c3496fda",
+          "locator": "/method,/protocol,/training,/execution"
+        },
+        {
+          "path": "workspace/harbor_task/environment/starter/method.py",
+          "sha256": "9bfdf7895b80ced4e0806f78879e494aba75d5e3761dc66e2716853571271e9b",
+          "locator": "Starter源码身份，不执行"
+        }
+      ],
+      "fact": "Starter 与正式 Baseline 身份有源码哈希与原始结果对应；两者同一5000 callback预算，10个真实模型与callback日志齐。按官方 Baseline 方法核角色、实施和公平协议，未以分差推断合理。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "C04",
+      "status": "通过",
+      "clause": "references/requirements-map.md C04（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "cb18f1d23af6eaf4742fec33f9668ff5df1e3949c985fb3833b2d85114f39eec",
+          "locator": "Workflow and Iteration"
+        },
+        {
+          "path": "workspace/harbor_task/environment/runtime/public_run.py",
+          "sha256": "ba6f97e9aca223d802d5e9d9b1329aa9bc2f3db89960d10ed842bae615b5aa63",
+          "locator": "完整五seed入口"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "/agent_execution/typical_round_minutes"
+        }
+      ],
+      "fact": "完整 PublicDev 入口执行固定五 seed；每 seed 600s 上限、总正式3600s窗口与现有真实候选回路的分钟级记录支持≤2h，无用SMOKE顶替完整协议。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "C05",
+      "status": "证据不足",
+      "clause": "references/requirements-map.md C05（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "环境ownership路径与原配置"
+        },
+        {
+          "path": "expert_evidence/专家作业说明文档.md",
+          "sha256": "457a5b46fc0530946d1cdf85d1dd9519ca71f72d1deb3ed96ed60f1f1d9910e4",
+          "locator": "数据盘说明"
+        }
+      ],
+      "fact": "历史记录中的产物/ownership在数据盘路径；包内未集中提供Docker/containerd与所有缓存/临时写入实际设备回执。",
+      "reason": "目录字符串与专家说明不能代替实际挂载设备及完整运行时根核验。",
+      "action": "补实际findmnt/daemon/containerd/TMPDIR/cache/cgroup回执并绑定当前宿主和provider版本。",
+      "recheck": "数据设备、Docker data-root、containerd root/snapshotter、缓存和可写层逐项原始回执。"
+    },
+    {
+      "id": "C06",
+      "status": "不通过",
+      "clause": "references/requirements-map.md C06（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/ownership/reference/private_task__aukukq3__env.inspection",
+          "sha256": "ce3fc7e23c938175337374e9d29d0582e33e5c94928e7ca8d63e7ea14d28aa7e",
+          "locator": "HostConfig.DeviceRequests/Config.Env"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/ownership/reference/private_task__aukukq3__verifier__trial.inspection",
+          "sha256": "cef07d965892581361206a1e6c10cc172bbf09cc4b5b62313dc7e3ca5c88bf11",
+          "locator": "HostConfig.DeviceRequests/Config.Env"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "GPU资源字段"
+        }
+      ],
+      "fact": "当前包保存的 r6 main/verifier inspection.HostConfig.DeviceRequests 明确 Driver=nvidia，Config.Env无 NVIDIA_VISIBLE_DEVICES=void。历史健康观察/退出可追溯，但不满足当前官方 CDI 准入合同。",
+      "reason": "直接legacy GPU注入反证；旧成功Trial不能替代ManagedDockerEnvironment gpu_attachment=cdi回执。",
+      "action": "保留历史回执，只在新版本按官方provider准备CDI主/Verifier并留OCI/inspect、void环境、唯一GPU UUID及新CUDA进程初始化探针；需另行授权动态核验。",
+      "recheck": "当前官方provider版本、CDI配置、main/verifier真实回执和资源/清理材料。"
+    }
+  ],
+  "conclusion": "不通过",
+  "risks": [
+    "历史legacy GPU与现CDI不符",
+    "本次新启动配置未冻结"
+  ],
+  "upstream": [
+    {
+      "layer": "B",
+      "path": "@review/layer-B.json",
+      "sha256": "ef83b3fdaac378b6619ef7b0f68470cd5e420995603c479bf1cf2b7ac5c8bf44",
+      "conclusion": "证据不足"
+    }
+  ],
+  "skill": {
+    "path": "layers/autoresearch-package-layer-c-environment/SKILL.md",
+    "sha256": "28c37a80edb7a17cbc4ad03594c30c52a7fee7c5935d585b042aba4f10ca42c1"
+  },
+  "source_basis": [
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/requirements-map.md",
+      "sha256": "71d009731b52e1b77e59e70a820eba9060ba4d7295f624cefeee31b412f59ce2",
+      "locator": "逐ID条款全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/audit-protocol.md",
+      "sha256": "b1e973ef8311b6739d506739e529278ef4100ffe17b651d6008319133e49aaf6",
+      "locator": "完整共用审核合同"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/schemas-and-status.md",
+      "sha256": "d3c13d79db48407c333bcddad16aadc1c4267ac80d478069de70c5a5c34958eb",
+      "locator": "完整状态/Schema口径"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/official-qa-bridge.md",
+      "sha256": "27ab2e951a5b2f0e83b393809946b177bac09405578e61462152b8fa5d9a4947",
+      "locator": "方法复用/阶段桥接"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md",
+      "sha256": "8e26ea0d396ecc600874f3a8f9ffd00d304035ecfddfe5d11860b0aa75d987f3",
+      "locator": "当前官方QA方法全文；未宣称完成官方全21项报告"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md",
+      "sha256": "e1ad68530be94c2cfe59ee146a7dd37c614eae537ff85cbda3e7147c0c150d76",
+      "locator": "B01–B08方法全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/baseline-review-method.md",
+      "sha256": "15f996157d18b17209d0640bec24e2c39711fbac682ee7eaac830c7a7a8a568c",
+      "locator": "训练预算/公平性方法"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/submission-format.md",
+      "sha256": "1e49f4a8eb2b9842a225ac6d6efb1b1ad6b557ea14ff1da32bfa42b6170f75a6",
+      "locator": "三目录/result/model/NOP"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/harbor-harness.md",
+      "sha256": "ae7878890146f026970eee053fc3591a6db4966fc859b40f68343bb63fb41b20",
+      "locator": "H01–H06"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/exposure-manifest.md",
+      "sha256": "7f4bba67d2acd2e7732409d04bce76422c0935987eb8a9f42c9e992641929a69",
+      "locator": "最终Agent面/层与探针"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/content_gates.py",
+      "sha256": "baab33a3c4b51b30b93d3136398295673e814b5de67de06a6ce98999c664d29c",
+      "locator": "assess_improvement实际函数接口/源码"
+    }
+  ],
+  "commands": [
+    "cat materials/autoresearch-package-skills/autoresearch-package-finalize/SKILL.md materials/autoresearch-package-skills/layers/*/SKILL.md materials/autoresearch-package-skills/autoresearch-package-final-audit/SKILL.md",
+    "cat materials/autoresearch-package-skills/references/{requirements-map,audit-protocol,schemas-and-status,official-qa-bridge}.md",
+    "python3 -B materials/autoresearch-package-skills/scripts/check_package.py --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --mode pre_run",
+    "python3 -B materials/autoresearch-package-skills/scripts/review_contract.py layer --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --report /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/auto0861/layer-C.json"
+  ],
+  "evidence_roots": [
+    "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch"
+  ],
+  "local_conclusion": "不通过",
+  "generated_at": "2026-10-12T14:49:38.293611+08:00",
+  "ledger_delta": [
+    {
+      "id": "C01",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/environment/Dockerfile",
+          "sha256": "042f8c03b85fa1a8e90b79f9abe2186b242621ee9234dd8fc2df912f0e2d5076",
+          "locator": "FROM/COPY/依赖安装"
+        },
+        {
+          "path": "workspace/harbor_task/tests/Dockerfile",
+          "sha256": "d9c6cf0bbc6dd838c996861f2b77a3cb7e75251e704f2238cdae151fad05deb0",
+          "locator": "独立Verifier context/依赖"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/evidence/build-tests.json",
+          "sha256": "a8f3a0f756ed8f20f1bb612e4fe0bc0285b0ebe2d1494430281b5c6c2dd79d9b",
+          "locator": "已有构建命令/结果"
+        }
+      ]
+    },
+    {
+      "id": "C02",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "cb18f1d23af6eaf4742fec33f9668ff5df1e3949c985fb3833b2d85114f39eec",
+          "locator": "Task Setting/Hard Boundaries"
+        },
+        {
+          "path": "workspace/harbor_task/environment/public_assets/manifest.json",
+          "sha256": "9767cf26df061181794187a98fca8075641d41bd62bc5bbf7e5468d139409693",
+          "locator": "数据版本/指纹"
+        },
+        {
+          "path": "workspace/harbor_task/tests/formal_score.py",
+          "sha256": "289ac94d6d0e08e5f03de998a339146e84f7599fc0a081f1b9d6ba045db83587",
+          "locator": "训练资源/公开与私有评分数据读取"
+        }
+      ]
+    },
+    {
+      "id": "C03",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "Baseline来源/预算/质量/seed"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/result.json",
+          "sha256": "9f7ae6f5eae2ae0cf588bf7b7d0b0b574aa7d3b097c0bb54c7273769c3496fda",
+          "locator": "/method,/protocol,/training,/execution"
+        },
+        {
+          "path": "workspace/harbor_task/environment/starter/method.py",
+          "sha256": "9bfdf7895b80ced4e0806f78879e494aba75d5e3761dc66e2716853571271e9b",
+          "locator": "Starter源码身份，不执行"
+        }
+      ]
+    },
+    {
+      "id": "C04",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "workspace/harbor_task/instruction.md",
+          "sha256": "cb18f1d23af6eaf4742fec33f9668ff5df1e3949c985fb3833b2d85114f39eec",
+          "locator": "Workflow and Iteration"
+        },
+        {
+          "path": "workspace/harbor_task/environment/runtime/public_run.py",
+          "sha256": "ba6f97e9aca223d802d5e9d9b1329aa9bc2f3db89960d10ed842bae615b5aa63",
+          "locator": "完整五seed入口"
+        },
+        {
+          "path": "expert_evidence/run_summary.json",
+          "sha256": "108c6b7258b2b81932bbe838d2445b97bc581fb7740c3ac43d47c455ad6e7730",
+          "locator": "/agent_execution/typical_round_minutes"
+        }
+      ]
+    },
+    {
+      "id": "C05",
+      "status": "证据不足",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/jobs/auto0861-r6-qa17-reference/private_task__aUkuKQ3/config.json",
+          "sha256": "6135be65015091ec6999f1c13ed5f91287d22e4a85e2fb703b82a9d5a3b1dfaa",
+          "locator": "环境ownership路径与原配置"
+        },
+        {
+          "path": "expert_evidence/专家作业说明文档.md",
+          "sha256": "457a5b46fc0530946d1cdf85d1dd9519ca71f72d1deb3ed96ed60f1f1d9910e4",
+          "locator": "数据盘说明"
+        }
+      ]
+    },
+    {
+      "id": "C06",
+      "status": "不通过",
+      "evidence": [
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/ownership/reference/private_task__aukukq3__env.inspection",
+          "sha256": "ce3fc7e23c938175337374e9d29d0582e33e5c94928e7ca8d63e7ea14d28aa7e",
+          "locator": "HostConfig.DeviceRequests/Config.Env"
+        },
+        {
+          "path": "expert_evidence/harbor_acceptance/compat-cu128-r6/ownership/reference/private_task__aukukq3__verifier__trial.inspection",
+          "sha256": "cef07d965892581361206a1e6c10cc172bbf09cc4b5b62313dc7e3ca5c88bf11",
+          "locator": "HostConfig.DeviceRequests/Config.Env"
+        },
+        {
+          "path": "workspace/harbor_task/task.toml",
+          "sha256": "9ed224abbfc3159db51e4612a4124a734c96188088126f80c3c7ab6685d9e93c",
+          "locator": "GPU资源字段"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "schema_version": "package-ledger.v1",
+  "mode": "pre_run",
+  "package_digest": "bb69dd738c28e82bf7b917a41a60fc76e245042b1ff05abb3ef5fe8174243e16",
+  "items": [
+    {
+      "id": "trajectory_codex",
+      "layer": "F",
+      "target": "expert_evidence/trajectory_codex.json",
+      "required_stage": "post_run",
+      "status": "合理待生成",
+      "value": null,
+      "reason": "合成请求处于G03后长程前；未运行研究Agent",
+      "sources": [],
+      "action": "另行授权后由真实长程产生",
+      "authorization_required": true
+    },
+    {
+      "id": "trajectory_seed",
+      "layer": "F",
+      "target": "expert_evidence/trajectory_seed.json",
+      "required_stage": "post_run",
+      "status": "合理待生成",
+      "value": null,
+      "reason": "合成请求处于G03后长程前；未运行研究Agent",
+      "sources": [],
+      "action": "另行授权后由真实长程产生",
+      "authorization_required": true
+    },
+    {
+      "id": "best_method",
+      "layer": "F",
+      "target": "expert_evidence/best_method",
+      "required_stage": "post_run",
+      "status": "合理待生成",
+      "value": null,
+      "reason": "合成请求处于G03后长程前；未运行研究Agent",
+      "sources": [],
+      "action": "另行授权后由真实长程产生",
+      "authorization_required": true
+    },
+    {
+      "id": "agent_effective_duration",
+      "layer": "F",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "post_run",
+      "status": "合理待生成",
+      "value": null,
+      "reason": "合成请求处于G03后长程前；未运行研究Agent",
+      "sources": [],
+      "action": "另行授权后由真实长程产生",
+      "authorization_required": true
+    },
+    {
+      "id": "agent_round_count",
+      "layer": "F",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "post_run",
+      "status": "合理待生成",
+      "value": null,
+      "reason": "合成请求处于G03后长程前；未运行研究Agent",
+      "sources": [],
+      "action": "另行授权后由真实长程产生",
+      "authorization_required": true
+    },
+    {
+      "id": "best_method_clean_revalidation",
+      "layer": "F",
+      "target": "expert_evidence/run_summary.json",
+      "required_stage": "post_run",
+      "status": "合理待生成",
+      "value": null,
+      "reason": "合成请求处于G03后长程前；未运行研究Agent",
+      "sources": [],
+      "action": "另行授权后由真实长程产生",
+      "authorization_required": true
+    }
+  ],
+  "layers": {},
+  "pending_long_run": [
+    "trajectory_codex",
+    "trajectory_seed",
+    "best_method",
+    "agent_effective_duration",
+    "agent_round_count",
+    "best_method_clean_revalidation"
+  ]
+}

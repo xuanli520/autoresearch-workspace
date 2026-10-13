@@ -1,0 +1,40 @@
+{
+  "schema_version": "package-check.v1",
+  "read_only": true,
+  "root": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007",
+  "mode": "pre_run",
+  "generated_at": "2026-10-12T06:49:38.261561+00:00",
+  "snapshot": {
+    "file_count": 441,
+    "bytes": 178331640,
+    "sha256": "66295f12d0d090e45a9401d3992abcbeef0783ece6ab479797eea4aa5f5c3018",
+    "algorithm": "sha256(UTF-8 JSON sorted [[relative_path,bytes,file_sha256]], ensure_ascii=false,separators=(',',':'))"
+  },
+  "findings": [
+    {
+      "check": "A05",
+      "layer": "A",
+      "status": "证据不足",
+      "clause": "用户任务§4.1；工作区AGENTS.md§6；打包闭环白名单",
+      "path": "qa-ledger.json",
+      "detail": "未提供新套件台账；历史成品包不因此判失败，需建立映射后才能形成新准入结论。"
+    }
+  ],
+  "summary": {
+    "status": "OBSERVATIONS_ONLY",
+    "finding_counts": {
+      "证据不足": 1
+    },
+    "admission_decision": null
+  },
+  "trajectory_states": {
+    "trajectory_codex": {
+      "state": "HISTORICAL_PRESENT",
+      "round_count": 73
+    },
+    "trajectory_seed": {
+      "state": "HISTORICAL_PRESENT",
+      "round_count": 60
+    }
+  }
+}

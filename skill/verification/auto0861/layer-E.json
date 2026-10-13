@@ -1,0 +1,883 @@
+{
+  "schema_version": "package-layer-review.v1",
+  "mode": "pre_run",
+  "layer": "E",
+  "package_digest": "66295f12d0d090e45a9401d3992abcbeef0783ece6ab479797eea4aa5f5c3018",
+  "definition": {
+    "deliverables": [
+      "全部正式成对seed原件",
+      "模型/重载及只读统计核对"
+    ],
+    "acceptance": [
+      "按requirements-map固定ID全项读内容，不能由存在/关键词签通过",
+      "原件不改不执行；dynamic缺口保留需授权状态；上游不足不可放行"
+    ],
+    "risks": []
+  },
+  "checks": [
+    {
+      "id": "E01",
+      "status": "通过",
+      "clause": "references/requirements-map.md E01（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/result.json",
+          "sha256": "9f7ae6f5eae2ae0cf588bf7b7d0b0b574aa7d3b097c0bb54c7273769c3496fda",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/result.json",
+          "sha256": "bb9e868642ae227b17f5e2fb2580c00ac96676fbc9ed3db2541fd7ec42c163ee",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/result.json",
+          "sha256": "972570fe55a5bb6c5342b926138119780ed73a2b053552273b4e1524e47c3cb2",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/result.json",
+          "sha256": "ce4fb3ae7a848264e33125b96b50eb5cb003c71a0541d34d9745e4472ce8f6da",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/result.json",
+          "sha256": "65745fdad509be39265e0a1fbe1a9ef7a226734a7228f6f47738b5638bae1fe0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/result.json",
+          "sha256": "1121a15a26dd1271260bfd9790322ae0cb8f31bd0ee33b8e0c418f710cead58e",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/result.json",
+          "sha256": "ba6c05ce3b7edd6021ac5354240e6adf8b08b3038557a99d05fe83f83a1a4cfd",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/result.json",
+          "sha256": "a4a63ec687017f495152300d34c8904f14ec74b1505854ca3bda71bd35ed5f51",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/result.json",
+          "sha256": "094fc86f446c7a28dcb0423e6afbc335e628cd1756ffb25be875992bfe1eac08",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/result.json",
+          "sha256": "32193ab891fad7780c08bb54c8ee3a3f3da7502ed10601951e85a67e23ca29f0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "/seeds,/source_results或paired_results"
+        }
+      ],
+      "fact": "baseline/reference 全部正式seed [861, 862, 863, 864, 865] 一一配对，role/seed目录及协议哈希对应；未抽样重命名或剔除共享争用完成记录。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "E02",
+      "status": "通过",
+      "clause": "references/requirements-map.md E02（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/result.json",
+          "sha256": "9f7ae6f5eae2ae0cf588bf7b7d0b0b574aa7d3b097c0bb54c7273769c3496fda",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/result.json",
+          "sha256": "bb9e868642ae227b17f5e2fb2580c00ac96676fbc9ed3db2541fd7ec42c163ee",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/result.json",
+          "sha256": "972570fe55a5bb6c5342b926138119780ed73a2b053552273b4e1524e47c3cb2",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/result.json",
+          "sha256": "ce4fb3ae7a848264e33125b96b50eb5cb003c71a0541d34d9745e4472ce8f6da",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/result.json",
+          "sha256": "65745fdad509be39265e0a1fbe1a9ef7a226734a7228f6f47738b5638bae1fe0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/result.json",
+          "sha256": "1121a15a26dd1271260bfd9790322ae0cb8f31bd0ee33b8e0c418f710cead58e",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/result.json",
+          "sha256": "ba6c05ce3b7edd6021ac5354240e6adf8b08b3038557a99d05fe83f83a1a4cfd",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/result.json",
+          "sha256": "a4a63ec687017f495152300d34c8904f14ec74b1505854ca3bda71bd35ed5f51",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/result.json",
+          "sha256": "094fc86f446c7a28dcb0423e6afbc335e628cd1756ffb25be875992bfe1eac08",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/result.json",
+          "sha256": "32193ab891fad7780c08bb54c8ee3a3f3da7502ed10601951e85a67e23ca29f0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        }
+      ],
+      "fact": "所有10个result最小顶层字段齐，源码/协议/原始metrics/quality/执行/产物可追溯；不可恢复train argv/PID/时戳为null且有明确缺失原因和替代Trial/callback回执。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "E03",
+      "status": "通过",
+      "clause": "references/requirements-map.md E03（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/run.log",
+          "sha256": "0989f2d2e58764996dd2e0e58b5a6e2515540a75bcb5bdf8d1ef125d41f70733",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/run.log",
+          "sha256": "c34c9a6da20e1445fcde72b3abb49575e571228c798a7d1c60812402f15fe6ba",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/run.log",
+          "sha256": "0de42c8c4907337f6474c938183026a1ca535fbb65f89afc155a7ff9c5db8089",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/run.log",
+          "sha256": "e2c559b8d691687ecc1b52078ba5563fb12030b6f66ade6023bddffe70fe24dc",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/run.log",
+          "sha256": "d638490882c0d97773ad7e9a2f2e18f1ccdf75f4464e51747325b1eedb5aacf9",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/run.log",
+          "sha256": "4dab7cff37b05d19943254c1ddb5092491b67f7d7576a6eb6b5b68b7af48b2fb",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/run.log",
+          "sha256": "121045d561d41a6e9e435d452e9bc41f9826764a6219b0c9e0f996e3927e5171",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/run.log",
+          "sha256": "80af3cdc7b318706935b34fa3ff3b43b4a25a4f2cfaf918004a499d8b69c76d5",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/run.log",
+          "sha256": "33728ad92594102de6954741dea6764106840f163e66c2b8861655dbaf35d6f5",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/run.log",
+          "sha256": "d9115682806361b6a1543f3f99b43882c41bf51e9e3b72526de991fdd469a954",
+          "locator": "原始完整callback JSONL，5000行"
+        }
+      ],
+      "fact": "10份run.log保留原始逐callback/逐condition记录；与native Trial callback hash逐一相同，不以空train.log判缺失。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "E04",
+      "status": "通过",
+      "clause": "references/requirements-map.md E04（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/model/artifact.json",
+          "sha256": "fa17a4a60f8a1fd8f3639077a04caef66fc7f8efdec452b8009c3e81d963fa86",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/model/model.safetensors",
+          "sha256": "2007e30975bf1db11f8a9776a1ef5576f744953b6e329a9c15cdc60d612ce478",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/model/artifact.json",
+          "sha256": "b79076d83f4f50bdf143aab7e79954a260d4e8edfe31a6682673c2399178d9de",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/model/model.safetensors",
+          "sha256": "ac655ee06fdb51e768f534d64a393f6d101c4c3eb633231cc52bc5816d0c7648",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/model/artifact.json",
+          "sha256": "fb34326935b943827dcfa281e57d57973b3fc2625c3b5a345e2509bfd02344e9",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/model/model.safetensors",
+          "sha256": "4e47225d012dc93318f5c0a5b8d7719ba5169175bcc8c03d3a13648af1f660bc",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/model/artifact.json",
+          "sha256": "02d4286c42ed0a10126bf3b69965211f3ba4562e94287c7d9527cf8d8cbfee86",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/model/model.safetensors",
+          "sha256": "3dd6bdd3024b0f2ce3c1f9d77ad6c11b8822487f6360bc71ff0b9437760c11ca",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/model/artifact.json",
+          "sha256": "cd9e303dfac7d3d6ceda92135b5c495120ba767bf27c51a29acc71000c558dd8",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/model/model.safetensors",
+          "sha256": "8972fc054ed83de1bd77322caaa777f773b7425a2e5f85af8305654cbb7ea8d8",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/model/artifact.json",
+          "sha256": "c9d83a0cdf06c5c1718275919b461a331b26996c2ba9f858d0200d520a6e7602",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/model/model.safetensors",
+          "sha256": "b96dbbe760648d9ffe8cf8d33002ee62ad1dbdc1f3158f8216c238555bc21e17",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/model/artifact.json",
+          "sha256": "7aa478fd0c9902b18f87d6a79dddf124330e7d9996347b3363643489dd82983b",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/model/model.safetensors",
+          "sha256": "fec729816baa48bdcdb145f8b7778d37a89de5152830ce7ee354ebb84f0a709d",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/model/artifact.json",
+          "sha256": "ce27ba4adf685f63b387aa34cb2ea9802d2ec7e4564794cc133c272d4adf58c2",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/model/model.safetensors",
+          "sha256": "cfcc188dcec0840d69f856bf0fdfa774d20da06bb864b667f0809e91a9713725",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/model/artifact.json",
+          "sha256": "3404ce5b0f803e94674c17f39ffe98e38ca198b3bfebeb509cea3d63910c81fc",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/model/model.safetensors",
+          "sha256": "78410ab794ff44c3bec3b45072c9656f93a28b9eaa5ba0f9e74379bace6e5339",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/model/artifact.json",
+          "sha256": "1c37d3061cff5415c912d523f0164d097ff47e367a3188d5fe29e1f3a0059966",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/model/model.safetensors",
+          "sha256": "ab3bd58aaa7987610257b2dc503d5511d661cc0520d26b170eaf0f96e65183a9",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        }
+      ],
+      "fact": "10个真实safetensors各3240676 bytes；artifact/result路径、SHA256、role/seed/method哈希与现有原模型一致。只读字节hash，不加载权重。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "E05",
+      "status": "通过",
+      "clause": "references/requirements-map.md E05（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/model/reload.log",
+          "sha256": "7b8930df9ce733ed6aaf7bf8604ef94af2bc7ee24c8e0466743e3b7531b10c98",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/model/reload.log",
+          "sha256": "63b0a747f438111b186ab15023f0af7ce0492f4d757c2f225af6f971004abf49",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/model/reload.log",
+          "sha256": "b2b56f295188bccaf678909add3716b9e1f7fb1795b1598dc036e769af567568",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/model/reload.log",
+          "sha256": "df8da1f5a91a0f7e1b789be48cef9a12ad04c3005bc461bc42d3600b09f99e50",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/model/reload.log",
+          "sha256": "78768236933c7614d7dd2ecd934ad66fb8b3cb6cca4045e168a1d3548add1ed1",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/model/reload.log",
+          "sha256": "d6b1e16cf54b86871ad9bc3bc97d3e4a83eeaad7582b1301fb2300a646e6a7e1",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/model/reload.log",
+          "sha256": "88a8f624e8ca771c22fc51edf3da9fea1eea6526546e300c9c9aab5718864b1a",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/model/reload.log",
+          "sha256": "e8bfeb6bfdbc0abb9f04c56a1d1ecfcdc80ca01891d4116c0d196ecd3bea0823",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/model/reload.log",
+          "sha256": "1ce7b2623fd4405b54b5f4de12d5239e1ced8e281b74c4a8a1a624c06ba1f410",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/model/reload.log",
+          "sha256": "c186664072b1c4db71b41ea92034129dcc9d84f4daa4eb197d2d8ceb5b683ccb",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "workspace/harbor_task/tests/formal_score.py",
+          "sha256": "289ac94d6d0e08e5f03de998a339146e84f7599fc0a081f1b9d6ba045db83587",
+          "locator": "subprocess tensor_score新进程/120s/reload hash与分数验证"
+        }
+      ],
+      "fact": "10个非空reload日志各包含实际新进程重载与复评分记录：对应reload PID 81/98/115/132/149，checkpoint hash匹配、raw_score_matches=true；不把单纯非空当重载证据。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "E06",
+      "status": "通过",
+      "clause": "references/requirements-map.md E06（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "聚合与锚点"
+        },
+        {
+          "path": "@review/official-statistics.json",
+          "sha256": "75ee5494850e61f7a4020f9eea0ca973c31e5406e756137f907dbb033322fdb9",
+          "locator": "/method,/result/computed,/result/status"
+        }
+      ],
+      "fact": "调用官方content_gates.assess_improvement，5对真实原始metrics只读复算均值、n−1样本std、改善方向、3σ与归一化，结果pass且与冻结summary一致；未写回原件。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    },
+    {
+      "id": "E07",
+      "status": "通过",
+      "clause": "references/requirements-map.md E07（内含原规范/教程/规则/官方QA出处）",
+      "evidence": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "/status、全正式pair"
+        },
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "完整性/历史失败范围"
+        }
+      ],
+      "fact": "全部正式五对运行有效、质量门齐；模型及真实独立重载全部对应，COMPLETE成立。历史失败/旧环境原件明确归档，未混入当前正式比较。",
+      "reason": "",
+      "action": null,
+      "recheck": null
+    }
+  ],
+  "conclusion": "证据不足",
+  "risks": [],
+  "upstream": [
+    {
+      "layer": "D",
+      "path": "@review/layer-D.json",
+      "sha256": "537ac81dcc4778a42ffb13c362406153e50bccbdc969ed19173a59b795e72dcd",
+      "conclusion": "证据不足"
+    }
+  ],
+  "skill": {
+    "path": "layers/autoresearch-package-layer-e-evidence/SKILL.md",
+    "sha256": "4e83d70bd05ed7540b71e4b108411edf5d1e80b846317864499ac9264856e874"
+  },
+  "source_basis": [
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/requirements-map.md",
+      "sha256": "71d009731b52e1b77e59e70a820eba9060ba4d7295f624cefeee31b412f59ce2",
+      "locator": "逐ID条款全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/audit-protocol.md",
+      "sha256": "b1e973ef8311b6739d506739e529278ef4100ffe17b651d6008319133e49aaf6",
+      "locator": "完整共用审核合同"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/schemas-and-status.md",
+      "sha256": "d3c13d79db48407c333bcddad16aadc1c4267ac80d478069de70c5a5c34958eb",
+      "locator": "完整状态/Schema口径"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/references/official-qa-bridge.md",
+      "sha256": "27ab2e951a5b2f0e83b393809946b177bac09405578e61462152b8fa5d9a4947",
+      "locator": "方法复用/阶段桥接"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/SKILL.md",
+      "sha256": "8e26ea0d396ecc600874f3a8f9ffd00d304035ecfddfe5d11860b0aa75d987f3",
+      "locator": "当前官方QA方法全文；未宣称完成官方全21项报告"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/SKILL.md",
+      "sha256": "e1ad68530be94c2cfe59ee146a7dd37c614eae537ff85cbda3e7147c0c150d76",
+      "locator": "B01–B08方法全文"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-baseline-quality/references/baseline-review-method.md",
+      "sha256": "15f996157d18b17209d0640bec24e2c39711fbac682ee7eaac830c7a7a8a568c",
+      "locator": "训练预算/公平性方法"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/submission-format.md",
+      "sha256": "1e49f4a8eb2b9842a225ac6d6efb1b1ad6b557ea14ff1da32bfa42b6170f75a6",
+      "locator": "三目录/result/model/NOP"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/harbor-harness.md",
+      "sha256": "ae7878890146f026970eee053fc3591a6db4966fc859b40f68343bb63fb41b20",
+      "locator": "H01–H06"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/references/exposure-manifest.md",
+      "sha256": "7f4bba67d2acd2e7732409d04bce76422c0935987eb8a9f42c9e992641929a69",
+      "locator": "最终Agent面/层与探针"
+    },
+    {
+      "path": "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-qa-skills/autoresearch-task-qa/scripts/content_gates.py",
+      "sha256": "baab33a3c4b51b30b93d3136398295673e814b5de67de06a6ce98999c664d29c",
+      "locator": "assess_improvement实际函数接口/源码"
+    }
+  ],
+  "commands": [
+    "cat materials/autoresearch-package-skills/autoresearch-package-finalize/SKILL.md materials/autoresearch-package-skills/layers/*/SKILL.md materials/autoresearch-package-skills/autoresearch-package-final-audit/SKILL.md",
+    "cat materials/autoresearch-package-skills/references/{requirements-map,audit-protocol,schemas-and-status,official-qa-bridge}.md",
+    "python3 -B materials/autoresearch-package-skills/scripts/check_package.py --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --mode pre_run",
+    "python3 -B materials/autoresearch-package-skills/scripts/review_contract.py layer --root /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/autoresearch_三期/auto0861/交付包_最终冻结_v2_20261007 --report /Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch/materials/autoresearch-package-skills/verification/auto0861/layer-E.json",
+    "python3 -B materials/autoresearch-package-skills/verification/recompute_statistics.py --review materials/autoresearch-package-skills/verification/auto0861/official-statistics.json"
+  ],
+  "evidence_roots": [
+    "/Volumes/吃猪的小鱼饼干/工作/xpert_harbor_autosearch"
+  ],
+  "local_conclusion": "通过",
+  "generated_at": "2026-10-12T14:49:38.294610+08:00",
+  "ledger_delta": [
+    {
+      "id": "E01",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/result.json",
+          "sha256": "9f7ae6f5eae2ae0cf588bf7b7d0b0b574aa7d3b097c0bb54c7273769c3496fda",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/result.json",
+          "sha256": "bb9e868642ae227b17f5e2fb2580c00ac96676fbc9ed3db2541fd7ec42c163ee",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/result.json",
+          "sha256": "972570fe55a5bb6c5342b926138119780ed73a2b053552273b4e1524e47c3cb2",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/result.json",
+          "sha256": "ce4fb3ae7a848264e33125b96b50eb5cb003c71a0541d34d9745e4472ce8f6da",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/result.json",
+          "sha256": "65745fdad509be39265e0a1fbe1a9ef7a226734a7228f6f47738b5638bae1fe0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/result.json",
+          "sha256": "1121a15a26dd1271260bfd9790322ae0cb8f31bd0ee33b8e0c418f710cead58e",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/result.json",
+          "sha256": "ba6c05ce3b7edd6021ac5354240e6adf8b08b3038557a99d05fe83f83a1a4cfd",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/result.json",
+          "sha256": "a4a63ec687017f495152300d34c8904f14ec74b1505854ca3bda71bd35ed5f51",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/result.json",
+          "sha256": "094fc86f446c7a28dcb0423e6afbc335e628cd1756ffb25be875992bfe1eac08",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/result.json",
+          "sha256": "32193ab891fad7780c08bb54c8ee3a3f3da7502ed10601951e85a67e23ca29f0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "/seeds,/source_results或paired_results"
+        }
+      ]
+    },
+    {
+      "id": "E02",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/result.json",
+          "sha256": "9f7ae6f5eae2ae0cf588bf7b7d0b0b574aa7d3b097c0bb54c7273769c3496fda",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/result.json",
+          "sha256": "bb9e868642ae227b17f5e2fb2580c00ac96676fbc9ed3db2541fd7ec42c163ee",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/result.json",
+          "sha256": "972570fe55a5bb6c5342b926138119780ed73a2b053552273b4e1524e47c3cb2",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/result.json",
+          "sha256": "ce4fb3ae7a848264e33125b96b50eb5cb003c71a0541d34d9745e4472ce8f6da",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/result.json",
+          "sha256": "65745fdad509be39265e0a1fbe1a9ef7a226734a7228f6f47738b5638bae1fe0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/result.json",
+          "sha256": "1121a15a26dd1271260bfd9790322ae0cb8f31bd0ee33b8e0c418f710cead58e",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/result.json",
+          "sha256": "ba6c05ce3b7edd6021ac5354240e6adf8b08b3038557a99d05fe83f83a1a4cfd",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/result.json",
+          "sha256": "a4a63ec687017f495152300d34c8904f14ec74b1505854ca3bda71bd35ed5f51",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/result.json",
+          "sha256": "094fc86f446c7a28dcb0423e6afbc335e628cd1756ffb25be875992bfe1eac08",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/result.json",
+          "sha256": "32193ab891fad7780c08bb54c8ee3a3f3da7502ed10601951e85a67e23ca29f0",
+          "locator": "/role,/seed,/protocol,/metrics,/quality_gate,/execution,/artifacts"
+        }
+      ]
+    },
+    {
+      "id": "E03",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/run.log",
+          "sha256": "0989f2d2e58764996dd2e0e58b5a6e2515540a75bcb5bdf8d1ef125d41f70733",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/run.log",
+          "sha256": "c34c9a6da20e1445fcde72b3abb49575e571228c798a7d1c60812402f15fe6ba",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/run.log",
+          "sha256": "0de42c8c4907337f6474c938183026a1ca535fbb65f89afc155a7ff9c5db8089",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/run.log",
+          "sha256": "e2c559b8d691687ecc1b52078ba5563fb12030b6f66ade6023bddffe70fe24dc",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/run.log",
+          "sha256": "d638490882c0d97773ad7e9a2f2e18f1ccdf75f4464e51747325b1eedb5aacf9",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/run.log",
+          "sha256": "4dab7cff37b05d19943254c1ddb5092491b67f7d7576a6eb6b5b68b7af48b2fb",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/run.log",
+          "sha256": "121045d561d41a6e9e435d452e9bc41f9826764a6219b0c9e0f996e3927e5171",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/run.log",
+          "sha256": "80af3cdc7b318706935b34fa3ff3b43b4a25a4f2cfaf918004a499d8b69c76d5",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/run.log",
+          "sha256": "33728ad92594102de6954741dea6764106840f163e66c2b8861655dbaf35d6f5",
+          "locator": "原始完整callback JSONL，5000行"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/run.log",
+          "sha256": "d9115682806361b6a1543f3f99b43882c41bf51e9e3b72526de991fdd469a954",
+          "locator": "原始完整callback JSONL，5000行"
+        }
+      ]
+    },
+    {
+      "id": "E04",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/model/artifact.json",
+          "sha256": "fa17a4a60f8a1fd8f3639077a04caef66fc7f8efdec452b8009c3e81d963fa86",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/model/model.safetensors",
+          "sha256": "2007e30975bf1db11f8a9776a1ef5576f744953b6e329a9c15cdc60d612ce478",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/model/artifact.json",
+          "sha256": "b79076d83f4f50bdf143aab7e79954a260d4e8edfe31a6682673c2399178d9de",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/model/model.safetensors",
+          "sha256": "ac655ee06fdb51e768f534d64a393f6d101c4c3eb633231cc52bc5816d0c7648",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/model/artifact.json",
+          "sha256": "fb34326935b943827dcfa281e57d57973b3fc2625c3b5a345e2509bfd02344e9",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/model/model.safetensors",
+          "sha256": "4e47225d012dc93318f5c0a5b8d7719ba5169175bcc8c03d3a13648af1f660bc",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/model/artifact.json",
+          "sha256": "02d4286c42ed0a10126bf3b69965211f3ba4562e94287c7d9527cf8d8cbfee86",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/model/model.safetensors",
+          "sha256": "3dd6bdd3024b0f2ce3c1f9d77ad6c11b8822487f6360bc71ff0b9437760c11ca",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/model/artifact.json",
+          "sha256": "cd9e303dfac7d3d6ceda92135b5c495120ba767bf27c51a29acc71000c558dd8",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/model/model.safetensors",
+          "sha256": "8972fc054ed83de1bd77322caaa777f773b7425a2e5f85af8305654cbb7ea8d8",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/model/artifact.json",
+          "sha256": "c9d83a0cdf06c5c1718275919b461a331b26996c2ba9f858d0200d520a6e7602",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/model/model.safetensors",
+          "sha256": "b96dbbe760648d9ffe8cf8d33002ee62ad1dbdc1f3158f8216c238555bc21e17",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/model/artifact.json",
+          "sha256": "7aa478fd0c9902b18f87d6a79dddf124330e7d9996347b3363643489dd82983b",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/model/model.safetensors",
+          "sha256": "fec729816baa48bdcdb145f8b7778d37a89de5152830ce7ee354ebb84f0a709d",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/model/artifact.json",
+          "sha256": "ce27ba4adf685f63b387aa34cb2ea9802d2ec7e4564794cc133c272d4adf58c2",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/model/model.safetensors",
+          "sha256": "cfcc188dcec0840d69f856bf0fdfa774d20da06bb864b667f0809e91a9713725",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/model/artifact.json",
+          "sha256": "3404ce5b0f803e94674c17f39ffe98e38ca198b3bfebeb509cea3d63910c81fc",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/model/model.safetensors",
+          "sha256": "78410ab794ff44c3bec3b45072c9656f93a28b9eaa5ba0f9e74379bace6e5339",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/model/artifact.json",
+          "sha256": "1c37d3061cff5415c912d523f0164d097ff47e367a3188d5fe29e1f3a0059966",
+          "locator": "格式/路径/大小/hash/role/seed/method/source"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/model/model.safetensors",
+          "sha256": "ab3bd58aaa7987610257b2dc503d5511d661cc0520d26b170eaf0f96e65183a9",
+          "locator": "只读流式哈希/真实大小3240676 bytes；不反序列化"
+        }
+      ]
+    },
+    {
+      "id": "E05",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/baseline_runs/seed_861/model/reload.log",
+          "sha256": "7b8930df9ce733ed6aaf7bf8604ef94af2bc7ee24c8e0466743e3b7531b10c98",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_861/model/reload.log",
+          "sha256": "63b0a747f438111b186ab15023f0af7ce0492f4d757c2f225af6f971004abf49",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_862/model/reload.log",
+          "sha256": "b2b56f295188bccaf678909add3716b9e1f7fb1795b1598dc036e769af567568",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_862/model/reload.log",
+          "sha256": "df8da1f5a91a0f7e1b789be48cef9a12ad04c3005bc461bc42d3600b09f99e50",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_863/model/reload.log",
+          "sha256": "78768236933c7614d7dd2ecd934ad66fb8b3cb6cca4045e168a1d3548add1ed1",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_863/model/reload.log",
+          "sha256": "d6b1e16cf54b86871ad9bc3bc97d3e4a83eeaad7582b1301fb2300a646e6a7e1",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_864/model/reload.log",
+          "sha256": "88a8f624e8ca771c22fc51edf3da9fea1eea6526546e300c9c9aab5718864b1a",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_864/model/reload.log",
+          "sha256": "e8bfeb6bfdbc0abb9f04c56a1d1ecfcdc80ca01891d4116c0d196ecd3bea0823",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/baseline_runs/seed_865/model/reload.log",
+          "sha256": "1ce7b2623fd4405b54b5f4de12d5239e1ced8e281b74c4a8a1a624c06ba1f410",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "optimization_evidence/reference_runs/seed_865/model/reload.log",
+          "sha256": "c186664072b1c4db71b41ea92034129dcc9d84f4daa4eb197d2d8ceb5b683ccb",
+          "locator": "JSONL第二条实际reload_pid、raw_score、raw_score_matches、checkpoint_sha256"
+        },
+        {
+          "path": "workspace/harbor_task/tests/formal_score.py",
+          "sha256": "289ac94d6d0e08e5f03de998a339146e84f7599fc0a081f1b9d6ba045db83587",
+          "locator": "subprocess tensor_score新进程/120s/reload hash与分数验证"
+        }
+      ]
+    },
+    {
+      "id": "E06",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "聚合与锚点"
+        },
+        {
+          "path": "@review/official-statistics.json",
+          "sha256": "75ee5494850e61f7a4020f9eea0ca973c31e5406e756137f907dbb033322fdb9",
+          "locator": "/method,/result/computed,/result/status"
+        }
+      ]
+    },
+    {
+      "id": "E07",
+      "status": "通过",
+      "evidence": [
+        {
+          "path": "optimization_evidence/comparison_summary.json",
+          "sha256": "7129a6526b78b7afbe8b2033ae344d04db6c4d7251aa7c1ee0d4156594366ff3",
+          "locator": "/status、全正式pair"
+        },
+        {
+          "path": "optimization_evidence/训练证据说明.md",
+          "sha256": "6758680561babd8bbf2cf70cf775a24b4b76e421098471d26c79943341679007",
+          "locator": "完整性/历史失败范围"
+        }
+      ]
+    }
+  ]
+}
