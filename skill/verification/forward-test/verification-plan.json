@@ -1,9 +1,0 @@
-{
-  "clause": "authorized-verification.md 命令如何成为准确、可审核的命令§2",
-  "status": "COMMAND_UNRESOLVED",
-  "purpose": "当前版本NOP准确命令",
-  "argv": null,
-  "reason": "合成输入没有目标Harbor版本、该版本CLI help/源码与provider映射",
-  "executed": false,
-  "admission_effect": "证据不足，保持阻塞"
-}
