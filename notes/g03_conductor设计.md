@@ -97,12 +97,13 @@ B = mean(B_i)      σ_B = sqrt(Σ(B_i − B)² / (n − 1))      R = mean(R_i)
 
 ## 8. pi 扩展 `extensions/g03-conductor/`
 
-- 启动：`pi --no-extensions -e ~/.pi/agent/extensions/subagent -e extensions/g03-conductor`。必须用交互模式，小组件才能显示。建议放在 tmux 中运行。
+- 启动：初始化 Agent 按 [交接规范](g03_conductor交接规范.md) 事先执行 init/propose/status/verify，停在 S0，生成带首条任务消息、持续主提示与私有会话路径的一行主 pi 命令。必须用交互模式，小组件才能显示。建议放在 tmux 中运行；仅加载扩展的裸 pi 命令仍等待用户输入。
 - 注册工具：`g03_status`、`g03_propose`（提交协议草案或候选描述）、`g03_run`（唯一的实验入口，内部调用 Python，再走 gpu_scheduler 阻塞 submit）、`g03_note`（写入 ASI 和负结果说明）。阶段转移没有对应工具。
 - 门控：
   - `tool_call` 拦截当前阶段不允许的 conductor 工具。
   - 锁定后，拦截对锁定路径的 `write`/`edit`；bash 写入无法可靠拦截，靠 §1 的哈希校验发现。
 - 驱动：
+  - `session_start` 只刷新状态，不调用 next。启动命令中的首条消息驱动主会话只读核对交接，首轮结束后才进入下方的 agent_settled 驱动；RPC 加载检查不推进阶段或启动实验。
   - `agent_settled` 时调用 Python `next`，由它返回下一步指令（继续当前阶段、强制审查、转移、终止）。
   - 扩展通过 `sendUserMessage` 下发指令。需要审查的关卡由扩展直接 spawn reviewer 子进程，结论写入 `reviews/`。
 - 终止：到达 DONE 或 STOP_UNMET 时写最终记录，然后调用 `ctx.shutdown()`。
@@ -141,4 +142,8 @@ B = mean(B_i)      σ_B = sqrt(Σ(B_i − B)² / (n − 1))      R = mean(R_i)
 | P4 gpu_scheduler | fake Client 覆盖 spec（原截止、无 queue_timeout、模板资源）、WAITING_GPU、INFEASIBLE/EXPIRED/UNKNOWN → BLOCKED_INFRA 且复用原 request_id、有效回执不重提 | `tests/test_scheduler_executor.py`；真实服务未接入 |
 
 实现偏差：账本记录的保留字段（seq/ts/at/type/prev/hash）不能用作事件字段，内容哈希统一叫 `content_hash`，控制序号叫 `cseq`；σ_B=0 的专家签字只能通过 CLI `signoff --kind deterministic`。
+
+### 首轮交接补充（2026-10-13）
+
+新增 [初始化与主 pi 交接规范](g03_conductor交接规范.md)、私有 [handoff 模板](../tools/g03_conductor/examples/handoff.example.md) 与 [持续主提示模板](../tools/g03_conductor/examples/main.example.md)。复用 pi 的位置消息参数和 --append-system-prompt，初始化 Agent 预执行合法草案提交，用户只运行一行主 pi 命令。没有修改扩展启动事件或 Python 状态机。worker 通过官方 subagent 实现后交回，实验统一由主会话 g03_run，强制 reviewer 仍由 review-run 执行。
 

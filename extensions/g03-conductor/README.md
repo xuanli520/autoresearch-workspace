@@ -5,12 +5,14 @@
 ## 启动
 
 ```text
-G03_ROOT=<私有区> pi --no-extensions -e ~/.pi/agent/extensions/subagent -e extensions/g03-conductor
+cd '<私有区>' && G03_ROOT='<私有区>' pi --model anthropic/claude-opus-5-5 --thinking high --no-extensions -e '<subagent绝对路径>' -e '<工具发布根>/extensions/g03-conductor' --session-dir '<私有区>/g03/pi-sessions' --append-system-prompt '<私有区>/ops/g03_handoff/main.md' '先读取ops/g03_handoff/handoff.md，调用g03_status并只读核对交接；一致则结束首轮交由扩展推进，差异则通过官方CLI暂停并报告。'
 ```
 
 - 必须用交互模式才能看到小组件，建议在 tmux 中运行。没设 `G03_ROOT` 时扩展只注册一个提示用的 `/g03`，其他功能不生效。
 - `G03_PYTHON` 可以覆盖解释器，默认 `python3`。
-- 子代理 `g03-worker` / `g03-reviewer` 通过官方 subagent 扩展调起。关卡审查由扩展通过 `review-run` 直接拉起 reviewer 子进程（`--no-extensions -e guard`，角色为 reviewer），主会话无法跳过。
+- `g03-worker` 由主会话通过官方 subagent 扩展调起；关卡 reviewer 由扩展通过 `review-run` 直接拉起独立 pi 子进程（`--no-extensions -e guard`，角色为 reviewer），主会话无法跳过，不能重复派 reviewer 代替强制关卡。
+- 初始化 Agent 按 [G03 初始化与主 pi 交接规范](../../notes/g03_conductor交接规范.md) 事先执行 init/propose/status/verify，停在 S0 并填写交接与主提示模板，再交付一行实际命令。session_start 只刷新状态；命令中首条消息启动接管轮，agent_settled 后 next 才推进。因此用户不需要再输入提示，裸 pi 命令仍会等用户输入。
+- worker 子进程不自动继承主会话通过 -e 加载的 G03 工具。worker 实现/核查代码后交回，所有 G03 实验由主会话 g03_run，不让 worker 直接提交 scheduler 或假定其拥有 g03_run。
 
 ## 提供的能力
 

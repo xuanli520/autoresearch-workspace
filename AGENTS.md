@@ -14,6 +14,8 @@
 
 涉及出题前 G02/G03 准备（Baseline 诊断、可行性预检、正式配对与判定）时，优先使用 [g03_conductor](tools/g03_conductor/README.md)：阶段、统计和停止只由其 Python 账本决定，LLM 不得推进或跳过阶段；它只产出专家侧证据，不替代正式双 Agent 长跑，也不产出 best_method。接入真实 GPU 前同样遵循下方 GPU 调度规则与本题授权。
 
+初始化题目并移交 G03 时，必须执行 [G03 初始化与主 pi 交接规范](notes/g03_conductor交接规范.md)：初始化 Agent 在已有授权内事先准备资产、执行 init/propose/status/verify，停在 S0 有合法草案的边界；填写私有交接文件与持续主提示，再给用户一行包含首条任务消息的完整主 pi 命令。用户无需再初始化或输入启动提示；首轮核对后由账本推进。worker 只实现/核查，实验由主会话 g03_run；不得以准备交接为由提前探索、启动正式长跑或重置原预算。
+
 涉及 GPU 提交、等待、对账或接入变更时，必须阅读 [GPU 调度器正确使用指南](tools/gpu_scheduler/USAGE.md) 与 [接口 README](tools/gpu_scheduler/README.md)，并从 [公共 ops 进展清单](ops/gpu_scheduler/进展清单.md) 核对实际部署/客户端/控制器版本及授权。已上传 release 不等于已部署；不得只换客户端向旧服务调用新协议，也不得因文档更新安装或切换服务。
 
 ## 2. 交付目标

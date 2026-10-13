@@ -17,8 +17,10 @@
 
 ## 2. 启动一次 G03 准备
 
-1. 准备私有区：评分器、Baseline 目录、数据清单放在私有区内，公开 Starter 放在私有区之外（两者不能互相包含）。
-2. 初始化，GPU 预算和截止就是事前授权，运行中不再询问：
+首轮初始化 Agent 必须按 [G03 初始化与主 pi 交接规范](../../notes/g03_conductor交接规范.md) 准备资产、环境和私有交接材料，并事先执行下面的 init/propose/status/verify。用户只执行最终生成的一行主 pi 命令；正常阶段无需另发第一条提示或逐步确认。
+
+1. 准备私有区：可信评分器、Baseline、数据放在私有区内，公开 Starter 放在私有区之外（两者不能互相包含）。填写 [交接模板](examples/handoff.example.md) 与 [主 pi 提示模板](examples/main.example.md)，保存到私有区 ops/g03_handoff/。
+2. 核对已有授权后初始化；参数记录原预算和绝对截止，本命令不自动授予新权限：
 
    ```text
    python3 -I tools/g03_conductor init --root <私有区> --task-id <task> \
@@ -27,14 +29,23 @@
      --authorization "<授权原文或来源>"
    ```
 
-   `--executor local_cpu` 只用于空转/CPU 任务。`--reviewer-cmd` 只用于测试和空转，正式运行用 pi reviewer。
-3. 在 tmux 中以交互模式启动 pi（小组件需要交互模式）：
+   `--executor local_cpu` 只用于空转/CPU 任务。`--reviewer-cmd` 只用于测试和空转，正式运行用 pi reviewer。GPU executor 使用目标主机的本地 Client；主 pi 和数据须能访问同一 scheduler_root，不接受 remote 连接配置。
+3. 初始化 Agent 提交并校验协议草案，然后停在 S0：
 
    ```text
-   G03_ROOT=<私有区> pi --no-extensions -e ~/.pi/agent/extensions/subagent -e extensions/g03-conductor
+   python3 -I -B tools/g03_conductor propose --root <私有区> --kind protocol --file <protocol.draft.yaml>
+   python3 -I -B tools/g03_conductor status --root <私有区> --detail
+   python3 -I -B tools/g03_conductor verify --root <私有区>
    ```
 
-4. 主会话按 conductor 下发的阶段指令工作；到 DONE 或 STOP_UNMET 时扩展写最终记录并退出。
+   propose 只校验并记录草案，尚未冻结；要求 stage=S0、draft_id 非空、无暂停/阻塞/终态且 verify 通过。初始化侧不调用 next、实验或 reviewer。已有账本按原记录对账，不重复 init 或重置预算。
+4. 用户运行初始化 Agent 生成的完整一行命令（包含主模型、私有会话路径、持续主提示和首条任务消息），例如：
+
+   ```text
+   cd '<私有区>' && G03_ROOT='<私有区>' pi --model anthropic/claude-opus-5-5 --thinking high --no-extensions -e '<subagent绝对路径>' -e '<工具发布根>/extensions/g03-conductor' --session-dir '<私有区>/g03/pi-sessions' --append-system-prompt '<私有区>/ops/g03_handoff/main.md' '先读取ops/g03_handoff/handoff.md，调用g03_status并只读核对交接；一致则结束首轮交由扩展推进，差异则通过官方CLI暂停并报告。'
+   ```
+
+   初始化 Agent 必须替换所有占位符、核验解释器/环境、生成可直接复制的真实命令。交互 TUI 的 session_start 只刷新小组件；首条 CLI 消息触发模型核对，首轮 agent_settled 才由 next 从 S0 进入 S1。worker 只实现/核查代码，主会话调用 g03_run；reviewer/正式运行自动执行，终态退出。
 
 接入 GPU（P4）前必须按 [GPU 调度器正确使用指南](../gpu_scheduler/USAGE.md) 核对已部署版本，并取得本题授权；文档和本工具不授予启动权限。
 
@@ -53,7 +64,7 @@
 | S5 | 无 | 冻结候选（`frozen/` 只读），自动跑 `formal_r` 并独立重载复评分；跑完前不显示中间统计 |
 | S6 | 无 | 判定、生成 summary、终审；FAIL 时 k+1 并换下一组正式 seed |
 
-任何阶段都可以用 `g03_propose(kind=defect|infeasible)` 提交缺陷或不可行声明，由 reviewer 在下一关卡审查后路由到类型 B（回 S1）或类型 C（回 S0，最多 1 次）。没有阶段转移工具；非法转移由 Python 拒绝。
+S1_5/S4 可用 `g03_propose(kind=defect|infeasible)` 提交声明，S3 可提交 defect；以 status.allowed 为准。reviewer 在下一关卡审查后路由到类型 B（回 S1）或类型 C（回 S0，最多 1 次）。没有阶段转移工具；非法转移由 Python 拒绝。
 
 ## 4. CLI 速查
 
